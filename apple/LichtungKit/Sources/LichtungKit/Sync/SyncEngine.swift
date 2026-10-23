@@ -46,6 +46,17 @@ public actor SyncEngine {
         observers[id] = nil
     }
 
+    /// Jeder neue Stand als Strom, beginnend mit dem aktuellen. Für
+    /// `for await` in der Oberfläche; ältere, nicht abgeholte Stände entfallen.
+    public func updates() -> AsyncStream<SyncState> {
+        let (stream, continuation) = AsyncStream<SyncState>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let id = observe { continuation.yield($0) }
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeObserver(id) }
+        }
+        return stream
+    }
+
     // MARK: Lokale Änderungen
 
     /// Legt eine Änderung in die Outbox und zeigt sie sofort an.

@@ -170,6 +170,14 @@ struct SyncEngineTests {
         #expect(seen.value == 2)
     }
 
+    @Test func updatesStreamStartsWithCurrentState() async {
+        let engine = E.engine(ScriptedTransport([]))
+        var iterator = await engine.updates().makeAsyncIterator()
+        #expect(await iterator.next()?.outbox.isEmpty == true)
+        await engine.delete(eventId: "ev_1")
+        #expect(await iterator.next()?.outbox.count == 1)
+    }
+
     @Test func cursorAnnouncementOnlySyncsWhenNewer() async throws {
         var seeded = SyncState()
         seeded.cursor = 10

@@ -32,3 +32,23 @@ jobs:
       - uses: actions/checkout@v4
       - run: swift --version
       - run: swift test
+
+  # Die SwiftUI-Apps lassen sich nur auf macOS bauen. Ohne Signatur, nur
+  # um zu prüfen, dass sie kompilieren.
+  apps-macos:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: apple
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: macOS-App bauen
+        run: >
+          xcodebuild build -project Lichtung.xcodeproj -scheme Lichtung-macOS
+          -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO
+      - name: iOS-App bauen
+        run: >
+          xcodebuild build -project Lichtung.xcodeproj -scheme Lichtung-iOS
+          -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO

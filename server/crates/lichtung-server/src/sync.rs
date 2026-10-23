@@ -30,7 +30,8 @@
 //! leaves the account alone until new credentials are stored.
 //!
 //! **Scheduler** ([`run_scheduler`]): at startup every account, then every
-//! [`SYNC_INTERVAL`]; `POST /api/accounts/{id}/sync` runs one at once. At
+//! [`SYNC_INTERVAL`] (ICS subscriptions, [`crate::ics_feed`]: every 15
+//! minutes); `POST /api/accounts/{id}/sync` runs one at once. At
 //! most one run per account; runs end with the shutdown token; a failing
 //! account does not hold up the others.
 
@@ -118,6 +119,15 @@ fn means_unsupported(e: &DavError) -> bool {
     )
 }
 
+/// Regular interval of an account: [`SYNC_INTERVAL`], ICS subscriptions
+/// [`crate::ics_feed::ICS_SYNC_INTERVAL`].
+pub fn sync_interval(kind: AccountKind) -> Duration {
+    match kind {
+        AccountKind::Ics => crate::ics_feed::ICS_SYNC_INTERVAL,
+        _ => SYNC_INTERVAL,
+    }
+}
+
 /// Wait before the next attempt after `failures` failed runs in a row.
 pub fn backoff(failures: u32) -> Duration {
     let factor = 1u32 << failures.saturating_sub(1).min(16);
@@ -185,6 +195,9 @@ impl App {
             })
             .await?
         };
+        if row.kind == AccountKind::Ics {
+            return self.run_ics_sync(row).await;
+        }
         let kind = row.kind;
         let Some(credentials) = self.decrypt_credentials(&row) else {
             let message = "Zugangsdaten fehlen, bitte das Konto neu verbinden".to_owned();
@@ -486,7 +499,7 @@ pub async fn run_scheduler(app: App) {
     let shutdown = app.shutdown_token();
     // Account → (next run, failures in a row). Missing = due now.
     let mut plan: HashMap<String, (Instant, u32)> = HashMap::new();
-    let (done_tx, mut done_rx) = mpsc::unbounded_channel::<(String, bool)>();
+    let (done_tx, mut done_rx) = mpsc::unbounded_channel::<(String, bool, Duration)>();
     loop {
         match app
             .with_reader(|conn| Ok(accounts_store::accounts(conn)?))
@@ -503,7 +516,7 @@ pub async fn run_scheduler(app: App) {
                         plan.remove(&account.id);
                         continue;
                     }
-                    if matches!(account.kind, AccountKind::Ics | AccountKind::Microsoft) {
+                    if account.kind == AccountKind::Microsoft {
                         continue;
                     }
                     let due = plan.get(&account.id).is_none_or(|(at, _)| *at <= now);
@@ -516,9 +529,10 @@ pub async fn run_scheduler(app: App) {
                     let handle = spawn_claimed(app.clone(), account.id.clone());
                     let done = done_tx.clone();
                     let id = account.id.clone();
+                    let interval = sync_interval(account.kind);
                     tokio::spawn(async move {
                         let ok = matches!(handle.await, Ok(Some(Ok(_))));
-                        let _ = done.send((id, ok));
+                        let _ = done.send((id, ok, interval));
                     });
                 }
             }
@@ -526,9 +540,9 @@ pub async fn run_scheduler(app: App) {
         }
         tokio::select! {
             () = shutdown.cancelled() => return,
-            Some((id, ok)) = done_rx.recv() => {
+            Some((id, ok, interval)) = done_rx.recv() => {
                 let failures = if ok { 0 } else { plan.get(&id).map_or(0, |(_, f)| *f) + 1 };
-                let wait = if ok { SYNC_INTERVAL } else { backoff(failures) };
+                let wait = if ok { interval } else { backoff(failures) };
                 plan.insert(id, (Instant::now() + wait, failures));
             }
             () = app.sync_wakeup() => {}

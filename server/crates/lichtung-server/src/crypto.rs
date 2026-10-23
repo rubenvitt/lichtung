@@ -119,9 +119,16 @@ impl fmt::Debug for Secret {
 
 /// What is encrypted per account: a JSON object, so later providers (e.g.
 /// OAuth refresh tokens for Microsoft) can add fields.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredCredentials {
     pub password: Secret,
+    /// ICS subscriptions (LIC-14): the full feed URL, which usually carries
+    /// a secret token in its path or query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<Secret>,
+    /// ICS subscriptions: Basic-auth user name, if the feed needs one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<Secret>,
 }
 
 impl StoredCredentials {
@@ -230,6 +237,7 @@ mod tests {
         let c = Cipher::new(&key(3));
         let creds = StoredCredentials {
             password: Secret::new("app-passwort-1234"),
+            ..Default::default()
         };
         let blob = creds.seal(&c, "acc_a");
         assert_eq!(StoredCredentials::open(&c, "acc_a", &blob).unwrap(), creds);
@@ -240,10 +248,26 @@ mod tests {
     fn secrets_are_redacted_in_debug_output() {
         let creds = StoredCredentials {
             password: Secret::new("app-passwort-1234"),
+            ..Default::default()
         };
         let debug = format!("{creds:?} {:?}", Cipher::new(&key(1)));
         assert!(!debug.contains("app-passwort"), "{debug}");
         assert!(debug.contains("<redacted>"), "{debug}");
+    }
+
+    #[test]
+    fn feed_credentials_are_optional_fields() {
+        // Blobs written before LIC-14 hold only the password.
+        let old: StoredCredentials = serde_json::from_str(r#"{"password":"x"}"#).unwrap();
+        assert_eq!((old.url, old.username), (None, None));
+        let creds = StoredCredentials {
+            url: Some(Secret::new("https://feeds.example.org/k.ics?token=t")),
+            ..Default::default()
+        };
+        let c = Cipher::new(&key(4));
+        let blob = creds.seal(&c, "acc_f");
+        assert_eq!(StoredCredentials::open(&c, "acc_f", &blob).unwrap(), creds);
+        assert!(!format!("{creds:?}").contains("token"));
     }
 
     #[test]

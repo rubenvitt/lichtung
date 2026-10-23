@@ -8,6 +8,7 @@
 //! - [`accounts`]: calendar accounts, calendars, calendar sets
 //! - [`events`]: stored events (iCalendar original), event JSON, occurrences
 //! - [`sync`]: CalDAV sync engine and its scheduler
+//! - [`ics_feed`]: read-only ICS subscriptions (fetch, split per UID)
 //! - [`crypto`]: encryption of provider credentials (AES-256-GCM)
 //! - [`changes`]: change log (`seq`, tombstones, cursor notifications)
 //! - [`auth`]: principals, API and device tokens, sessions, CSRF rule, OIDC
@@ -28,6 +29,7 @@ pub mod error;
 pub mod events;
 pub mod healthcheck;
 pub mod http;
+pub mod ics_feed;
 pub mod oauth;
 pub mod sync;
 

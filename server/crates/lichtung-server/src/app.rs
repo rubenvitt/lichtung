@@ -7,7 +7,7 @@
 //!   `spawn_blocking` while holding it, so no two writes interleave.
 //! - One reader connection (WAL allows reading while writing) for lookups.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -92,6 +92,12 @@ struct Inner {
     syncing: Mutex<HashSet<String>>,
     /// Wakes the sync scheduler (new account, new credentials).
     sync_wakeup: tokio::sync::Notify,
+    /// One lock per calendar: a sync round and a write to the provider
+    /// never overlap on the same calendar (see [`App::lock_calendars`]).
+    calendar_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Serializes mutations (push, MCP): idempotency checks and the
+    /// version check before a write see every earlier write.
+    write_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -159,6 +165,8 @@ impl App {
                 changes: watch::channel(cursor).0,
                 syncing: Mutex::new(HashSet::new()),
                 sync_wakeup: tokio::sync::Notify::new(),
+                calendar_locks: Mutex::new(HashMap::new()),
+                write_lock: Arc::new(tokio::sync::Mutex::new(())),
                 config,
             }),
         })
@@ -265,6 +273,38 @@ impl App {
     /// Resolves when [`App::wake_sync_scheduler`] was called.
     pub(crate) async fn sync_wakeup(&self) {
         self.inner.sync_wakeup.notified().await;
+    }
+
+    /// Locks the given calendars (sorted, so two callers never deadlock)
+    /// until the guards are dropped. A sync round holds its calendar's lock
+    /// from listing to storing, a write from reading the stored version to
+    /// storing the result; so neither stores data the other has already
+    /// replaced.
+    pub(crate) async fn lock_calendars(
+        &self,
+        ids: &[&str],
+    ) -> Vec<tokio::sync::OwnedMutexGuard<()>> {
+        let mut ids: Vec<&str> = ids.to_vec();
+        ids.sort_unstable();
+        ids.dedup();
+        let locks: Vec<Arc<tokio::sync::Mutex<()>>> = {
+            let mut map = lock(&self.inner.calendar_locks);
+            // Drop locks nobody holds or waits for, so the map stays small.
+            map.retain(|_, l| Arc::strong_count(l) > 1);
+            ids.iter()
+                .map(|id| map.entry((*id).to_owned()).or_default().clone())
+                .collect()
+        };
+        let mut guards = Vec::with_capacity(locks.len());
+        for l in locks {
+            guards.push(l.lock_owned().await);
+        }
+        guards
+    }
+
+    /// Held while one mutation runs (see `Inner::write_lock`).
+    pub(crate) async fn write_guard(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.inner.write_lock.clone().lock_owned().await
     }
 
     /// Runs `f` with the reader connection on the blocking pool.

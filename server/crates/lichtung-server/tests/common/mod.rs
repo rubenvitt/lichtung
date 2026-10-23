@@ -1,6 +1,8 @@
 //! Shared helpers for the HTTP integration tests.
 #![allow(dead_code)]
 
+pub mod dav;
+
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Method, Request, StatusCode};
 use axum::Router;

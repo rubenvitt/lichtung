@@ -9,6 +9,9 @@
 //! - [`events`]: stored events (iCalendar original), event JSON, occurrences
 //! - [`sync`]: CalDAV sync engine and its scheduler
 //! - [`crypto`]: encryption of provider credentials (AES-256-GCM)
+//! - [`writes`]: writing events to the provider (create, update, delete,
+//!   respond) with conflict detection
+//! - [`conflicts`]: dropped own changes (provider wins), visible until dismissed
 //! - [`changes`]: change log (`seq`, tombstones, cursor notifications)
 //! - [`auth`]: principals, API and device tokens, sessions, CSRF rule, OIDC
 //! - [`oauth`]: built-in OAuth 2.1 authorization server (`/mcp`, devices)
@@ -22,6 +25,7 @@ pub mod auth;
 pub mod backup;
 pub mod changes;
 pub mod config;
+pub mod conflicts;
 pub mod crypto;
 pub mod db;
 pub mod error;
@@ -30,6 +34,7 @@ pub mod healthcheck;
 pub mod http;
 pub mod oauth;
 pub mod sync;
+pub mod writes;
 
 use std::future::IntoFuture;
 use std::sync::Arc;

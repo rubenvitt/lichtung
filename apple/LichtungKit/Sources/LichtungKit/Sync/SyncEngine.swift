@@ -14,6 +14,8 @@ public actor SyncEngine {
     private let now: @Sendable () -> Date
     private var observers: [UUID: @Sendable (SyncState) -> Void] = [:]
     private var running = false
+    /// Rückgängig/Wiederholen für Änderungen über `perform` (LIC-23).
+    public internal(set) var undoHistory = UndoHistory()
 
     public init(
         api: SyncAPI,

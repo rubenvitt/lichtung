@@ -23,3 +23,7 @@ xcuserdata/
 # Editor / OS
 .DS_Store
 .idea/
+
+# Swift Package Manager / xcodegen
+.swiftpm/
+DerivedInfo/

@@ -1,0 +1,34 @@
+name: apple
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apple/**"
+      - ".github/workflows/apple.yml"
+  pull_request:
+    paths:
+      - "apple/**"
+      - ".github/workflows/apple.yml"
+
+jobs:
+  # Der Kern (LichtungKit) ist reines Foundation und muss auch unter Linux bauen.
+  kit-linux:
+    runs-on: ubuntu-latest
+    container: swift:6.1-noble
+    defaults:
+      run:
+        working-directory: apple/LichtungKit
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test
+
+  kit-macos:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: apple/LichtungKit
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: swift test

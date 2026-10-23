@@ -19,6 +19,8 @@ use common::{api_token, Auth, TestServer, BOOTSTRAP};
 
 const USER: &str = "anna@example.org";
 const PASSWORD: &str = "app-passwort-1234";
+/// Invented wrong password (refused by the mocked provider).
+const WRONG_PASSWORD: &str = "noch-ein-falsches";
 const XML: &str = "application/xml; charset=utf-8";
 const HOME: &str = "/dav/calendars/user/anna%40example.org/";
 
@@ -627,7 +629,7 @@ async fn new_credentials_are_checked_before_they_are_stored() {
         &s,
         &path,
         Auth::Web(&session),
-        json!({"password": "noch-ein-falsches"}),
+        json!({ "password": WRONG_PASSWORD }),
     )
     .await;
     assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.text());

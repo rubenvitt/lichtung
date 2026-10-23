@@ -10,6 +10,9 @@ const USAGE: &str = "\
 Aufruf:
   lichtung-server               Server starten (Konfiguration über LICHTUNG_*-Variablen)
   lichtung-server healthcheck   /healthz des lokalen Servers prüfen (Exit-Code 0 = gesund)
+  lichtung-server reset-secret-key
+                                nach Verlust von LICHTUNG_SECRET_KEY: gespeicherte Zugangsdaten
+                                verwerfen und den neuen Schlüssel eintragen (Server vorher stoppen)
   lichtung-server --version     Version ausgeben";
 
 #[tokio::main]
@@ -23,6 +26,7 @@ async fn main() -> ExitCode {
     {
         [] => serve().await,
         ["healthcheck"] => healthcheck().await,
+        ["reset-secret-key"] => reset_secret_key(),
         ["--version" | "-V"] => {
             println!("lichtung-server {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -56,6 +60,31 @@ async fn serve() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             tracing::error!(error = ?e, "server stopped with an error");
+            // Also on stderr, in German, for whoever starts the container.
+            eprintln!("Lichtung-Server beendet: {e:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn reset_secret_key() -> ExitCode {
+    let config = match Config::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match lichtung_server::accounts::reset_secret_key(&config) {
+        Ok(n) => {
+            println!(
+                "Schlüssel eingetragen. Gespeicherte Zugangsdaten verworfen: {n} Konto/Konten \
+                 in der App neu verbinden."
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Zurücksetzen fehlgeschlagen: {e:#}");
             ExitCode::FAILURE
         }
     }

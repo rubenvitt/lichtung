@@ -92,6 +92,14 @@ impl Principal {
         self.is_browser() || self.is_device()
     }
 
+    /// May change calendar settings and calendar sets: a browser session or
+    /// a device of the app. API and bootstrap tokens may not: they also open
+    /// `/mcp`, and `mcp_write` is the guard against Claude writing into a
+    /// calendar, so a token for Claude must not be able to lift it.
+    pub fn may_change_settings(&self) -> bool {
+        self.is_browser() || self.is_device()
+    }
+
     /// A short label for logs and change sources: `web`, `app:<device>`,
     /// `api:<token>`, `oauth:<client>`.
     pub fn label(&self) -> String {
@@ -210,6 +218,7 @@ mod tests {
         });
         assert_eq!(token.label(), "api:werkzeug");
         assert!(!token.is_browser() && !token.may_manage_credentials());
+        assert!(!token.may_change_settings());
         let boot = p(PrincipalKind::Bootstrap);
         assert_eq!(boot.label(), "api:bootstrap");
         assert!(!boot.may_manage_credentials());
@@ -225,5 +234,6 @@ mod tests {
         });
         assert_eq!(device.label(), "app:Testgerät");
         assert!(!device.is_browser() && device.may_manage_credentials());
+        assert!(device.may_change_settings() && web.may_change_settings());
     }
 }

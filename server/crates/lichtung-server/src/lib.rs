@@ -1,20 +1,26 @@
 //! Lichtung server: login, API and device tokens, OAuth for `/mcp` and the
-//! apps, persistence. Calendar sync, the sync API and MCP tools build on
-//! this scaffold (later tasks).
+//! apps, calendar accounts, persistence. Event sync, the sync API and MCP
+//! tools build on this (later tasks).
 //!
 //! - [`config`]: configuration from environment variables (bootstrap only)
 //! - [`db`]: SQLite schema, migrations and queries
 //! - [`app`]: application service (the only way to read or change data)
+//! - [`accounts`]: calendar accounts, calendars, calendar sets
+//! - [`crypto`]: encryption of provider credentials (AES-256-GCM)
+//! - [`changes`]: change log (`seq`, tombstones, cursor notifications)
 //! - [`auth`]: principals, API and device tokens, sessions, CSRF rule, OIDC
 //! - [`oauth`]: built-in OAuth 2.1 authorization server (`/mcp`, devices)
 //! - [`http`]: router and handlers
 //! - [`backup`]: nightly `VACUUM INTO` backups
 //! - [`healthcheck`]: client for the `healthcheck` subcommand
 
+pub mod accounts;
 pub mod app;
 pub mod auth;
 pub mod backup;
+pub mod changes;
 pub mod config;
+pub mod crypto;
 pub mod db;
 pub mod error;
 pub mod healthcheck;

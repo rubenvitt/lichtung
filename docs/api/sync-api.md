@@ -72,6 +72,7 @@ Die Apps melden sich wie die Zunder-App über den eingebauten OAuth-Server an (A
 - `kind`: `fastmail`, `icloud`, `ics`, später `microsoft`.
 - `username`: Anmeldename (bei `ics` die URL ohne Zugangsdaten). Passwörter verlassen den Server nie.
 - `status.state`: `ok`, `syncing`, `error` (vorübergehend, `message` sagt warum), `auth_failed` (Zugangsdaten erneuern).
+- *Ergänzung (LIC-7):* `kind: caldav` ist ein beliebiger CalDAV-Server mit eigener Adresse (Selbsthoster, Radicale in Tests). Nur bei diesem `kind` enthält das Account zusätzlich `url` (Server-Adresse). Clients, die `caldav` nicht kennen, zeigen das Konto wie ein unbekanntes an.
 
 ### Calendar
 
@@ -95,6 +96,8 @@ Die Apps melden sich wie die Zunder-App über den eingebauten OAuth-Server an (A
 - `writable`: Rechte beim Anbieter (bei geteilten Kalendern die Rechte der Freigabe, bei ICS immer `false`).
 - `can_invite`: Termine mit Teilnehmern verschicken echte Einladungen.
 - Einstellungen (in der App änderbar, Abschnitt 7): `color` (überschreibt `provider_color`), `hidden`, `mcp_write` (darf Claude hier schreiben; Standard `false` für den Arbeitskalender), `openings_busy` (zählt für freie Zeiten), `all_day_blocks` (ganztägige Termine blockieren), `position`.
+- *Ergänzung (LIC-7):* `color` ist immer gesetzt: die eigene Farbe, sonst `provider_color`, sonst eine feste Ersatzfarbe. `provider_color` ist `null`, wenn der Anbieter keine Farbe meldet. Farben haben die Form `#RRGGBB` (Großbuchstaben).
+- *Ergänzung (LIC-7):* Standardwerte beim Anlegen: `mcp_write` = `writable` (bei `microsoft` später `false`), `openings_busy` `true`, `all_day_blocks` `false`, `hidden` `false`; `position` hängt neue Kalender hinten an (innerhalb eines Kontos in der Reihenfolge des Anbieters). Sammlungen, die nur Aufgaben (VTODO) halten, werden nicht als Kalender übernommen.
 
 ### CalendarSet
 
@@ -343,7 +346,17 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 | `POST /api/conflicts/{id}/dismiss` | Konflikt wegklicken (erscheint im Pull als `delete`) |
 | `GET /api/occurrences?from=<datum>&to=<datum>&calendar_ids=cal_01,cal_02` | Komfort: vom Server expandierte Vorkommen im Zeitraum (`from` inklusiv, `to` exklusiv, ISO-Datum oder RFC 3339). Nicht für den Cache gedacht. |
 | `GET /api/devices`, `DELETE /api/devices/{id}` | angemeldete Geräte, einzeln abmelden |
+| *Ergänzung (LIC-7):* `GET /api/calendars`, `GET /api/calendar-sets` | Komfort: alle Kalender bzw. Sets wie im Pull (nach `position` sortiert) |
 | `GET /api/tokens`, `POST /api/tokens`, `DELETE /api/tokens/{id}` | API-Tokens (`lt_…`) für MCP-Clients; das Token steht nur in der Antwort auf `POST` |
+
+*Ergänzungen (LIC-7) zu den Konten-Aufrufen:*
+
+- `POST /api/accounts` mit `kind: caldav`: `{"kind": "caldav", "url": "https://dav.example.org/", "username": "…", "password": "…", "name": "…"}`. `name` ist bei allen Arten optional (Standard: „Fastmail“, „iCloud“ bzw. der Hostname). `kind: ics` antwortet bis LIC-14 mit `400 invalid_request`.
+- Antwort auf `POST /api/accounts` ist `201` mit dem Account; die Kalender des Kontos kommen über den Pull bzw. `GET /api/calendars`. Dasselbe Konto (Art, Server, Benutzername) ein zweites Mal: `409 conflict`.
+- `PATCH /api/accounts/{id}`: Neue Zugangsdaten werden erst beim Anbieter geprüft (`422 invalid_credentials` bzw. `502 provider_unavailable`) und nur bei Erfolg gespeichert. Wer nur `username` oder `url` ändert, braucht `password` nicht erneut zu schicken, außer das Konto steht auf `auth_failed` ohne gespeicherte Zugangsdaten (dann `400`). `url` gibt es nur bei `kind: caldav`.
+- `POST /api/accounts/{id}/sync` antwortet `202` mit dem Account (`status.state: syncing`); das Ergebnis erscheint im Status (Pull/SSE).
+- `PATCH /api/calendars/{id}` und `/api/calendar-sets`: unbekannte Felder und ungültige Werte (Farbe nicht `#RRGGBB`, `position` negativ, unbekannte oder doppelte `calendar_ids`) ergeben `400 invalid_request`. `POST /api/calendar-sets` antwortet `201`, `DELETE`-Aufrufe `204`.
+- **Wer darf:** Lesen (`GET`) und `POST /api/accounts/{id}/sync` jedes Token für `/api`. Konten anlegen, ändern, löschen sowie Kalender-Einstellungen und Sets ändern nur Geräte der App und Browser-Sitzungen (`403 forbidden` für API-Tokens `lt_…`): API-Tokens öffnen auch `/mcp`, und `mcp_write` ist der Schutz vor Claude.
 
 ## 8. Geplant (noch nicht verbindlich)
 
@@ -373,3 +386,4 @@ Zusätzliche `code`s in Mutations-Ergebnissen (`rejected`/`retry`): `calendar_re
 | Datum | Änderung |
 |---|---|
 | 2026-10-23 | Version 1 (Entwurf) |
+| 2026-10-23 | Ergänzungen aus LIC-7 (keine bestehende Form geändert): `kind: caldav` mit `url`; `color` immer gesetzt, Standardwerte neuer Kalender, VTODO-Sammlungen ausgelassen; `GET /api/calendars`, `GET /api/calendar-sets`; Statuscodes und Rechte der Konten-, Kalender- und Set-Aufrufe (Abschnitt 7) |

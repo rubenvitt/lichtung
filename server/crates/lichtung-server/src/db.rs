@@ -12,7 +12,10 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use uuid::Uuid;
 
 /// Embedded migrations; index + 1 is the schema version (`user_version`).
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_init.sql"),
+    include_str!("../migrations/0002_accounts.sql"),
+];
 
 /// The schema version this binary expects.
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

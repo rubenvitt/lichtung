@@ -23,6 +23,11 @@ const DEV_SESSION_SECRET: &str = "lichtung-dev-auth-session-secret-not-for-produ
 /// auth the variable is mandatory.
 pub const DEV_SECRET_KEY: [u8; SECRET_KEY_LEN] = *b"lichtung-dev-key-not-for-prod!!!";
 
+/// CalDAV entry point of Fastmail.
+pub const FASTMAIL_CALDAV_URL: &str = "https://caldav.fastmail.com/dav/";
+/// CalDAV entry point of iCloud.
+pub const ICLOUD_CALDAV_URL: &str = "https://caldav.icloud.com/";
+
 /// Configuration error with a German, user-facing message.
 #[derive(Debug, thiserror::Error)]
 #[error("Konfigurationsfehler: {0}")]
@@ -65,12 +70,17 @@ pub struct Config {
     /// cookie.
     pub session_secret: String,
     /// Key for encrypting provider credentials in the database
-    /// (`LICHTUNG_SECRET_KEY`). The encryption itself follows in LIC-7.
+    /// (`LICHTUNG_SECRET_KEY`, see [`crate::crypto`]).
     pub secret_key: [u8; SECRET_KEY_LEN],
     pub bootstrap_token: Option<String>,
     pub dev_auth: bool,
     /// Local hour (0–23) of the nightly backup.
     pub backup_hour: u8,
+    /// CalDAV base URL for `kind: fastmail` accounts. Not configurable
+    /// through the environment; tests point it at a mock server.
+    pub fastmail_url: Url,
+    /// CalDAV base URL for `kind: icloud` accounts (like `fastmail_url`).
+    pub icloud_url: Url,
 }
 
 impl fmt::Debug for Config {
@@ -88,6 +98,8 @@ impl fmt::Debug for Config {
             )
             .field("dev_auth", &self.dev_auth)
             .field("backup_hour", &self.backup_hour)
+            .field("fastmail_url", &self.fastmail_url.as_str())
+            .field("icloud_url", &self.icloud_url.as_str())
             .finish()
     }
 }
@@ -284,6 +296,8 @@ impl Config {
             bootstrap_token: get("LICHTUNG_BOOTSTRAP_TOKEN"),
             dev_auth,
             backup_hour,
+            fastmail_url: default_fastmail_url(),
+            icloud_url: default_icloud_url(),
         })
     }
 
@@ -300,6 +314,8 @@ impl Config {
             bootstrap_token: None,
             dev_auth: false,
             backup_hour: 3,
+            fastmail_url: default_fastmail_url(),
+            icloud_url: default_icloud_url(),
         }
     }
 
@@ -335,6 +351,14 @@ impl Config {
     pub fn public_origin(&self) -> String {
         self.public_url.origin().ascii_serialization()
     }
+}
+
+fn default_fastmail_url() -> Url {
+    Url::parse(FASTMAIL_CALDAV_URL).expect("static URL is valid")
+}
+
+fn default_icloud_url() -> Url {
+    Url::parse(ICLOUD_CALDAV_URL).expect("static URL is valid")
 }
 
 fn is_loopback_url(url: &Url) -> bool {

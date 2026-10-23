@@ -116,3 +116,36 @@ fn invalid_configuration_fails_fast() {
     let output = Command::new(BIN).arg("unsinn").output().unwrap();
     assert_eq!(output.status.code(), Some(2));
 }
+
+#[test]
+fn a_secret_key_that_does_not_match_the_database_stops_the_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let run = |key: &str, args: &[&str]| {
+        Command::new(BIN)
+            .args(args)
+            .env_clear()
+            .env("LICHTUNG_BIND", format!("127.0.0.1:{}", free_port()))
+            .env("LICHTUNG_DATA_DIR", &data)
+            .env("LICHTUNG_SECRET_KEY", key)
+            .env("RUST_LOG", "off")
+            .output()
+            .unwrap()
+    };
+    // Creates the database with a check value for SECRET_KEY.
+    std::fs::create_dir_all(&data).unwrap();
+    let output = run(SECRET_KEY, &["reset-secret-key"]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("0 Konto"));
+
+    // An invented, different key.
+    let other = "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8=";
+    let output = run(other, &[]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("LICHTUNG_SECRET_KEY passt nicht"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("reset-secret-key"), "{stderr}");
+}

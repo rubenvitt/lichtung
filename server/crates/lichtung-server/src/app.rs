@@ -7,17 +7,21 @@
 //!   `spawn_blocking` while holding it, so no two writes interleave.
 //! - One reader connection (WAL allows reading while writing) for lookups.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use anyhow::Context;
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction};
 use serde::Serialize;
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::auth::{self, Principal, PrincipalKind};
+use crate::changes;
 use crate::config::Config;
+use crate::crypto::{self, Cipher};
 use crate::db::{self, TokenRow, User};
 use crate::error::{AppError, AppResult};
 
@@ -80,6 +84,12 @@ struct Inner {
     reader: Mutex<Connection>,
     shutdown: CancellationToken,
     bootstrap_hash: Option<String>,
+    /// Encrypts provider credentials (`LICHTUNG_SECRET_KEY`).
+    cipher: Cipher,
+    /// Latest change cursor, published after each committed change.
+    changes: watch::Sender<i64>,
+    /// Accounts with a sync running in the background.
+    syncing: Mutex<HashSet<String>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -130,6 +140,10 @@ impl App {
                 Some("Entwicklung"),
             )?;
         }
+        let cipher = Cipher::new(&config.secret_key);
+        crypto::verify_or_init_key_check(&conn, &cipher)?;
+        crate::accounts::reset_stale_sync_states(&conn)?;
+        let cursor = changes::current(&conn)?;
         let reader = db::open(&path)?;
         let bootstrap_hash = config.bootstrap_token.as_deref().map(auth::sha256_hex);
         Ok(App {
@@ -139,6 +153,9 @@ impl App {
                 reader: Mutex::new(reader),
                 shutdown: CancellationToken::new(),
                 bootstrap_hash,
+                cipher,
+                changes: watch::channel(cursor).0,
+                syncing: Mutex::new(HashSet::new()),
                 config,
             }),
         })
@@ -178,6 +195,63 @@ impl App {
     {
         self.blocking(move |inner| f(&mut lock(&inner.writer)))
             .await
+    }
+
+    /// Runs `f` in a write transaction (serialized with every other write)
+    /// and, once it has committed, publishes the new change cursor if `f`
+    /// recorded changes ([`changes::bump`], [`changes::tombstone`]).
+    pub(crate) async fn with_change_tx<T, F>(&self, f: F) -> AppResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Transaction<'_>) -> AppResult<T> + Send + 'static,
+    {
+        self.blocking(move |inner| {
+            let mut conn = lock(&inner.writer);
+            let tx = conn.transaction()?;
+            let out = f(&tx)?;
+            let cursor = changes::current(&tx)?;
+            tx.commit()?;
+            // Still under the writer lock, so cursors are published in order.
+            inner.changes.send_if_modified(|current| {
+                if cursor > *current {
+                    *current = cursor;
+                    true
+                } else {
+                    false
+                }
+            });
+            Ok(out)
+        })
+        .await
+    }
+
+    /// Receives the change cursor after every committed change (for SSE,
+    /// LIC-11). Several changes may collapse into one notification.
+    pub fn subscribe_changes(&self) -> watch::Receiver<i64> {
+        self.inner.changes.subscribe()
+    }
+
+    /// The latest published change cursor.
+    pub fn change_cursor(&self) -> i64 {
+        *self.inner.changes.borrow()
+    }
+
+    pub(crate) fn cipher(&self) -> &Cipher {
+        &self.inner.cipher
+    }
+
+    /// Marks a background sync of `account_id` as running; `false` if one
+    /// already runs.
+    pub(crate) fn begin_sync(&self, account_id: &str) -> bool {
+        lock(&self.inner.syncing).insert(account_id.to_owned())
+    }
+
+    pub(crate) fn end_sync(&self, account_id: &str) {
+        lock(&self.inner.syncing).remove(account_id);
+    }
+
+    pub(crate) fn is_syncing(&self, account_id: &str) -> bool {
+        lock(&self.inner.syncing).contains(account_id)
     }
 
     /// Runs `f` with the reader connection on the blocking pool.

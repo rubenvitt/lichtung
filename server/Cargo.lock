@@ -1001,6 +1001,7 @@ dependencies = [
  "hmac",
  "http-body-util",
  "jsonwebtoken",
+ "lichtung-caldav",
  "reqwest",
  "ring",
  "rsa",
@@ -1019,6 +1020,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]

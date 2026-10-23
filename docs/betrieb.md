@@ -36,7 +36,19 @@ Ohne Anmeldung erreichbar sind nur `/`, `/healthz`, die Login-Strecke `/auth/*` 
 | `TZ` | Zeitzone für die Backup-Stunde | Image: `Europe/Berlin` |
 | `RUST_LOG` | Log-Filter (tracing) | `info,tower_http=info` |
 
-`LICHTUNG_SECRET_KEY` gehört zusätzlich in den Passwortmanager: Ohne ihn sind gespeicherte Zugangsdaten nicht mehr lesbar, auch nicht aus Backups. Nicht nachträglich ändern.
+`LICHTUNG_SECRET_KEY` gehört zusätzlich in den Passwortmanager: Ohne ihn sind gespeicherte Zugangsdaten nicht mehr lesbar, auch nicht aus Backups. Nicht nachträglich ändern (siehe [Schlüssel für die Zugangsdaten](#schlüssel-für-die-zugangsdaten)).
+
+## Schlüssel für die Zugangsdaten
+
+Die Zugangsdaten der Kalenderkonten (App-Passwörter von Fastmail, iCloud, CalDAV-Servern) liegen nur verschlüsselt in der Datenbank: AES-256-GCM mit `LICHTUNG_SECRET_KEY`, zufälliger Nonce pro Verschlüsselung, die Konto-ID als zusätzliche Prüfung (ein Eintrag lässt sich nicht einem anderen Konto unterschieben). Passwörter stehen in keiner API-Antwort und in keinem Log.
+
+- **Prüfwert:** Beim ersten Start legt der Server in der Tabelle `meta` einen mit dem Schlüssel verschlüsselten Prüfwert ab. Bei jedem weiteren Start prüft er ihn. Passt `LICHTUNG_SECRET_KEY` nicht zur Datenbank (falscher Schlüssel, Tippfehler, Dev-Schlüssel), **startet der Server nicht** und meldet: „LICHTUNG_SECRET_KEY passt nicht zu dieser Datenbank …“. Dann den richtigen Schlüssel aus dem Passwortmanager setzen.
+- **Schlüssel verloren:** Die gespeicherten Zugangsdaten sind dann nicht mehr zu retten. Neuen Schlüssel erzeugen und eintragen, dann bei gestopptem Server einmal
+  ```sh
+  docker compose run --rm lichtung lichtung-server reset-secret-key
+  ```
+  ausführen (Dienstname wie in `compose.yaml`). Das verwirft alle gespeicherten Zugangsdaten und trägt den Prüfwert für den neuen Schlüssel ein. Konten, Kalender, Einstellungen und Sets bleiben; die Konten stehen auf `auth_failed` und werden in der App **neu verbunden** (App-Passwort erneut eingeben, ggf. beim Anbieter ein neues erzeugen).
+- **Backups** enthalten die Zugangsdaten nur verschlüsselt; ein Backup ist nur zusammen mit dem Schlüssel, der beim Backup galt, vollständig.
 
 ## Erstinbetriebnahme
 
@@ -100,6 +112,7 @@ curl -s -X POST http://localhost:8080/api/tokens \
 | Bootstrap-Token | Wert von `LICHTUNG_BOOTSTRAP_TOKEN` | wie ein API-Token | Umgebung |
 
 - Gespeichert werden nur Hashes (Tokens und Codes SHA-256, Sitzungen HMAC-SHA256).
+- **Kalenderkonten und Kalender-Einstellungen:** Konten anlegen, ändern, löschen sowie Kalender-Einstellungen und Kalender-Sets ändern dürfen wie bei den Zugängen nur Browser-Sitzung und Geräte. API-Tokens dürfen lesen und einen Abgleich anstoßen, aber nichts ändern: Sie gelten auch für `/mcp`, und der Schreibschutz pro Kalender (`mcp_write`) soll nicht von Claude selbst aufgehoben werden können.
 - **Wer Zugänge verwalten darf:** eine Browser-Sitzung oder ein Gerät der App. API-, Bootstrap- und OAuth-Tokens dürfen keine Tokens anlegen oder widerrufen. Abweichung von Zunder (dort nur der Browser): Lichtung hat keine Weboberfläche, Tokens werden in der App erzeugt (Spec, Abschnitt 7).
 - **CSRF:** Mit Cookie angemeldete, ändernde Anfragen brauchen den Header `X-Lichtung-Client` (beliebiger Wert).
 - **Geräte-Login der App:** OAuth-Code-Flow mit PKCE über `ASWebAuthenticationSession`. Die App registriert sich unter `/oauth/register` mit `client_name` (= Gerätename) und einer Redirect-URI wie `dev.rubeen.lichtung:/oauth`, fragt `/oauth/authorize` mit `resource=<public>/api` und tauscht den Code unter `/oauth/token` gegen einen Geräte-Token. Geräte-Tokens gibt es nur für App-Schemata oder localhost, nie für Web-Dienste. Abmelden: `/oauth/revoke` mit dem eigenen Token.

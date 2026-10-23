@@ -22,6 +22,12 @@ pub enum AppError {
     Conflict(String),
     #[error("{0}")]
     PayloadTooLarge(String),
+    /// The calendar provider rejected the credentials (422).
+    #[error("{0}")]
+    InvalidCredentials(String),
+    /// The calendar provider is unreachable or answered with an error (502).
+    #[error("{0}")]
+    ProviderUnavailable(String),
     /// Rate limit hit; the response carries `Retry-After` (seconds).
     #[error("{message}")]
     TooManyRequests {
@@ -50,6 +56,8 @@ impl AppError {
             AppError::BadRequest { .. } => StatusCode::BAD_REQUEST,
             AppError::Conflict(_) => StatusCode::CONFLICT,
             AppError::PayloadTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
+            AppError::InvalidCredentials(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            AppError::ProviderUnavailable(_) => StatusCode::BAD_GATEWAY,
             AppError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             AppError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -64,6 +72,8 @@ impl AppError {
             AppError::BadRequest { code, .. } => code,
             AppError::Conflict(_) => "conflict",
             AppError::PayloadTooLarge(_) => "payload_too_large",
+            AppError::InvalidCredentials(_) => "invalid_credentials",
+            AppError::ProviderUnavailable(_) => "provider_unavailable",
             AppError::TooManyRequests { .. } => "too_many_requests",
             AppError::Unavailable(_) => "unavailable",
             AppError::Internal(_) => "internal",

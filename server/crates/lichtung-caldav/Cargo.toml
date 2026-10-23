@@ -1,0 +1,22 @@
+[package]
+name = "lichtung-caldav"
+description = "CalDAV protocol layer for Lichtung: discovery, calendar listing, sync-collection, ETag fallback, multiget and conditional writes."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+percent-encoding = "2.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+roxmltree = "0.21"
+thiserror = "2"
+url = "2.5"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"
+
+[lints]
+workspace = true

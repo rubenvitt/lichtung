@@ -29,7 +29,8 @@
 //!
 //! **Rights.** Calendars that are not `writable` (shared read-only, ICS
 //! subscriptions) refuse with `calendar_read_only`; for origin `mcp:` the
-//! calendar setting `mcp_write` must also allow it.
+//! calendar setting `mcp_write` must also allow it (else
+//! `mcp_write_forbidden`, also for answering invitations).
 //!
 //! **Provider errors.** Unreachable or rate limited → `retry`
 //! (`provider_unavailable`, `retry_after_seconds`); refused (4xx) →
@@ -101,7 +102,7 @@ impl Origin {
             PrincipalKind::Device { name, .. } => Origin::App(name.clone()),
             PrincipalKind::Token { name, .. } => Origin::Api(name.clone()),
             PrincipalKind::Bootstrap => Origin::Api(BOOTSTRAP_TOKEN_NAME.to_owned()),
-            PrincipalKind::OAuth { client_name, .. } => Origin::Mcp(client_name.clone()),
+            PrincipalKind::OAuth { client_name, .. } => Origin::Mcp(format!("oauth:{client_name}")),
         }
     }
 
@@ -512,10 +513,11 @@ impl App {
         }
         if origin.is_mcp() && !t.calendar.mcp_write {
             return Err(Stop::from(WriteOutcome::rejected(
-                "calendar_read_only",
+                "mcp_write_forbidden",
                 format!(
-                    "Claude darf in den Kalender „{name}“ nicht schreiben \
-                     (Einstellung „mcp_write“ in der App)."
+                    "Claude darf in den Kalender „{name}“ nicht schreiben (Schreibschutz für MCP, \
+                     Einstellung mcp_write). Freigeben lässt sich das in der App in den \
+                     Einstellungen des Kalenders."
                 ),
             )));
         }

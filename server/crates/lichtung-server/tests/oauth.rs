@@ -4,8 +4,8 @@
 //! authorization code with PKCE, token rotation with reuse detection,
 //! revocation, device tokens and the negative cases.
 //!
-//! The `/mcp` endpoint follows in LIC-12; until then "accepted by /mcp"
-//! means [`lichtung_server::oauth::authenticate_mcp`] accepts the token.
+//! Here "accepted by /mcp" means [`lichtung_server::oauth::authenticate_mcp`]
+//! accepts the token; the endpoint itself is tested in `tests/mcp.rs`.
 
 mod common;
 

@@ -1,6 +1,6 @@
 //! Lichtung server: login, API and device tokens, OAuth for `/mcp` and the
 //! apps, calendar accounts, CalDAV event sync, persistence. The sync API
-//! (pull, push, SSE) serves the apps; MCP tools build on this (LIC-12).
+//! (pull, push, SSE) serves the apps, the MCP endpoint serves Claude.
 //!
 //! - [`config`]: configuration from environment variables (bootstrap only)
 //! - [`db`]: SQLite schema, migrations and queries
@@ -17,6 +17,7 @@
 //! - [`auth`]: principals, API and device tokens, sessions, CSRF rule, OIDC
 //! - [`oauth`]: built-in OAuth 2.1 authorization server (`/mcp`, devices)
 //! - [`http`]: router and handlers
+//! - [`mcp`]: MCP endpoint `/mcp` with the calendar tools (LIC-12)
 //! - [`backup`]: nightly `VACUUM INTO` backups
 //! - [`healthcheck`]: client for the `healthcheck` subcommand
 
@@ -33,6 +34,7 @@ pub mod error;
 pub mod events;
 pub mod healthcheck;
 pub mod http;
+pub mod mcp;
 pub mod oauth;
 pub mod sync;
 pub mod sync_api;

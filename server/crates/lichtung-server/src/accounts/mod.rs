@@ -447,6 +447,15 @@ fn duplicate_account() -> AppError {
 
 // ----- reconciliation -----------------------------------------------------------------
 
+/// `mcp_write` of a new calendar: Claude may write where Lichtung may
+/// write, except in calendars of the work account (spec section 7: the
+/// work calendar is locked for MCP by default). The work calendar comes as
+/// an ICS feed until the Graph approval, then as a Microsoft account; both
+/// kinds start locked, even if a provider reported them writable.
+pub fn default_mcp_write(kind: AccountKind, writable: bool) -> bool {
+    writable && !matches!(kind, AccountKind::Ics | AccountKind::Microsoft)
+}
+
 /// Brings the stored calendars of `account` in line with `remote`.
 pub(crate) fn reconcile(
     conn: &Connection,
@@ -482,9 +491,7 @@ pub(crate) fn reconcile(
                     can_invite: rc.can_invite,
                     shared: rc.shared,
                     hidden: false,
-                    // Claude may write where we may write; Microsoft (the
-                    // work calendar) starts locked (spec section 7).
-                    mcp_write: rc.writable && account.kind != AccountKind::Microsoft,
+                    mcp_write: default_mcp_write(account.kind, rc.writable),
                     openings_busy: true,
                     all_day_blocks: false,
                     position: next_position,
@@ -1044,6 +1051,68 @@ pub fn reset_secret_key(config: &Config) -> anyhow::Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn work_account_kinds_start_locked_for_mcp() {
+        for kind in [
+            AccountKind::Fastmail,
+            AccountKind::Icloud,
+            AccountKind::Caldav,
+        ] {
+            assert!(default_mcp_write(kind, true), "{kind:?}");
+            assert!(!default_mcp_write(kind, false), "{kind:?}");
+        }
+        for kind in [AccountKind::Ics, AccountKind::Microsoft] {
+            assert!(!default_mcp_write(kind, true), "{kind:?}");
+            assert!(!default_mcp_write(kind, false), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn reconcile_locks_new_ics_calendars_for_mcp() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        let account = |kind: AccountKind, id: &str| AccountRow {
+            id: id.to_owned(),
+            kind,
+            name: "Beispiel".into(),
+            username: "anna@example.org".into(),
+            base_url: format!("https://{id}.example.org/"),
+            principal_url: None,
+            home_url: None,
+            auto_schedule: false,
+            user_addresses: Vec::new(),
+            credentials: None,
+            status_state: StatusState::Ok,
+            status_message: None,
+            last_sync_at: None,
+            created_at: 1,
+            updated_at: 1,
+            seq: 0,
+        };
+        let remote = |href: &str| RemoteCalendar {
+            href: href.to_owned(),
+            name: "Kalender".into(),
+            description: None,
+            color: None,
+            // Even a feed that claims write access starts locked.
+            writable: true,
+            shared: false,
+            can_invite: false,
+        };
+        for (kind, id, expected) in [
+            (AccountKind::Ics, "acc_ics", false),
+            (AccountKind::Microsoft, "acc_ms", false),
+            (AccountKind::Caldav, "acc_dav", true),
+        ] {
+            let a = account(kind, id);
+            store::insert_account(&conn, &a).unwrap();
+            reconcile(&conn, &a, &[remote(&format!("/{id}/"))], 1).unwrap();
+            let cals = store::calendars(&conn, Some(id)).unwrap();
+            assert_eq!(cals.len(), 1);
+            assert_eq!(cals[0].mcp_write, expected, "{kind:?}");
+        }
+    }
 
     #[test]
     fn colors_are_validated_and_normalized() {

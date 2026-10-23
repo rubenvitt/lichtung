@@ -1,7 +1,7 @@
 # Lichtung – Design
 
 - **Datum:** 2026-10-23
-- **Status:** Entwurf, wartet auf Freigabe
+- **Status:** freigegeben (2026-10-23)
 - **Repo:** öffentlich, Apache-2.0
 
 Lichtung ist eine eigene Kalender-App für macOS und iOS, in Bedienung und Gestaltung sehr eng an Fantastical angelehnt, mit einem selbst gehosteten Server dahinter. Der Name steht für die freie Stelle im Wald: die Lücke im Kalender, die andere bei mir buchen können.
@@ -176,11 +176,11 @@ Mindestumfang (Parität zu dem, was die Planungs-Skills heute bei Fantastical nu
 
 | Etappe | Inhalt | Ergebnis |
 |---|---|---|
-| **S Spikes** | **S1 ist das Tor vor allem anderen:** Graph-Zugang zum Arbeitskalender (Freigabe nötig? delta, accept/decline). S2: Fastmail und iCloud per CalDAV: Teilnehmer anlegen → wird eingeladen? PARTSTAT setzen → geht Antwort raus? S3: ICS-Feed des Arbeitskalenders lesbar | Weg pro Anbieter bestätigt, Graph-Freigabe ggf. beantragt |
-| **E1 Server-Kern** | Konten, Sync Fastmail/iCloud/ICS, Serien, Sync-API, MCP (lesen + schreiben mit Schreibschutz) | Planungs-Skills können vom Fantastical-MCP umziehen |
+| **S Spikes** | S2: Fastmail und iCloud per CalDAV: Teilnehmer anlegen → wird eingeladen? PARTSTAT setzen → geht Antwort raus? S3: ICS-Feed des Arbeitskalenders lesbar | Weg für Fastmail/iCloud bestätigt |
+| **E1 Server-Kern** | **Beginnt mit Fastmail allein** (Nutzer: „erstmal was bauen mit Fastmail“), danach iCloud und ICS. Konten, Sync, Serien, Sync-API, MCP (lesen + schreiben mit Schreibschutz) | Planungs-Skills können vom Fantastical-MCP umziehen |
 | **E2 Apps** | iPhone A/B/D, Mac C/B/D/Jahr, Termin-Editor, Satz-Parser, Sets, Cache, Erinnerungen | tägliche Nutzung möglich |
 | **E3 Einladungen + Openings** | Teilnehmer, Anfragen beantworten, Einmal-Links, Vorlagen, Buchungsseite | Openings ersetzen Fantastical |
-| **E4 Arbeitskalender voll** | Graph-Sync statt ICS, Anfragen aus dem Arbeitskalender beantworten | **Fantastical kündbar** |
+| **E4 Arbeitskalender voll** | S1: Graph-Zugang klären (Freigabe nötig? delta, accept/decline), dann Graph-Sync statt ICS, Anfragen aus dem Arbeitskalender beantworten | **Fantastical kündbar** |
 
 ## 10. Entscheidungen und verworfene Alternativen
 
@@ -196,7 +196,7 @@ Mindestumfang (Parität zu dem, was die Planungs-Skills heute bei Fantastical nu
 
 ## 11. Risiken
 
-- **Graph-Freigabe beim Arbeitgeber** wird abgelehnt oder dauert: Dann bleibt der Arbeitskalender lesend über ICS, und die Kriterien 2 und 4 sind nicht erfüllbar. Deshalb ist S1 das Tor vor allem anderen. Bei Ablehnung entscheidet der Nutzer zwischen Stopp (Tendenz) und Weiterbau mit „Arbeitsanfragen bleiben in Outlook“ als angepasstem Kriterium. Der Nutzer erwartet, die Freigabe zu bekommen.
+- **Graph-Freigabe beim Arbeitgeber** wird abgelehnt oder dauert: Dann bleibt der Arbeitskalender lesend über ICS, und die Kriterien 2 und 4 sind nicht erfüllbar. Der Nutzer schiebt die Klärung (S1) bewusst nach hinten und baut zuerst mit Fastmail; das Risiko, Arbeit in ein Projekt zu stecken, das an der Freigabe scheitert, ist damit akzeptiert. Bei Ablehnung entscheidet der Nutzer zwischen Stopp (Tendenz) und Weiterbau mit „Arbeitsanfragen bleiben in Outlook“ als angepasstem Kriterium. Der Nutzer erwartet, die Freigabe zu bekommen.
 - **Sync-Korrektheit** (Serien, Zeitzonen, Ausnahmen, Konflikte) ist der teuerste Teil. Gegenmittel: iCalendar-Original speichern, Tabellentests, Anbieter gewinnt bei Konflikt.
 - **CalDAV-Scheduling** verhält sich bei Fastmail oder iCloud anders als erwartet (Spike S2). Fallback, falls nötig: Einladung als iMIP-Mail vom Server *(nur wenn S2 scheitert)*.
 - **Doppelte Benachrichtigungen,** wenn dieselben Konten parallel im System-Kalender von iOS/macOS eingerichtet bleiben. Lösung beim Umstieg: dort Benachrichtigungen ausschalten oder Konten entfernen.

@@ -1,0 +1,16 @@
+[package]
+name = "lichtung-ical"
+description = "Lossless iCalendar model, recurrence expansion and scoped series editing for Lichtung"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+chrono = "0.4"
+chrono-tz = "0.10"
+rrule = "0.14"
+thiserror = "2"
+
+[lints]
+workspace = true

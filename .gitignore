@@ -1,0 +1,25 @@
+# Rust
+/target/
+**/target/
+
+# Swift / Xcode (Projekt entsteht aus project.yml)
+*.xcodeproj/
+.build/
+DerivedData/
+xcuserdata/
+
+# Lokale Daten und Geheimnisse
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+!.env.example
+/data/
+
+# Brainstorming-Entwürfe
+.superpowers/
+
+# Editor / OS
+.DS_Store
+.idea/

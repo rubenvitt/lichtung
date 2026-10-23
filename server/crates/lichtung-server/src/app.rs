@@ -90,6 +90,8 @@ struct Inner {
     changes: watch::Sender<i64>,
     /// Accounts with a sync running in the background.
     syncing: Mutex<HashSet<String>>,
+    /// Wakes the sync scheduler (new account, new credentials).
+    sync_wakeup: tokio::sync::Notify,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -156,6 +158,7 @@ impl App {
                 cipher,
                 changes: watch::channel(cursor).0,
                 syncing: Mutex::new(HashSet::new()),
+                sync_wakeup: tokio::sync::Notify::new(),
                 config,
             }),
         })
@@ -252,6 +255,16 @@ impl App {
 
     pub(crate) fn is_syncing(&self, account_id: &str) -> bool {
         lock(&self.inner.syncing).contains(account_id)
+    }
+
+    /// Asks the sync scheduler to look at the accounts now.
+    pub(crate) fn wake_sync_scheduler(&self) {
+        self.inner.sync_wakeup.notify_one();
+    }
+
+    /// Resolves when [`App::wake_sync_scheduler`] was called.
+    pub(crate) async fn sync_wakeup(&self) {
+        self.inner.sync_wakeup.notified().await;
     }
 
     /// Runs `f` with the reader connection on the blocking pool.

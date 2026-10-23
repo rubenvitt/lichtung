@@ -72,6 +72,7 @@ Die Apps melden sich wie die Zunder-App über den eingebauten OAuth-Server an (A
 - `kind`: `fastmail`, `icloud`, `ics`, später `microsoft`.
 - `username`: Anmeldename (bei `ics` die URL ohne Zugangsdaten). Passwörter verlassen den Server nie.
 - `status.state`: `ok`, `syncing`, `error` (vorübergehend, `message` sagt warum), `auth_failed` (Zugangsdaten erneuern).
+- *Ergänzung (LIC-8):* Der Server synchronisiert jedes Konto beim Start und danach alle 5 Minuten. Nach `error` versucht er es mit wachsendem Abstand erneut (1, 2, 4 … höchstens 60 Minuten), `last_sync_at` bleibt dabei der letzte erfolgreiche Abgleich. Ein Konto auf `auth_failed` versucht er nicht mehr von selbst, bis neue Zugangsdaten gespeichert sind (`PATCH /api/accounts/{id}`); `POST /api/accounts/{id}/sync` versucht es trotzdem. `message` bei `error` nennt den betroffenen Kalender, z. B. „Kalender „Privat“: Kalenderanbieter derzeit nicht erreichbar: HTTP 503“.
 - *Ergänzung (LIC-7):* `kind: caldav` ist ein beliebiger CalDAV-Server mit eigener Adresse (Selbsthoster, Radicale in Tests). Nur bei diesem `kind` enthält das Account zusätzlich `url` (Server-Adresse). Clients, die `caldav` nicht kennen, zeigen das Konto wie ein unbekanntes an.
 
 ### Calendar
@@ -172,6 +173,26 @@ Ein Event ist **ein iCalendar-Objekt** (eine UID in einem Kalender): ein Einzelt
 | `travel_time_minutes` | Reisezeit (X-APPLE-TRAVEL-DURATION), sonst `null` |
 
 Das iCalendar-Original hält der Server; Felder, die Lichtung nicht modelliert, bleiben beim Bearbeiten erhalten.
+
+*Ergänzungen (LIC-8), keine bestehende Form geändert:*
+
+- **`DateValue`:** Werte in UTC haben `time_zone: "UTC"`. Lässt sich eine Zeitzone nicht nach IANA übersetzen (unbekannter Name ohne Definition, eigene VTIMEZONE ohne passende IANA-Zone), ist `time_zone` `null`, `utc` aber gesetzt: Der Zeitpunkt gilt, die Wanduhrzeit ist die des Anbieters. Nur `time_zone: null` **und** `utc: null` heißt floating. Eigene VTIMEZONEs übersetzt der Server über `X-LIC-LOCATION` oder über den Vergleich ihrer Offsets mit den IANA-Zonen (bevorzugt eine Zone, deren Stadt im Namen steht).
+- **`title`** ist `""`, wenn der Termin keinen Titel hat. `end` fehlt nie: ohne DTEND gilt DTSTART + DURATION, sonst ein Tag (ganztägig) bzw. Dauer null.
+- **`recurrence.rrule`** kann `null` sein: bei Serien nur aus RDATEs und bei Objekten ohne Master. `rdates` mit Zeitraum (PERIOD) liefern nur ihren Beginn. Eine EXRULE (veraltet) oder ein nicht lesbares RDATE/EXDATE setzt `incomplete: true`.
+- **Objekte ohne Master** (nur einzelne Vorkommen einer fremden Serie, z. B. die Einladung zu einem Termin einer Serie): Kopf-Felder aus dem frühesten Vorkommen, `start` ist dessen `recurrence_id` (Ende mit der Dauer des Vorkommens), `recurrence` ist `{"rrule": null, "rdates": [recurrence_id der übrigen Vorkommen], "exdates": []}`, `overrides` enthält alle Vorkommen. So ergibt die normale Expansion genau diese Vorkommen.
+- **`overrides`** sind nach `recurrence_id` sortiert und haben keine eigene `id`, `uid`, `version`, `recurrence` oder `overrides`.
+- **`alarms`:** Erinnerungen relativ zum Ende (`RELATED=END`) werden auf den Beginn umgerechnet; Platzhalter mit `ACTION:NONE` (Apple) fehlen.
+- **`created_at`/`updated_at`** sind die Zeitpunkte, zu denen Lichtung das Event zuerst gesehen bzw. zuletzt geändert gespeichert hat (nicht CREATED/LAST-MODIFIED aus dem iCalendar).
+- **Nicht lesbare Termine:** Kann der Server das iCalendar-Original nicht lesen (kaputte Daten, kein VEVENT, kein DTSTART), speichert er es trotzdem und liefert ein Event in dieser Form:
+  ```json
+  {"id": "ev_09", "calendar_id": "cal_01", "uid": "…", "version": 1,
+   "title": "(nicht lesbarer Termin)", "location": null, "notes": null, "url": null,
+   "start": null, "end": null, "all_day": false, "status": "confirmed", "availability": "free",
+   "recurrence": null, "overrides": [], "organizer": null, "attendees": [], "self_status": null,
+   "alarms": [], "travel_time_minutes": null, "created_at": "…", "updated_at": "…",
+   "parse_error": "iCalendar-Fehler in Zeile 12: END:VCALENDAR fehlt am Ende der Daten"}
+  ```
+  `parse_error` (deutsch) gibt es nur in dieser Form; `uid` kann `null` sein. Die App zeigt solche Events nicht im Kalender, höchstens in einer Liste zum Nachsehen. Wird das Original beim Anbieter repariert, kommt das Event mit höherer `version` in normaler Form.
 
 ### Conflict
 
@@ -355,6 +376,31 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 - Antwort auf `POST /api/accounts` ist `201` mit dem Account; die Kalender des Kontos kommen über den Pull bzw. `GET /api/calendars`. Dasselbe Konto (Art, Server, Benutzername) ein zweites Mal: `409 conflict`.
 - `PATCH /api/accounts/{id}`: Neue Zugangsdaten werden erst beim Anbieter geprüft (`422 invalid_credentials` bzw. `502 provider_unavailable`) und nur bei Erfolg gespeichert. Wer nur `username` oder `url` ändert, braucht `password` nicht erneut zu schicken, außer das Konto steht auf `auth_failed` ohne gespeicherte Zugangsdaten (dann `400`). `url` gibt es nur bei `kind: caldav`.
 - `POST /api/accounts/{id}/sync` antwortet `202` mit dem Account (`status.state: syncing`); das Ergebnis erscheint im Status (Pull/SSE).
+
+*Ergänzung (LIC-8) zu `GET /api/occurrences`:*
+
+- Parameter: `from` (Pflicht, inklusiv), `to` (Pflicht, exklusiv), jeweils ISO-Datum (`2026-11-03`, Mitternacht in `time_zone`) oder RFC 3339; `calendar_ids` (kommagetrennt, ohne = alle Kalender, auch ausgeblendete); `time_zone` (IANA, für ISO-Daten, floating und ganztägige Termine; ohne = Zeitzone des Servers); `include_cancelled` (`true` liefert auch abgesagte Vorkommen mit `status: cancelled`, Standard `false`). Höchstens 400 Tage. Fehler: `400 invalid_request` (fehlender oder ungültiger Wert, unbekannter Kalender oder Parameter, `to` nicht nach `from`). Erlaubt für jedes Token für `/api`.
+- Antwort:
+  ```json
+  {
+    "occurrences": [
+      {
+        "event_id": "ev_01", "calendar_id": "cal_01", "uid": "…", "version": 4,
+        "recurrence_id": {"date_time": "2026-11-09T09:00:00", "time_zone": "Europe/Berlin", "utc": "2026-11-09T08:00:00Z"},
+        "is_override": true,
+        "title": "Team-Sync (verschoben)", "location": "Raum 2", "notes": "…", "url": null,
+        "start": {"date_time": "2026-11-09T10:00:00", "time_zone": "Europe/Berlin", "utc": "2026-11-09T09:00:00Z"},
+        "end": {"date_time": "2026-11-09T10:30:00", "time_zone": "Europe/Berlin", "utc": "2026-11-09T09:30:00Z"},
+        "all_day": false, "status": "confirmed", "availability": "busy",
+        "organizer": null, "attendees": [], "self_status": null,
+        "alarms": [{"minutes_before": 10}], "travel_time_minutes": null
+      }
+    ],
+    "truncated": false
+  }
+  ```
+- Ein Vorkommen trägt die Felder des Events bzw. der Ausnahme, aus der es stammt (wie ein Eintrag in `overrides`), dazu `event_id`, `calendar_id`, `uid`, `version` des Events, `recurrence_id` (ursprünglicher Beginn, `null` bei Einzelterminen) und `is_override`. `start`/`end` sind die des Vorkommens.
+- Sortiert nach Beginn (UTC), dann Ende. Höchstens 5000 Vorkommen; mehr ergibt `truncated: true`. Nicht lesbare Termine fehlen.
 - `PATCH /api/calendars/{id}` und `/api/calendar-sets`: unbekannte Felder und ungültige Werte (Farbe nicht `#RRGGBB`, `position` negativ, unbekannte oder doppelte `calendar_ids`) ergeben `400 invalid_request`. `POST /api/calendar-sets` antwortet `201`, `DELETE`-Aufrufe `204`.
 - **Wer darf:** Lesen (`GET`) und `POST /api/accounts/{id}/sync` jedes Token für `/api`. Konten anlegen, ändern, löschen sowie Kalender-Einstellungen und Sets ändern nur Geräte der App und Browser-Sitzungen (`403 forbidden` für API-Tokens `lt_…`): API-Tokens öffnen auch `/mcp`, und `mcp_write` ist der Schutz vor Claude.
 
@@ -387,3 +433,4 @@ Zusätzliche `code`s in Mutations-Ergebnissen (`rejected`/`retry`): `calendar_re
 |---|---|
 | 2026-10-23 | Version 1 (Entwurf) |
 | 2026-10-23 | Ergänzungen aus LIC-7 (keine bestehende Form geändert): `kind: caldav` mit `url`; `color` immer gesetzt, Standardwerte neuer Kalender, VTODO-Sammlungen ausgelassen; `GET /api/calendars`, `GET /api/calendar-sets`; Statuscodes und Rechte der Konten-, Kalender- und Set-Aufrufe (Abschnitt 7) |
+| 2026-10-23 | Ergänzungen aus LIC-8 (keine bestehende Form geändert): Sync-Rhythmus und Status der Konten; `DateValue` mit `time_zone: null` und `utc` (nicht übersetzbare Zone), `time_zone: "UTC"`; `rrule: null`, Objekte ohne Master; Form nicht lesbarer Termine mit `parse_error`; Form von `GET /api/occurrences` mit `time_zone` und `include_cancelled` (Abschnitt 7) |

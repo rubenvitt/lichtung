@@ -33,7 +33,7 @@ Ohne Anmeldung erreichbar sind nur `/`, `/healthz`, die Login-Strecke `/auth/*` 
 | `LICHTUNG_BACKUP_HOUR` | Stunde des nächtlichen Backups (0–23, Zeitzone `TZ`) | `3` |
 | `LICHTUNG_DEV_AUTH` | `true` = Anmeldung ohne OIDC, nur über localhost. **Nie in Produktion** | `false` |
 | `LICHTUNG_DEV_AUTH_ALLOW_REMOTE` | `true` = Dev-Auth auch mit nicht lokaler `LICHTUNG_BIND` (nur für einen lokalen Container mit `-p 127.0.0.1:…`) | `false` |
-| `TZ` | Zeitzone für die Backup-Stunde | Image: `Europe/Berlin` |
+| `TZ` | Zeitzone für die Backup-Stunde und für floating/ganztägige Termine bei Server-Abfragen | Image: `Europe/Berlin` |
 | `RUST_LOG` | Log-Filter (tracing) | `info,tower_http=info` |
 
 `LICHTUNG_SECRET_KEY` gehört zusätzlich in den Passwortmanager: Ohne ihn sind gespeicherte Zugangsdaten nicht mehr lesbar, auch nicht aus Backups. Nicht nachträglich ändern (siehe [Schlüssel für die Zugangsdaten](#schlüssel-für-die-zugangsdaten)).
@@ -119,6 +119,14 @@ curl -s -X POST http://localhost:8080/api/tokens \
 - **claude.ai:** Connector mit der URL `https://lichtung.rubeen.dev/mcp` anlegen (der Endpunkt folgt in LIC-12); Discovery, Registrierung und Freigabe laufen automatisch über die deutsche Freigabeseite.
 
 Fehler kommen als `{"error":{"code":"…","message":"…"}}` mit deutscher Meldung; die OAuth-Endpunkte antworten im OAuth-Format `{"error","error_description"}`.
+
+## Kalender-Abgleich
+
+- **Rhythmus:** Beim Start gleicht der Server alle Konten ab, danach jedes Konto alle 5 Minuten; „Jetzt synchronisieren“ in der App (`POST /api/accounts/{id}/sync`) stößt sofort einen Lauf an. Pro Konto läuft höchstens ein Abgleich gleichzeitig, Konten laufen unabhängig voneinander.
+- **Verfahren:** CalDAV mit `sync-collection` (RFC 6578). Ohne Token, mit abgelaufenem Token oder bei Servern ohne `sync-collection` vergleicht der Server alle ETags (bei unverändertem ctag gar nicht). Neue und geänderte Termine holt er per `calendar-multiget`.
+- **Nichts geht verloren, nichts doppelt:** Gespeichert wird das iCalendar-Original (Zeilenenden auf CRLF vereinheitlicht), auch wenn es nicht lesbar ist. Die Änderungen einer Runde und der neue Sync-Token landen in einer Transaktion; bricht ein Lauf ab (Netz, Fehler beim Anbieter, Neustart), wiederholt der nächste die Runde.
+- **Status:** `syncing` während des Laufs, danach `ok`. Vorübergehende Fehler setzen `error` mit Meldung; der nächste Versuch kommt nach 1, 2, 4 … höchstens 60 Minuten. Bei `auth_failed` (Anbieter lehnt das App-Passwort ab) versucht es der Server erst wieder, wenn in der App neue Zugangsdaten gespeichert sind.
+- **Zeitzone des Servers:** Floating-Zeiten und ganztägige Termine rechnet der Server in `TZ` (Image: `Europe/Berlin`), falls dort eine IANA-Zone steht, sonst in UTC.
 
 ## Backups
 

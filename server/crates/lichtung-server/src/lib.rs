@@ -1,11 +1,13 @@
 //! Lichtung server: login, API and device tokens, OAuth for `/mcp` and the
-//! apps, calendar accounts, persistence. Event sync, the sync API and MCP
-//! tools build on this (later tasks).
+//! apps, calendar accounts, CalDAV event sync, persistence. The sync API
+//! (pull, push, SSE) and MCP tools build on this (later tasks).
 //!
 //! - [`config`]: configuration from environment variables (bootstrap only)
 //! - [`db`]: SQLite schema, migrations and queries
 //! - [`app`]: application service (the only way to read or change data)
 //! - [`accounts`]: calendar accounts, calendars, calendar sets
+//! - [`events`]: stored events (iCalendar original), event JSON, occurrences
+//! - [`sync`]: CalDAV sync engine and its scheduler
 //! - [`crypto`]: encryption of provider credentials (AES-256-GCM)
 //! - [`changes`]: change log (`seq`, tombstones, cursor notifications)
 //! - [`auth`]: principals, API and device tokens, sessions, CSRF rule, OIDC
@@ -23,9 +25,11 @@ pub mod config;
 pub mod crypto;
 pub mod db;
 pub mod error;
+pub mod events;
 pub mod healthcheck;
 pub mod http;
 pub mod oauth;
+pub mod sync;
 
 use std::future::IntoFuture;
 use std::sync::Arc;
@@ -115,7 +119,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 /// on its own (and closes SQLite) before it would be killed.
 pub const DRAIN_TIMEOUT: Duration = Duration::from_secs(8);
 
-/// Serves `router` on `listener` with the nightly backup until `signal`
+/// Serves `router` on `listener` with the nightly backup and the sync
+/// scheduler until `signal`
 /// completes, then lets running requests finish for at most
 /// `drain_timeout` and closes the remaining connections.
 pub async fn serve(
@@ -126,6 +131,7 @@ pub async fn serve(
     drain_timeout: Duration,
 ) -> anyhow::Result<()> {
     let backup = tokio::spawn(backup::run_nightly(app.clone()));
+    let scheduler = tokio::spawn(sync::run_scheduler(app.clone()));
     let shutdown = app.shutdown_token();
     let service = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
     let server = axum::serve(listener, service).with_graceful_shutdown({
@@ -153,6 +159,10 @@ pub async fn serve(
     match tokio::time::timeout(drain_timeout, backup).await {
         Ok(joined) => joined?,
         Err(_) => tracing::warn!("backup still running at shutdown"),
+    }
+    match tokio::time::timeout(drain_timeout, scheduler).await {
+        Ok(joined) => joined?,
+        Err(_) => tracing::warn!("sync scheduler still running at shutdown"),
     }
     tracing::info!("stopped");
     Ok(())

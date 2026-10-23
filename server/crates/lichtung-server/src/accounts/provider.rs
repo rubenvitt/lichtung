@@ -20,6 +20,8 @@ pub struct Remote {
     pub principal: Url,
     pub home: Url,
     pub auto_schedule: bool,
+    /// `calendar-user-address-set` as lower-case e-mail addresses.
+    pub addresses: Vec<String>,
     /// Event calendars in provider order (see [`event_calendars`]).
     pub calendars: Vec<RemoteCalendar>,
 }
@@ -91,12 +93,27 @@ pub async fn fetch(
     username: &str,
     password: &Secret,
 ) -> Result<Remote, ProviderError> {
-    let wrap = |error| ProviderError { kind, error };
-    let client = Client::builder(base_url)
+    let client = client(kind, base_url, username, password)?;
+    fetch_with(kind, &client).await
+}
+
+/// A CalDAV client for the account.
+pub fn client(
+    kind: AccountKind,
+    base_url: &str,
+    username: &str,
+    password: &Secret,
+) -> Result<Client, ProviderError> {
+    Client::builder(base_url)
         .credentials(Credentials::basic(username, password.expose()))
         .timeout(PROVIDER_TIMEOUT)
         .build()
-        .map_err(wrap)?;
+        .map_err(|error| ProviderError { kind, error })
+}
+
+/// Like [`fetch`] with an existing client.
+pub async fn fetch_with(kind: AccountKind, client: &Client) -> Result<Remote, ProviderError> {
+    let wrap = |error| ProviderError { kind, error };
     let discovery = client.discover().await.map_err(wrap)?;
     let home = discovery.calendar_home().cloned().ok_or_else(|| {
         wrap(lichtung_caldav::Error::Protocol(
@@ -109,6 +126,12 @@ pub async fn fetch(
         .map_err(wrap)?;
     Ok(Remote {
         auto_schedule: discovery.auto_schedule(),
+        addresses: discovery
+            .email_addresses()
+            .into_iter()
+            .map(|a| a.trim().to_lowercase())
+            .filter(|a| !a.is_empty())
+            .collect(),
         calendars: event_calendars(&discovery, infos),
         principal: discovery.principal,
         home,

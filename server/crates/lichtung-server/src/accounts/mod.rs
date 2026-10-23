@@ -448,7 +448,7 @@ fn duplicate_account() -> AppError {
 // ----- reconciliation -----------------------------------------------------------------
 
 /// Brings the stored calendars of `account` in line with `remote`.
-fn reconcile(
+pub(crate) fn reconcile(
     conn: &Connection,
     account: &AccountRow,
     remote: &[RemoteCalendar],
@@ -505,10 +505,17 @@ fn reconcile(
     Ok(report)
 }
 
-fn apply_remote_to_account(row: &mut AccountRow, remote: &Remote, now: i64) {
+/// Takes over what discovery found (principal, home, scheduling, the
+/// user's addresses); the status stays as it is.
+pub(crate) fn apply_remote_identity(row: &mut AccountRow, remote: &Remote) {
     row.principal_url = Some(remote.principal.to_string());
     row.home_url = Some(remote.home.to_string());
     row.auto_schedule = remote.auto_schedule;
+    row.user_addresses.clone_from(&remote.addresses);
+}
+
+fn apply_remote_to_account(row: &mut AccountRow, remote: &Remote, now: i64) {
+    apply_remote_identity(row, remote);
     row.status_state = StatusState::Ok;
     row.status_message = None;
     row.last_sync_at = Some(now);
@@ -605,6 +612,7 @@ impl App {
             principal_url: None,
             home_url: None,
             auto_schedule: false,
+            user_addresses: Vec::new(),
             credentials: Some(credentials),
             status_state: StatusState::Ok,
             status_message: None,
@@ -630,6 +638,8 @@ impl App {
                 Ok(Account::from(&row))
             })
             .await?;
+        // The scheduler runs the first sync right away.
+        self.wake_sync_scheduler();
         Ok(account)
     }
 
@@ -696,27 +706,32 @@ impl App {
             .await
             .map_err(ProviderError::into_app_error)?;
         let credentials = StoredCredentials { password }.seal(self.cipher(), &id);
-        self.with_change_tx(move |tx| {
-            let mut row = store::account(tx, &id)?.ok_or_else(not_found_account)?;
-            if let Some(other) = store::find_account(tx, kind, &base_url, &username)? {
-                if other != id {
-                    return Err(duplicate_account());
+        let account = self
+            .with_change_tx(move |tx| {
+                let mut row = store::account(tx, &id)?.ok_or_else(not_found_account)?;
+                if let Some(other) = store::find_account(tx, kind, &base_url, &username)? {
+                    if other != id {
+                        return Err(duplicate_account());
+                    }
                 }
-            }
-            let now = now_ms();
-            if let Some(name) = name {
-                row.name = name;
-            }
-            row.username = username;
-            row.base_url = base_url;
-            row.credentials = Some(credentials);
-            apply_remote_to_account(&mut row, &remote, now);
-            store::update_account(tx, &row)?;
-            reconcile(tx, &row, &remote.calendars, now)?;
-            tracing::info!(account = %row.id, "account credentials updated");
-            Ok(Account::from(&row))
-        })
-        .await
+                let now = now_ms();
+                if let Some(name) = name {
+                    row.name = name;
+                }
+                row.username = username;
+                row.base_url = base_url;
+                row.credentials = Some(credentials);
+                apply_remote_to_account(&mut row, &remote, now);
+                store::update_account(tx, &row)?;
+                reconcile(tx, &row, &remote.calendars, now)?;
+                tracing::info!(account = %row.id, "account credentials updated");
+                Ok(Account::from(&row))
+            })
+            .await?;
+        // An account on `auth_failed` is synced again once it has new
+        // credentials.
+        self.wake_sync_scheduler();
+        Ok(account)
     }
 
     /// Removes an account with its calendars from Lichtung (nothing changes
@@ -734,7 +749,7 @@ impl App {
         .await
     }
 
-    fn decrypt_credentials(&self, row: &AccountRow) -> Option<StoredCredentials> {
+    pub(crate) fn decrypt_credentials(&self, row: &AccountRow) -> Option<StoredCredentials> {
         let blob = row.credentials.as_deref()?;
         match StoredCredentials::open(self.cipher(), &row.id, blob) {
             Ok(c) => Some(c),
@@ -745,7 +760,7 @@ impl App {
         }
     }
 
-    async fn set_status(
+    pub(crate) async fn set_status(
         &self,
         id: &str,
         state: StatusState,
@@ -809,8 +824,9 @@ impl App {
     }
 
     /// `POST /api/accounts/{id}/sync`: marks the account as syncing and runs
-    /// [`App::refresh_calendars`] in the background (once per account at a
-    /// time). Returns the account as it is now.
+    /// [`App::sync_account`] (calendars and events) in the background, once
+    /// per account at a time. Also runs for accounts on `auth_failed` (the
+    /// scheduler skips those). Returns the account as it is now.
     pub async fn request_sync(&self, id: &str) -> AppResult<Account> {
         let account = self.account(id).await?;
         if !self.begin_sync(id) {
@@ -823,20 +839,7 @@ impl App {
                 return Err(e);
             }
         };
-        let app = self.clone();
-        let id = id.to_owned();
-        tokio::spawn(async move {
-            let shutdown = app.shutdown_token();
-            tokio::select! {
-                result = app.refresh_calendars(&id) => {
-                    if let Err(e) = result {
-                        tracing::debug!(account = %id, error = %e, "background sync failed");
-                    }
-                }
-                () = shutdown.cancelled() => {}
-            }
-            app.end_sync(&id);
-        });
+        crate::sync::spawn_claimed(self.clone(), id.to_owned());
         Ok(account)
     }
 

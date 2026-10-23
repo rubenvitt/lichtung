@@ -22,6 +22,8 @@ pub struct AccountRow {
     pub principal_url: Option<String>,
     pub home_url: Option<String>,
     pub auto_schedule: bool,
+    /// `calendar-user-address-set` (lower-case e-mail addresses).
+    pub user_addresses: Vec<String>,
     pub credentials: Option<Vec<u8>>,
     pub status_state: StatusState,
     pub status_message: Option<String>,
@@ -48,7 +50,7 @@ impl std::fmt::Debug for AccountRow {
 
 const ACCOUNT_COLUMNS: &str = "id, kind, name, username, base_url, principal_url, home_url, \
      auto_schedule, credentials, status_state, status_message, last_sync_at, created_at, \
-     updated_at, seq";
+     updated_at, seq, user_addresses";
 
 fn text_enum<T>(row: &Row<'_>, idx: usize, parse: fn(&str) -> Option<T>) -> rusqlite::Result<T> {
     let raw: String = row.get(idx)?;
@@ -78,7 +80,16 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<AccountRow> {
         created_at: row.get(12)?,
         updated_at: row.get(13)?,
         seq: row.get(14)?,
+        user_addresses: addresses_from_json(&row.get::<_, String>(15)?),
     })
+}
+
+fn addresses_from_json(raw: &str) -> Vec<String> {
+    serde_json::from_str(raw).unwrap_or_default()
+}
+
+fn addresses_to_json(addresses: &[String]) -> String {
+    serde_json::to_string(addresses).unwrap_or_else(|_| "[]".into())
 }
 
 pub fn insert_account(conn: &Connection, a: &AccountRow) -> rusqlite::Result<i64> {
@@ -86,7 +97,7 @@ pub fn insert_account(conn: &Connection, a: &AccountRow) -> rusqlite::Result<i64
     conn.execute(
         &format!(
             "INSERT INTO accounts ({ACCOUNT_COLUMNS})
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)"
         ),
         params![
             a.id,
@@ -103,7 +114,8 @@ pub fn insert_account(conn: &Connection, a: &AccountRow) -> rusqlite::Result<i64
             a.last_sync_at,
             a.created_at,
             a.updated_at,
-            seq
+            seq,
+            addresses_to_json(&a.user_addresses)
         ],
     )?;
     Ok(seq)
@@ -115,7 +127,8 @@ pub fn update_account(conn: &Connection, a: &AccountRow) -> rusqlite::Result<i64
     conn.execute(
         "UPDATE accounts SET name = ?2, username = ?3, base_url = ?4, principal_url = ?5,
              home_url = ?6, auto_schedule = ?7, credentials = ?8, status_state = ?9,
-             status_message = ?10, last_sync_at = ?11, updated_at = ?12, seq = ?13
+             status_message = ?10, last_sync_at = ?11, updated_at = ?12, seq = ?13,
+             user_addresses = ?14
          WHERE id = ?1",
         params![
             a.id,
@@ -130,7 +143,8 @@ pub fn update_account(conn: &Connection, a: &AccountRow) -> rusqlite::Result<i64
             a.status_message,
             a.last_sync_at,
             a.updated_at,
-            seq
+            seq,
+            addresses_to_json(&a.user_addresses)
         ],
     )?;
     Ok(seq)
@@ -168,8 +182,8 @@ pub fn find_account(
     .optional()
 }
 
-/// Deletes an account with its calendars (and later events), leaving
-/// tombstones for every calendar and the account itself. Returns whether
+/// Deletes an account with its calendars and events, leaving tombstones for
+/// every event, every calendar and the account itself. Returns whether
 /// the account existed.
 pub fn delete_account(conn: &Connection, id: &str, now: i64) -> rusqlite::Result<bool> {
     let calendar_ids: Vec<String> = {
@@ -331,8 +345,8 @@ pub fn update_calendar(conn: &Connection, c: &CalendarRow) -> rusqlite::Result<i
     Ok(seq)
 }
 
-/// Deletes a calendar, takes it out of every set (those sets change) and
-/// leaves a tombstone. Events of the calendar follow with the event sync.
+/// Deletes a calendar with its events, takes it out of every set (those
+/// sets change) and leaves tombstones for the calendar and every event.
 pub fn delete_calendar(conn: &Connection, id: &str, now: i64) -> rusqlite::Result<bool> {
     let set_ids: Vec<String> = {
         let mut stmt =
@@ -340,6 +354,9 @@ pub fn delete_calendar(conn: &Connection, id: &str, now: i64) -> rusqlite::Resul
         let rows = stmt.query_map([id], |r| r.get(0))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
+    // Events first, so each leaves a tombstone (the foreign key would
+    // remove them silently).
+    crate::events::store::delete_calendar_events(conn, id, now)?;
     let n = conn.execute("DELETE FROM calendars WHERE id = ?1", [id])?;
     if n == 0 {
         return Ok(false);

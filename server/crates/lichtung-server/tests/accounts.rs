@@ -12,7 +12,7 @@ use base64::Engine;
 use lichtung_server::changes;
 use serde_json::{json, Value};
 use url::Url;
-use wiremock::matchers::{body_string_contains, header, method, path};
+use wiremock::matchers::{body_string_contains, header, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use common::{api_token, Auth, TestServer, BOOTSTRAP};
@@ -161,6 +161,24 @@ async fn mount_provider(server: &MockServer, password: &str, calendars: &[FakeCa
         .and(header("authorization", auth.as_str()))
         .and(header("depth", "1"))
         .respond_with(ms(calendar_listing(calendars)))
+        .mount(server)
+        .await;
+    // Event sync: every calendar is empty (state, then ETag listing).
+    let calendar_path = r"^/dav/calendars/user/anna@example\.org/[^/]+/$";
+    Mock::given(method("PROPFIND"))
+        .and(path_regex(calendar_path))
+        .and(header("authorization", auth.as_str()))
+        .and(header("depth", "0"))
+        .respond_with(ms(r#"<?xml version="1.0"?><D:multistatus xmlns:D="DAV:" xmlns:CS="http://calendarserver.org/ns/"><D:response><D:href>/dav/</D:href><D:propstat><D:prop><CS:getctag>1</CS:getctag></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response></D:multistatus>"#.to_owned()))
+        .mount(server)
+        .await;
+    Mock::given(method("PROPFIND"))
+        .and(path_regex(calendar_path))
+        .and(header("authorization", auth.as_str()))
+        .and(header("depth", "1"))
+        .respond_with(ms(
+            r#"<?xml version="1.0"?><D:multistatus xmlns:D="DAV:"></D:multistatus>"#.to_owned(),
+        ))
         .mount(server)
         .await;
     // Anything else (wrong password, no credentials) is refused.

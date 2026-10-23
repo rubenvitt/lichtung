@@ -6,7 +6,7 @@
 //! | `GET /healthz` | none |
 //! | `/auth/login`, `/auth/callback`, `/auth/logout` | OIDC login ([`auth_routes`]) |
 //! | `/.well-known/oauth-*`, `/oauth/*` | built-in authorization server ([`crate::oauth::routes`]) |
-//! | `/api/*` | session cookie, API/bootstrap token or device token ([`api`], [`accounts`]) |
+//! | `/api/*` | session cookie, API/bootstrap token or device token ([`api`], [`accounts`], [`events`]) |
 //!
 //! `/mcp` follows in LIC-12. Protected routes use
 //! [`crate::auth::middleware::require_auth`] and the
@@ -15,6 +15,7 @@
 pub mod accounts;
 pub mod api;
 pub mod auth_routes;
+pub mod events;
 pub mod extract;
 
 use std::sync::Arc;

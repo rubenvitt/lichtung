@@ -1,6 +1,6 @@
 [package]
 name = "lichtung-server"
-description = "Server von Lichtung: Login, Geräte- und API-Tokens, OAuth, Konten, Persistenz"
+description = "Server von Lichtung: Login, Geräte- und API-Tokens, OAuth, Konten, CalDAV-Sync, Persistenz"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -38,6 +38,8 @@ cookie = "0.18"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 ring = "0.17"
 lichtung-caldav = { path = "../lichtung-caldav" }
+lichtung-ical = { path = "../lichtung-ical" }
+chrono-tz = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true

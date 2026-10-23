@@ -16,6 +16,7 @@ xcuserdata/
 .env.*
 !.env.example
 /data/
+/server/data/
 
 # Brainstorming-Entwürfe
 .superpowers/

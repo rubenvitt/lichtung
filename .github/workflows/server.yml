@@ -1,0 +1,126 @@
+name: Server
+
+# lichtung-server (server/): fmt, clippy, tests, container image for amd64
+# and arm64 (arm64 cross-built without QEMU for Rust, see server/Dockerfile).
+# Pull requests only build the image; pushes to main publish it to GHCR and
+# create a GitHub deployment for the server's deploy-agent.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - ".github/workflows/server.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - ".github/workflows/server.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: server-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep in sync with RUST_VERSION in server/Dockerfile.
+  RUST_TOOLCHAIN: "1.97"
+  IMAGE: ghcr.io/rubenvitt/lichtung-server
+
+defaults:
+  run:
+    working-directory: server
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server -> target
+      - name: cargo fmt
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: cargo test
+        run: cargo test --workspace --locked
+
+  image:
+    name: Container-Image (GHCR, amd64 + arm64)
+    needs: [rust]
+    runs-on: ubuntu-24.04
+    # Runs on pull requests too (build only, so the Dockerfile and the arm64
+    # cross build are checked before merging). GHCR login, push and cache
+    # writes only happen when PUBLISH is true.
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v7
+      # QEMU is only needed for the small runtime stage of the foreign
+      # architecture; Rust is cross-built natively (see server/Dockerfile).
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            # The full SHA without prefix is the tag the server's deploy-agent rolls out.
+            type=sha,format=long,prefix=
+      - uses: docker/build-push-action@v7
+        with:
+          context: server
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha,scope=lichtung-server
+          # Only publishing runs write the cache, so pull requests reuse the
+          # main cache without evicting it.
+          cache-to: ${{ env.PUBLISH == 'true' && 'type=gha,mode=max,scope=lichtung-server' || '' }}
+
+  # The server fetches the deployment itself (pull, no runner with access to
+  # the host): ~/server/deploy-agent uses payload.tag as image tag and reports
+  # success/failure back. Same pattern as Zunder.
+  deploy:
+    name: Deployment anlegen (r-server)
+    needs: image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      deployments: write
+    steps:
+      - name: Deployment anlegen
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api "repos/${{ github.repository }}/deployments" --jq .id --input - <<JSON
+          {"ref": "${{ github.sha }}", "environment": "production", "auto_merge": false,
+           "required_contexts": [], "payload": {"tag": "${{ github.sha }}", "image": "${{ env.IMAGE }}"},
+           "description": "Image ${{ env.IMAGE }}:${{ github.sha }}"}
+          JSON
+          )
+          gh api "repos/${{ github.repository }}/deployments/$id/statuses" -f state=queued \
+            -f description="wartet auf den deploy-agent des Servers" > /dev/null
+          echo "Deployment $id angelegt"

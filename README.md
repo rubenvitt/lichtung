@@ -8,6 +8,16 @@ Eine Lichtung ist die freie Stelle im Wald: die Lücke im Kalender, die andere b
 
 Design-Phase. Die Spec steht unter [`docs/superpowers/specs/2026-10-23-lichtung-design.md`](docs/superpowers/specs/2026-10-23-lichtung-design.md). Noch kein Code.
 
+## Server
+
+`lichtung-server` (Rust, axum, SQLite) liegt unter [`server/`](server), ein eigener Cargo-Workspace. Login über Pocket-ID (OIDC), API-Tokens, Geräte-Login der Apps und OAuth für claude.ai; Container und Compose-Stack nach dem Vorbild von Zunder. Konfiguration, Inbetriebnahme und lokaler Start mit Dev-Auth: [`docs/betrieb.md`](docs/betrieb.md).
+
+```sh
+cd server
+cargo test --workspace
+LICHTUNG_DEV_AUTH=true cargo run -p lichtung-server
+```
+
 ## Lizenz
 
 Apache-2.0

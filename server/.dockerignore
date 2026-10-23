@@ -1,0 +1,13 @@
+# Allow-list: the image only needs the Rust workspace.
+*
+!Cargo.toml
+!Cargo.lock
+!crates/
+
+# Build output and local state, even inside allowed directories
+**/target/
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/.env
+**/.env.*

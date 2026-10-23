@@ -1,0 +1,41 @@
+# Lichtung auf r-server hinter Traefik, manuell betrieben mit docker compose.
+#
+# Auf dem Server liegt dieser Ordner als ~/server/lichtung/ (compose.yaml, .env, data/).
+# Öffentliche Domain (lichtung.rubeen.dev statt *.rubeen.home), weil claude.ai
+# den MCP-Endpunkt /mcp und Gäste die Buchungsseite von außen erreichen müssen.
+# Details: docs/betrieb.md.
+#
+# Geheimnisse stehen in .env neben dieser Datei (Vorlage .env.example, befüllen mit
+# ./generate-secrets.sh). Statische Werte stehen direkt hier.
+
+name: lichtung
+
+networks:
+  proxy:
+    external: true
+
+services:
+  lichtung:
+    image: ghcr.io/rubenvitt/lichtung-server:latest
+    container_name: lichtung
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - LICHTUNG_PUBLIC_URL=https://lichtung.rubeen.dev
+      - LICHTUNG_BIND=0.0.0.0:8080
+      - LICHTUNG_DATA_DIR=/data
+      - LICHTUNG_BACKUP_HOUR=3
+      - TZ=Europe/Berlin
+    volumes:
+      # Der Container läuft als uid/gid 10001: vorher `sudo chown 10001:10001 data`.
+      - ./data:/data
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.lichtung.entrypoints=https"
+      - "traefik.http.routers.lichtung.rule=Host(`lichtung.rubeen.dev`)"
+      - "traefik.http.routers.lichtung.tls.certresolver=letsencrypt"
+      # Bewusst ohne gzip- und buffering-Middleware: Lichtung komprimiert selbst,
+      # und Pufferung würde spätere Live-Updates (Server-Sent Events) brechen.
+      - "traefik.http.services.lichtung.loadbalancer.server.port=8080"

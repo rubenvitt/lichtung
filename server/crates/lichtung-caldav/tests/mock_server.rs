@@ -7,15 +7,23 @@ use lichtung_caldav::{Client, Credentials, Error, Precondition, Sharing, TimeRan
 use wiremock::matchers::{body_string_contains, header, header_exists, method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
-/// `Basic base64("anna@example.org:app-passwort")`.
-const AUTH: &str = "Basic YW5uYUBleGFtcGxlLm9yZzphcHAtcGFzc3dvcnQ=";
+const USER: &str = "anna@example.org";
+const PASSWORD: &str = "app-passwort";
+
+/// Expected `Authorization` header for the invented test credentials,
+/// built at runtime so no encoded credential sits in the source.
+fn auth() -> String {
+    use base64::Engine;
+    let token = base64::engine::general_purpose::STANDARD.encode(format!("{USER}:{PASSWORD}"));
+    format!("Basic {token}")
+}
 const XML: &str = "application/xml; charset=utf-8";
 const HOME: &str = "/dav/calendars/user/anna%40example.org/";
 const CAL: &str = "/dav/calendars/user/anna%40example.org/Privat/";
 
 fn client(server: &MockServer) -> Client {
     Client::builder(format!("{}/dav/", server.uri()))
-        .credentials(Credentials::basic("anna@example.org", "app-passwort"))
+        .credentials(Credentials::basic(USER, PASSWORD))
         .timeout(Duration::from_secs(5))
         .build()
         .unwrap()
@@ -52,7 +60,7 @@ fn ics(uid: &str, summary: &str) -> String {
 async fn mount_principal(server: &MockServer, home_href: &str) {
     Mock::given(method("PROPFIND"))
         .and(path("/dav/principals/user/anna@example.org/"))
-        .and(header("authorization", AUTH))
+        .and(header("authorization", auth().as_str()))
         .and(body_string_contains("calendar-home-set"))
         .respond_with(ms(
             207,
@@ -83,7 +91,7 @@ async fn discovery_follows_well_known_redirect() {
         .await;
     Mock::given(method("PROPFIND"))
         .and(path("/dav/"))
-        .and(header("authorization", AUTH))
+        .and(header("authorization", auth().as_str()))
         .and(header("depth", "0"))
         .and(header("user-agent", lichtung_caldav::USER_AGENT))
         .respond_with(ms(
@@ -169,7 +177,7 @@ async fn icloud_setup() -> (MockServer, MockServer) {
         .await;
     Mock::given(method("PROPFIND"))
         .and(path("/"))
-        .and(header("authorization", AUTH))
+        .and(header("authorization", auth().as_str()))
         .respond_with(ms(
             207,
             r#"<?xml version="1.0" encoding="UTF-8"?><multistatus xmlns="DAV:"><response><href>/</href><propstat><prop><current-user-principal><href>/123456789/principal/</href></current-user-principal></prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>"#,
@@ -183,7 +191,7 @@ async fn icloud_setup() -> (MockServer, MockServer) {
         .await;
     Mock::given(method("PROPFIND"))
         .and(path("/123456789/principal/"))
-        .and(header("authorization", AUTH))
+        .and(header("authorization", auth().as_str()))
         .respond_with(ms(
             207,
             format!(
@@ -200,7 +208,7 @@ async fn icloud_setup() -> (MockServer, MockServer) {
 async fn discovery_follows_redirect_to_other_host() {
     let (entry, partition) = icloud_setup().await;
     let c = Client::builder(format!("{}/", entry.uri()))
-        .credentials(Credentials::basic("anna@example.org", "app-passwort"))
+        .credentials(Credentials::basic(USER, PASSWORD))
         .trust_origin(&partition.uri())
         .build()
         .unwrap();
@@ -222,7 +230,7 @@ async fn credentials_are_not_forwarded_to_untrusted_plain_http_host() {
     let (entry, _partition) = icloud_setup().await;
     let c = Client::new(
         format!("{}/", entry.uri()),
-        Credentials::basic("anna@example.org", "app-passwort"),
+        Credentials::basic(USER, PASSWORD),
     )
     .unwrap();
     let err = c.discover().await.unwrap_err();
@@ -663,7 +671,7 @@ async fn put_new_with_if_none_match() {
         ))
         .and(header("if-none-match", "*"))
         .and(header("content-type", "text/calendar; charset=utf-8"))
-        .and(header("authorization", AUTH))
+        .and(header("authorization", auth().as_str()))
         .respond_with(
             ResponseTemplate::new(201)
                 .insert_header("ETag", "\"n1\"")

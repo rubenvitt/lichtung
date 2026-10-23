@@ -14,7 +14,15 @@ Lichtung ersetzt das Fantastical-Abo. Fantastical ist in Bedienung und Gestaltun
 
 1. **Im Alltag gut benutzbar**, auf Mac und iPhone, auch unterwegs.
 2. **Alle Kalender sind verbunden:** Fastmail, iCloud und der Arbeitskalender (Microsoft 365 / Exchange).
-3. **Modern und macht Spaß:** Die App fühlt sich so flüssig und durchdacht an wie Fantastical.
+3. **Modern und macht Spaß:** Die App fühlt sich so flüssig und durchdacht an wie Fantastical. Pflicht dafür (Nutzer: „alles“):
+   - im Raster per Ziehen anlegen, verschieben und in der Länge ändern
+   - Terminsuche
+   - Rückgängig
+   - Tastaturbedienung und Kontextmenüs auf dem Mac
+   - Termin duplizieren
+   - Videolinks in Terminen erkennen, Beitreten mit einem Klick
+   - Reisezeit
+   - mehrere Zeitzonen
 4. **Terminanfragen annehmen und ablehnen** geht direkt in der App, auf beiden Plattformen.
 5. **Die Planungs-Skills, die heute das Fantastical-MCP nutzen**, laufen gegen das MCP von Lichtung.
 
@@ -88,6 +96,7 @@ Lichtung ersetzt das Fantastical-Abo. Fantastical ist in Bedienung und Gestaltun
 - **Gespeichert wird das iCalendar-Original** (bzw. das Graph-Objekt) pro Termin, damit nichts verloren geht, was Lichtung nicht modelliert. Abgeleitet daraus: normalisierte Felder und expandierte Vorkommen für Abfragen.
 - **Serien:** RRULE, EXDATE, RDATE, überschriebene Vorkommen (RECURRENCE-ID), Zeitzonen inkl. Sommerzeit und ganztägige Termine müssen korrekt sein. Beim Bearbeiten: „nur dieser“, „dieser und folgende“, „alle“.
 - **Schreiben:** mit `If-Match`/ETag bzw. Graph-Änderungsschutz. **Konflikt:** Die Version des Anbieters gewinnt, die lokale Änderung wird dem Nutzer sichtbar gemeldet. Nichts verschwindet still.
+- **Geteilte Kalender** (in Fastmail oder iCloud freigegebene Kalender anderer) gehören dazu, so wie sie im Konto erscheinen, mit den Rechten, die die Freigabe hat (nur lesen oder auch schreiben) *(meine Setzung)*. Die Verfügbarkeit anderer Personen (Graph `getSchedule`) und delegierte Kalender sind kein Ziel.
 - **Zugangsdaten** liegen verschlüsselt in der Datenbank (Schlüssel aus dem Bootstrap).
 - **Vollständiger Spiegel:** Termine aller Konten liegen vollständig (mit Titeln und Teilnehmern) auf dem eigenen Server, auch die des Arbeitskontos. Das ist eine bewusste Entscheidung; MCP und Openings brauchen den vollständigen Stand.
 
@@ -121,13 +130,16 @@ Alle Ansichten kommen in die erste Version, **A und C sind die Hauptansichten** 
 
 - Die Apps halten einen lokalen Cache (Zeitraum *Builder*, z. B. −3 bis +12 Monate) und sind damit auch offline lesbar und schnell.
 - Offline angelegte oder geänderte Termine werden als ausstehende Änderungen gehalten und nachgesendet. Konflikte nach Abschnitt 4.
-- Live-Updates bei geöffneter App vom Server (z. B. SSE wie in Zunder); Hintergrund-Aktualisierung/Push *(Builder)*.
+- Live-Updates bei geöffneter App vom Server (z. B. SSE wie in Zunder).
+- **Erinnerungen müssen auch für Termine zuverlässig kommen, die die App nie gesehen hat** (z. B. morgens per MCP angelegte Zeitblöcke). Dafür schickt der Server stille Push-Nachrichten über APNs, die App aktualisiert daraufhin Cache und lokale Benachrichtigungen *(meine Setzung; ein bezahlter Apple-Developer-Account ist vorhanden, Verteilung über TestFlight bzw. direkte Installation)*.
 
 ## 6. Openings (Buchungslinks)
 
 Beide Arten gibt es, beide sind bestätigt:
 
 - **Einmal-Link:** In der App Dauer und Zielkalender wählen, optional konkrete Vorschläge markieren, Link kopieren. Nach einer Buchung ist der Link verbraucht.
+- **Markierte Vorschläge blockieren die Zeit** (Nutzer): Der Server legt für jeden Vorschlag einen Platzhalter-Termin ohne Teilnehmer im Zielkalender an. Platzhalter zählen überall als belegt (andere Openings, `find_free_times`), nur nicht für ihren eigenen Link. Bei der Buchung werden die übrigen Platzhalter des Links entfernt, beim Löschen des Links alle.
+- **Links laufen nicht ab** (Nutzer). Vorschläge, deren Zeit vorbei ist, fallen weg, ihre Platzhalter werden entfernt *(meine Setzung)*. Die App zeigt offene Einmal-Links als Liste zum Löschen.
 - **Fester Link (Vorlage):** z. B. „30 Minuten Kennenlernen“ mit Zeitfenstern (z. B. werktags 9–17 Uhr), Puffer vor/nach Terminen, Mindestvorlauf (z. B. 4 h), Buchungshorizont (z. B. 3 Wochen), optional festem Videolink.
 - **Zielkalender** ist pro Link/Vorlage wählbar, aber nur unter Kalendern, die Einladungen verschicken können (Fastmail sofort, Arbeitskalender nach der Graph-Freigabe, iCloud nach Spike S2).
 - **Frei** heißt: kein Termin in einem einbezogenen Kalender. Pro Kalender einstellbar, ob er für Openings zählt; ganztägige Termine blockieren nur, wenn das für den Kalender eingestellt ist. Abgesagte Termine und als „frei“ markierte (TRANSP/showAs free) blockieren nicht.
@@ -137,7 +149,7 @@ Beide Arten gibt es, beide sind bestätigt:
 
 ## 7. MCP
 
-Unter `/mcp`, Zugang über API-Tokens, die in der App erzeugt und einzeln widerrufen werden.
+Unter `/mcp`, Zugang wie bei Zunder: OAuth für Claude.ai und API-Tokens, die in der App erzeugt und einzeln widerrufen werden.
 
 Mindestumfang (Parität zu dem, was die Planungs-Skills heute bei Fantastical nutzen):
 
@@ -150,7 +162,7 @@ Mindestumfang (Parität zu dem, was die Planungs-Skills heute bei Fantastical nu
 | `list_invitations`, `respond_to_invitation` | offene Anfragen, annehmen / vielleicht / ablehnen |
 | `create_opening_link` | Einmal-Link erzeugen |
 
-- **Schreibschutz pro Kalender für MCP:** In der App wird pro Kalender festgelegt, ob Claude dort schreiben darf. **Standard für den Arbeitskalender: nein.** Hintergrund: Fantastical schreibt ohne Kalender-ID still in seinen Default-Kalender; ein Fehlgriff darf hier nicht im Arbeitskalender landen.
+- **Schreibschutz pro Kalender für MCP:** In der App wird pro Kalender festgelegt, ob Claude dort schreiben darf. **Standard für den Arbeitskalender: nein.** Der Schreibschutz sperrt auch `respond_to_invitation` für diesen Kalender *(meine Setzung)*. Hintergrund: Fantastical schreibt ohne Kalender-ID still in seinen Default-Kalender; ein Fehlgriff darf hier nicht im Arbeitskalender landen.
 - Zeiten immer mit Zeitzone; Zeiträume als ISO-Datum. Fehlermeldungen sagen, was falsch war und wie es richtig geht.
 
 ## 8. Login und Betrieb
@@ -164,7 +176,7 @@ Mindestumfang (Parität zu dem, was die Planungs-Skills heute bei Fantastical nu
 
 | Etappe | Inhalt | Ergebnis |
 |---|---|---|
-| **S Spikes** | S1: Graph-Zugang zum Arbeitskalender (Freigabe nötig? delta, accept/decline). S2: Fastmail und iCloud per CalDAV: Teilnehmer anlegen → wird eingeladen? PARTSTAT setzen → geht Antwort raus? S3: ICS-Feed des Arbeitskalenders lesbar | Weg pro Anbieter bestätigt, Graph-Freigabe ggf. beantragt |
+| **S Spikes** | **S1 ist das Tor vor allem anderen:** Graph-Zugang zum Arbeitskalender (Freigabe nötig? delta, accept/decline). S2: Fastmail und iCloud per CalDAV: Teilnehmer anlegen → wird eingeladen? PARTSTAT setzen → geht Antwort raus? S3: ICS-Feed des Arbeitskalenders lesbar | Weg pro Anbieter bestätigt, Graph-Freigabe ggf. beantragt |
 | **E1 Server-Kern** | Konten, Sync Fastmail/iCloud/ICS, Serien, Sync-API, MCP (lesen + schreiben mit Schreibschutz) | Planungs-Skills können vom Fantastical-MCP umziehen |
 | **E2 Apps** | iPhone A/B/D, Mac C/B/D/Jahr, Termin-Editor, Satz-Parser, Sets, Cache, Erinnerungen | tägliche Nutzung möglich |
 | **E3 Einladungen + Openings** | Teilnehmer, Anfragen beantworten, Einmal-Links, Vorlagen, Buchungsseite | Openings ersetzen Fantastical |
@@ -184,7 +196,7 @@ Mindestumfang (Parität zu dem, was die Planungs-Skills heute bei Fantastical nu
 
 ## 11. Risiken
 
-- **Graph-Freigabe beim Arbeitgeber** wird abgelehnt oder dauert: Dann bleibt der Arbeitskalender lesend über ICS, und Kündigungskriterium 4 ist für Arbeitsanfragen nicht erfüllbar. Früh beantragen (Spike S1).
+- **Graph-Freigabe beim Arbeitgeber** wird abgelehnt oder dauert: Dann bleibt der Arbeitskalender lesend über ICS, und die Kriterien 2 und 4 sind nicht erfüllbar. Deshalb ist S1 das Tor vor allem anderen. Bei Ablehnung entscheidet der Nutzer zwischen Stopp (Tendenz) und Weiterbau mit „Arbeitsanfragen bleiben in Outlook“ als angepasstem Kriterium. Der Nutzer erwartet, die Freigabe zu bekommen.
 - **Sync-Korrektheit** (Serien, Zeitzonen, Ausnahmen, Konflikte) ist der teuerste Teil. Gegenmittel: iCalendar-Original speichern, Tabellentests, Anbieter gewinnt bei Konflikt.
 - **CalDAV-Scheduling** verhält sich bei Fastmail oder iCloud anders als erwartet (Spike S2). Fallback, falls nötig: Einladung als iMIP-Mail vom Server *(nur wenn S2 scheitert)*.
 - **Doppelte Benachrichtigungen,** wenn dieselben Konten parallel im System-Kalender von iOS/macOS eingerichtet bleiben. Lösung beim Umstieg: dort Benachrichtigungen ausschalten oder Konten entfernen.

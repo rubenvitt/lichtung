@@ -206,7 +206,7 @@ async fn update_all_keeps_unknown_properties() {
         data.contains("DTSTART;TZID=Europe/Berlin:20261103T150000"),
         "{data}"
     );
-    assert!(!data.contains("LOCATION"));
+    assert!(!data.contains("\r\nLOCATION"), "{data}");
 
     // Unknown properties of the original survive an edit.
     let sitzung = t.event_by_uid("sitzung@example.org").await;
@@ -654,4 +654,60 @@ async fn moving_reports_a_failed_deletion_as_conflict() {
     assert_eq!(events.len(), 2, "both copies: {r}");
     assert!(t.dav.find_uid(WORK, "zahnarzt@example.org").is_some());
     assert!(t.dav.find_uid(CALENDAR, "zahnarzt@example.org").is_some());
+}
+
+/// Every PUT carries a `VTIMEZONE` for the TZIDs it uses (LIC-44): created
+/// objects and edited ones whose original had none; all-day events need none.
+#[tokio::test]
+async fn written_objects_carry_their_vtimezones() {
+    let (t, single, _) = synced().await;
+    let r = t
+        .mutate(json!({
+            "id": "m-tz", "op": "create_event", "calendar_id": t.calendar_id,
+            "event": {
+                "title": "Telefonat mit New York", "uid": "telefonat@example.org",
+                "start": zoned("2026-11-05T16:00:00"),
+                "end": {"date_time": "2026-11-05T11:00:00", "time_zone": "America/New_York"}
+            }
+        }))
+        .await;
+    assert_eq!(r["status"], "applied", "{r}");
+    let (_, _, data) = t.dav.find_uid(CALENDAR, "telefonat@example.org").unwrap();
+    let data = unfold(&data);
+    let vevent = data.find("BEGIN:VEVENT").unwrap();
+    for tzid in ["Europe/Berlin", "America/New_York"] {
+        let at = data.find(&format!("BEGIN:VTIMEZONE\r\nTZID:{tzid}\r\n"));
+        assert!(at.is_some_and(|i| i < vevent), "{tzid}: {data}");
+    }
+    assert!(
+        data.contains("RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU"),
+        "{data}"
+    );
+    assert_eq!(data.matches("BEGIN:VTIMEZONE").count(), 2, "{data}");
+    // Stored as sent: the next sync changes nothing.
+    let report = t.sync().await;
+    assert_eq!(report.events.updated, 0, "{report:?}");
+
+    // An edit of an original without VTIMEZONE adds it, once.
+    let r = t
+        .mutate(
+            json!({"id": "m-tz2", "op": "update_event", "event_id": single,
+                       "base_version": 1, "changes": {"notes": "Bonusheft"}}),
+        )
+        .await;
+    assert_eq!(r["status"], "applied", "{r}");
+    let (_, _, data) = t.dav.find_uid(CALENDAR, "zahnarzt@example.org").unwrap();
+    assert_eq!(data.matches("BEGIN:VTIMEZONE").count(), 1, "{data}");
+    assert!(data.contains("TZID:Europe/Berlin\r\nX-LIC-LOCATION:Europe/Berlin\r\n"));
+
+    let r = t
+        .mutate(json!({
+            "id": "m-tz3", "op": "create_event", "calendar_id": t.calendar_id,
+            "event": {"title": "Ganztägig", "uid": "ganztag@example.org",
+                      "start": {"date": "2026-11-06"}, "end": {"date": "2026-11-07"}}
+        }))
+        .await;
+    assert_eq!(r["status"], "applied", "{r}");
+    let (_, _, data) = t.dav.find_uid(CALENDAR, "ganztag@example.org").unwrap();
+    assert!(!data.contains("VTIMEZONE"), "{data}");
 }

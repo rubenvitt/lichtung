@@ -285,6 +285,7 @@ async fn fastmail_account_is_created_with_its_event_calendars() {
             "provider_color": "#3A7BD5",
             "writable": true,
             "can_invite": true,
+            "shared": false,
             "hidden": false,
             "mcp_write": true,
             "openings_busy": true,

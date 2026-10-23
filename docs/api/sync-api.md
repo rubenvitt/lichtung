@@ -99,6 +99,7 @@ Die Apps melden sich wie die Zunder-App über den eingebauten OAuth-Server an (A
 - Einstellungen (in der App änderbar, Abschnitt 7): `color` (überschreibt `provider_color`), `hidden`, `mcp_write` (darf Claude hier schreiben; Standard `false` für den Arbeitskalender), `openings_busy` (zählt für freie Zeiten), `all_day_blocks` (ganztägige Termine blockieren), `position`.
 - *Ergänzung (LIC-7):* `color` ist immer gesetzt: die eigene Farbe, sonst `provider_color`, sonst eine feste Ersatzfarbe. `provider_color` ist `null`, wenn der Anbieter keine Farbe meldet. Farben haben die Form `#RRGGBB` (Großbuchstaben).
 - *Ergänzung (LIC-7):* Standardwerte beim Anlegen: `mcp_write` = `writable` (bei `microsoft` später `false`), `openings_busy` `true`, `all_day_blocks` `false`, `hidden` `false`; `position` hängt neue Kalender hinten an (innerhalb eines Kontos in der Reihenfolge des Anbieters). Sammlungen, die nur Aufgaben (VTODO) halten, werden nicht als Kalender übernommen.
+- *Ergänzung (LIC-13):* Neues Feld `shared` (bool): `true` für Kalender anderer, die mit dem Konto geteilt sind (z. B. iCloud-Freigaben). Jede Freigabe ist ein eigener Kalender. Eigene Kalender, die man selbst mit anderen teilt, haben `shared: false`. Bei `writable: false` ist `mcp_write` immer `false`: `PATCH` mit `mcp_write: true` lässt den Wert auf `false`, und wird eine Freigabe beim Anbieter nur lesbar, setzt der nächste Abgleich `mcp_write` auf `false`.
 
 ### CalendarSet
 
@@ -434,3 +435,4 @@ Zusätzliche `code`s in Mutations-Ergebnissen (`rejected`/`retry`): `calendar_re
 | 2026-10-23 | Version 1 (Entwurf) |
 | 2026-10-23 | Ergänzungen aus LIC-7 (keine bestehende Form geändert): `kind: caldav` mit `url`; `color` immer gesetzt, Standardwerte neuer Kalender, VTODO-Sammlungen ausgelassen; `GET /api/calendars`, `GET /api/calendar-sets`; Statuscodes und Rechte der Konten-, Kalender- und Set-Aufrufe (Abschnitt 7) |
 | 2026-10-23 | Ergänzungen aus LIC-8 (keine bestehende Form geändert): Sync-Rhythmus und Status der Konten; `DateValue` mit `time_zone: null` und `utc` (nicht übersetzbare Zone), `time_zone: "UTC"`; `rrule: null`, Objekte ohne Master; Form nicht lesbarer Termine mit `parse_error`; Form von `GET /api/occurrences` mit `time_zone` und `include_cancelled` (Abschnitt 7) |
+| 2026-10-23 | Ergänzungen aus LIC-13 (keine bestehende Form geändert): Feld `shared` am Kalender; `mcp_write` ist bei nur lesbaren Kalendern immer `false` |

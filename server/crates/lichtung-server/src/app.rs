@@ -7,9 +7,10 @@
 //!   `spawn_blocking` while holding it, so no two writes interleave.
 //! - One reader connection (WAL allows reading while writing) for lookups.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use anyhow::Context;
 use rusqlite::{Connection, Transaction};
@@ -92,6 +93,8 @@ struct Inner {
     syncing: Mutex<HashSet<String>>,
     /// Wakes the sync scheduler (new account, new credentials).
     sync_wakeup: tokio::sync::Notify,
+    /// `Retry-After` of the last throttled sync run per account (LIC-13).
+    sync_retry_after: Mutex<HashMap<String, Duration>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -159,6 +162,7 @@ impl App {
                 changes: watch::channel(cursor).0,
                 syncing: Mutex::new(HashSet::new()),
                 sync_wakeup: tokio::sync::Notify::new(),
+                sync_retry_after: Mutex::new(HashMap::new()),
                 config,
             }),
         })
@@ -251,6 +255,17 @@ impl App {
 
     pub(crate) fn end_sync(&self, account_id: &str) {
         lock(&self.inner.syncing).remove(account_id);
+    }
+
+    /// Remembers the provider's `Retry-After` for the next scheduling of
+    /// `account_id`.
+    pub(crate) fn note_sync_retry_after(&self, account_id: &str, wait: Duration) {
+        lock(&self.inner.sync_retry_after).insert(account_id.to_owned(), wait);
+    }
+
+    /// Takes the remembered `Retry-After` of `account_id`, if any.
+    pub(crate) fn take_sync_retry_after(&self, account_id: &str) -> Option<Duration> {
+        lock(&self.inner.sync_retry_after).remove(account_id)
     }
 
     pub(crate) fn is_syncing(&self, account_id: &str) -> bool {

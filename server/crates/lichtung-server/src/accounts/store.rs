@@ -378,6 +378,8 @@ pub fn apply_remote(row: &mut CalendarRow, remote: &RemoteCalendar) -> bool {
     row.writable = remote.writable;
     row.can_invite = remote.can_invite;
     row.shared = remote.shared;
+    // A share that became read-only takes Claude's write permission along.
+    row.mcp_write &= row.writable;
     *row != before
 }
 

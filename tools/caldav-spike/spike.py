@@ -43,33 +43,94 @@ for prefix, uri in NS.items():
     ET.register_namespace(prefix, uri)
 
 
+MAX_REDIRECTS = 10
+
+AUTH_HINTS = {
+    "fastmail": "Fastmail braucht ein App-Passwort (Einstellungen → Privatsphäre & Sicherheit → "
+                "App-Passwörter, Zugriff „Kalender (CalDAV)“), nicht das normale Passwort.",
+    "icloud": "iCloud braucht ein App-spezifisches Passwort (appleid.apple.com → Anmelden und "
+              "Sicherheit → App-spezifische Passwörter), nicht das Passwort der Apple-ID.",
+}
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Hands every redirect back to the caller (as HTTPError).
+
+    urllib follows redirects only for GET/HEAD (PROPFIND/REPORT get a 301
+    back) and turns the method into GET; Client.request follows them itself.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def credentials_allowed(url: str, base: str) -> bool:
+    """Sends credentials to the base URL's origin and, over HTTPS only, to
+    iCloud hosts (``caldav.icloud.com`` redirects to ``pNN-caldav.icloud.com``)."""
+    u, b = urllib.parse.urlsplit(url), urllib.parse.urlsplit(base)
+
+    def origin(x):
+        return (x.scheme, (x.hostname or "").lower(), x.port or (443 if x.scheme == "https" else 80))
+
+    if origin(u) == origin(b):
+        return True
+    host = (u.hostname or "").lower()
+    return u.scheme == "https" and (host == "icloud.com" or host.endswith(".icloud.com"))
+
+
 class Client:
-    def __init__(self, base: str, user: str, password: str, verbose: bool) -> None:
+    def __init__(self, base: str, user: str, password: str, verbose: bool, provider: str = "") -> None:
         self.base = base
         self.verbose = verbose
+        self.provider = provider
         token = base64.b64encode(f"{user}:{password}".encode()).decode()
         self.auth = f"Basic {token}"
+        # URL that answered the last request (after redirects); relative
+        # hrefs in its body are resolved against it.
+        self.last_url = base
 
     def request(self, method: str, url: str, body: str | None = None,
                 headers: dict[str, str] | None = None) -> tuple[int, dict[str, str], str]:
         url = urllib.parse.urljoin(self.base, url)
         data = body.encode() if body is not None else None
-        req = urllib.request.Request(url, data=data, method=method)
-        req.add_header("Authorization", self.auth)
-        req.add_header("User-Agent", "lichtung-spike/0.1")
-        for k, v in (headers or {}).items():
-            req.add_header(k, v)
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                status, hdrs, text = resp.status, dict(resp.headers), resp.read().decode("utf-8", "replace")
-        except urllib.error.HTTPError as e:
-            status, hdrs, text = e.code, dict(e.headers), e.read().decode("utf-8", "replace")
-        if self.verbose:
-            print(f"--- {method} {url} -> {status}", file=sys.stderr)
-            print(text[:4000], file=sys.stderr)
+        for _ in range(MAX_REDIRECTS + 1):
+            req = urllib.request.Request(url, data=data, method=method)
+            if credentials_allowed(url, self.base):
+                req.add_header("Authorization", self.auth)
+            req.add_header("User-Agent", "lichtung-spike/0.1")
+            for k, v in (headers or {}).items():
+                req.add_header(k, v)
+            try:
+                with _OPENER.open(req, timeout=30) as resp:
+                    status, hdrs, text = resp.status, dict(resp.headers), resp.read().decode("utf-8", "replace")
+            except urllib.error.HTTPError as e:
+                status, hdrs, text = e.code, dict(e.headers), e.read().decode("utf-8", "replace")
+            if self.verbose:
+                print(f"--- {method} {url} -> {status}", file=sys.stderr)
+                print(text[:4000], file=sys.stderr)
+            location = hdrs.get("Location") or hdrs.get("location")
+            if status in (301, 302, 303, 307, 308) and location:
+                url = urllib.parse.urljoin(url, location)
+                if not url.startswith(("https://", "http://")):
+                    sys.exit(f"Weiterleitung auf {url} nicht unterstützt")
+                if status == 303:
+                    method, data = "GET", None
+                continue
+            break
+        else:
+            sys.exit("Zu viele Weiterleitungen")
+        self.last_url = url
         if status == 401:
-            sys.exit("Anmeldung abgelehnt (401). Benutzername oder App-Passwort prüfen.")
+            hint = AUTH_HINTS.get(self.provider, "Benutzername oder App-Passwort prüfen.")
+            sys.exit(f"Anmeldung abgelehnt (401). {hint}")
         return status, hdrs, text
+
+    def absolute(self, href: str) -> str:
+        """An href from the last response as an absolute URL."""
+        return urllib.parse.urljoin(self.last_url, href.strip())
 
     def propfind(self, url: str, props: str, depth: str = "0") -> ET.Element:
         body = (f'<?xml version="1.0" encoding="utf-8"?>'
@@ -92,27 +153,45 @@ def href_of(el: ET.Element, path: str) -> str | None:
 
 
 def discover(client: Client) -> dict:
-    root = client.propfind("", "<d:current-user-principal/>")
+    # Follows /.well-known/caldav (iCloud: 301) like Lichtung, else the base.
+    status, _, _ = client.request("PROPFIND", "/.well-known/caldav",
+                                  '<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:">'
+                                  '<d:prop><d:current-user-principal/></d:prop></d:propfind>',
+                                  {"Depth": "0", "Content-Type": "application/xml; charset=utf-8"})
+    start = client.last_url if status == 207 else ""
+    root = client.propfind(start, "<d:current-user-principal/>")
     principal = href_of(root, ".//d:current-user-principal")
     if not principal:
         sys.exit("current-user-principal nicht gefunden")
+    principal = client.absolute(principal)
     root = client.propfind(principal, "<c:calendar-home-set/><c:schedule-inbox-URL/>"
                                       "<c:schedule-outbox-URL/><c:calendar-user-address-set/>"
                                       "<d:displayname/>")
-    home = href_of(root, ".//c:calendar-home-set")
-    addresses = [h.text.strip() for h in root.findall(".//c:calendar-user-address-set/d:href", NS) if h.text]
+
+    def absolute(href: str | None) -> str | None:
+        return client.absolute(href) if href else None
+
+    # iCloud: the calendar home lives on a partition host,
+    # e.g. https://p42-caldav.icloud.com:443/<dsid>/calendars/.
+    home = absolute(href_of(root, ".//c:calendar-home-set"))
+    preferred = [h.text.strip() for h in root.findall(".//c:calendar-user-address-set/d:href", NS)
+                 if h.text and h.get("preferred") == "1"]
+    addresses = preferred + [h.text.strip() for h in root.findall(".//c:calendar-user-address-set/d:href", NS)
+                             if h.text and h.text.strip() not in preferred]
     info = {
         "principal": principal,
         "home": home,
-        "inbox": href_of(root, ".//c:schedule-inbox-URL"),
-        "outbox": href_of(root, ".//c:schedule-outbox-URL"),
+        "inbox": absolute(href_of(root, ".//c:schedule-inbox-URL")),
+        "outbox": absolute(href_of(root, ".//c:schedule-outbox-URL")),
         "addresses": addresses,
     }
-    status, headers, _ = client.request("OPTIONS", home or principal)
+    if not home:
+        sys.exit("calendar-home-set nicht gefunden")
+    status, headers, _ = client.request("OPTIONS", home)
     info["dav_header"] = headers.get("DAV") or headers.get("Dav") or ""
     root = client.propfind(home, "<d:displayname/><d:resourcetype/><c:supported-calendar-component-set/>"
                                  "<d:current-user-privilege-set/><d:sync-token/><cs:getctag/>"
-                                 "<c:schedule-calendar-transp/><a:calendar-color/>", depth="1")
+                                 "<c:schedule-calendar-transp/><a:calendar-color/><cs:invite/>", depth="1")
     calendars = []
     for resp in root.findall("d:response", NS):
         if resp.find(".//d:resourcetype/c:calendar", NS) is None:
@@ -120,9 +199,16 @@ def discover(client: Client) -> dict:
         name = resp.find(".//d:displayname", NS)
         comps = [c.get("name") for c in resp.findall(".//c:supported-calendar-component-set/c:comp", NS)]
         privs = [p[0].tag.split("}")[1] for p in resp.findall(".//d:current-user-privilege-set/d:privilege", NS) if len(p)]
-        shared = resp.find(".//d:resourcetype/cs:shared", NS) is not None
+        if resp.find(".//d:resourcetype/cs:shared", NS) is not None:
+            shared = "geteilt mit mir"
+        elif resp.find(".//d:resourcetype/cs:shared-owner", NS) is not None:
+            shared = "von mir geteilt"
+        elif resp.find(".//cs:invite/cs:organizer", NS) is not None:
+            shared = "geteilt (invite)"
+        else:
+            shared = ""
         calendars.append({
-            "href": resp.find("d:href", NS).text.strip(),
+            "href": client.absolute(resp.find("d:href", NS).text),
             "name": name.text if name is not None else "",
             "components": comps,
             "writable": any(p in ("write", "write-content", "all") for p in privs),
@@ -134,6 +220,7 @@ def discover(client: Client) -> dict:
 
 
 def own_address(info: dict) -> str:
+    # The preferred address (iCloud marks it with preferred="1") comes first.
     for a in info["addresses"]:
         if a.lower().startswith("mailto:"):
             return a
@@ -151,7 +238,7 @@ def ics_event(uid: str, organizer: str, attendee: str, start: dt.datetime) -> st
         f"DTSTART;TZID=Europe/Berlin:{start.strftime(fmt)}",
         f"DTEND;TZID=Europe/Berlin:{end.strftime(fmt)}",
         "SUMMARY:Lichtung-Spike: Testeinladung",
-        "DESCRIPTION:Automatischer Test von Lichtung (LIC-6). Kann gelöscht werden.",
+        "DESCRIPTION:Automatischer Test von Lichtung (LIC-6, LIC-13). Kann gelöscht werden.",
         f"ORGANIZER:{organizer}",
         f"ATTENDEE;ROLE=CHAIR;PARTSTAT=ACCEPTED:{organizer}",
         f"ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:{attendee}",
@@ -196,7 +283,7 @@ def cmd_discover(client: Client, args) -> None:
         flags = []
         flags.append("schreibbar" if c["writable"] else "nur lesen")
         if c["shared"]:
-            flags.append("geteilt")
+            flags.append(c["shared"])
         if c["sync_token"]:
             flags.append("sync-token")
         print(f"  {c['name']!r:30} {','.join(c['components']):15} {' '.join(flags):35} {c['href']}")
@@ -261,7 +348,7 @@ def cmd_requests(client: Client, args) -> None:
                 if value.lower() in me and "PARTSTAT=NEEDS-ACTION" in params.upper():
                     summary = next((split_prop(l)[1] for l in lines if l.startswith("SUMMARY")), "")
                     start = next((l for l in lines if l.startswith("DTSTART")), "")
-                    print(f"{summary!r}  {start}\n  {resp.find('d:href', NS).text.strip()}")
+                    print(f"{summary!r}  {start}\n  {client.absolute(resp.find('d:href', NS).text)}")
                     found += 1
                     break
     print(f"\n{found} offene Anfrage(n) in den nächsten {args.days} Tagen.")
@@ -332,7 +419,7 @@ def main() -> None:
 
     user = os.environ.get("LICHTUNG_SPIKE_USER") or input("Benutzername: ")
     password = os.environ.get("LICHTUNG_SPIKE_PASSWORD") or getpass.getpass("App-Passwort: ")
-    client = Client(args.base_url or PROVIDERS[args.provider], user, password, args.verbose)
+    client = Client(args.base_url or PROVIDERS[args.provider], user, password, args.verbose, args.provider)
     {"discover": cmd_discover, "invite": cmd_invite, "requests": cmd_requests,
      "respond": cmd_respond, "delete": cmd_delete}[args.cmd](client, args)
 

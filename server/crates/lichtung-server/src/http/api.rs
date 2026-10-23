@@ -8,6 +8,7 @@
 //! | `GET /api/oauth/clients`, `DELETE /api/oauth/clients/{id}` | browser session or device |
 //! | accounts, calendars, calendar sets | see [`super::accounts`] |
 //! | `GET /api/occurrences` | see [`super::events`] |
+//! | sync API (pull, push, SSE), conflicts | see [`super::sync`] |
 //!
 //! Credentials are managed by a browser session or a device of the app
 //! ([`Principal::may_manage_credentials`]); API, bootstrap and OAuth tokens
@@ -41,6 +42,7 @@ pub fn routes() -> Router<App> {
         .route("/oauth/clients/{id}", delete(revoke_oauth_client))
         .merge(super::accounts::routes())
         .merge(super::events::routes())
+        .merge(super::sync::routes())
         .layer(DefaultBodyLimit::max(API_BODY_LIMIT))
 }
 

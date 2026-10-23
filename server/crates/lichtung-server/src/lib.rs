@@ -1,6 +1,6 @@
 //! Lichtung server: login, API and device tokens, OAuth for `/mcp` and the
 //! apps, calendar accounts, CalDAV event sync, persistence. The sync API
-//! (pull, push, SSE) and MCP tools build on this (later tasks).
+//! (pull, push, SSE) serves the apps; MCP tools build on this (LIC-12).
 //!
 //! - [`config`]: configuration from environment variables (bootstrap only)
 //! - [`db`]: SQLite schema, migrations and queries
@@ -8,6 +8,7 @@
 //! - [`accounts`]: calendar accounts, calendars, calendar sets
 //! - [`events`]: stored events (iCalendar original), event JSON, occurrences
 //! - [`sync`]: CalDAV sync engine and its scheduler
+//! - [`sync_api`]: sync API for the apps (pull, push, cleanup)
 //! - [`crypto`]: encryption of provider credentials (AES-256-GCM)
 //! - [`writes`]: writing events to the provider (create, update, delete,
 //!   respond) with conflict detection
@@ -34,6 +35,7 @@ pub mod healthcheck;
 pub mod http;
 pub mod oauth;
 pub mod sync;
+pub mod sync_api;
 pub mod writes;
 
 use std::future::IntoFuture;

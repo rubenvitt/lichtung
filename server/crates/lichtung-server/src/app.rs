@@ -554,12 +554,13 @@ impl App {
 
     /// Writes a backup (`VACUUM INTO`) to `<data>/backups/lichtung-<local
     /// timestamp>.db` and keeps the newest [`BACKUPS_TO_KEEP`]. Also removes
-    /// expired sessions and stale OAuth rows, whether or not the backup
-    /// succeeds.
+    /// expired sessions, stale OAuth rows and old sync history (tombstones
+    /// after 90 days, mutation results after 30, see [`crate::sync_api`]),
+    /// whether or not the backup succeeds.
     pub async fn backup_now(&self) -> AppResult<PathBuf> {
         self.blocking(|inner| {
-            let purged = (|| -> AppResult<(usize, usize)> {
-                let conn = lock(&inner.writer);
+            let purged = (|| -> AppResult<(usize, usize, crate::sync_api::Purged)> {
+                let mut conn = lock(&inner.writer);
                 let now = now_ms();
                 Ok((
                     db::purge_expired_sessions(&conn, now)?,
@@ -569,13 +570,16 @@ impl App {
                         now - crate::oauth::STALE_CLIENT_MS,
                         now - crate::oauth::UNUSED_CLIENT_MS,
                     )?,
+                    crate::sync_api::purge(&mut conn, now)?,
                 ))
             })();
             match &purged {
-                Ok((sessions, clients)) => tracing::info!(
+                Ok((sessions, clients, history)) => tracing::info!(
                     purged_sessions = sessions,
                     purged_oauth_clients = clients,
-                    "expired sessions and OAuth rows removed"
+                    purged_tombstones = history.tombstones,
+                    purged_mutation_results = history.results,
+                    "expired sessions, OAuth rows and old sync history removed"
                 ),
                 Err(e) => tracing::error!(error = %e, "removing expired sessions failed"),
             }

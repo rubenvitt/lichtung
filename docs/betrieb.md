@@ -128,6 +128,20 @@ Fehler kommen als `{"error":{"code":"…","message":"…"}}` mit deutscher Meldu
 - **Status:** `syncing` während des Laufs, danach `ok`. Vorübergehende Fehler setzen `error` mit Meldung; der nächste Versuch kommt nach 1, 2, 4 … höchstens 60 Minuten. Bei `auth_failed` (Anbieter lehnt das App-Passwort ab) versucht es der Server erst wieder, wenn in der App neue Zugangsdaten gespeichert sind.
 - **Zeitzone des Servers:** Floating-Zeiten und ganztägige Termine rechnet der Server in `TZ` (Image: `Europe/Berlin`), falls dort eine IANA-Zone steht, sonst in UTC.
 
+## Schreiben und Konflikte
+
+- **Schreiben:** Änderungen aus den Apps (und später über MCP) schreibt der Server sofort zum Anbieter: neue Termine mit `If-None-Match: *`, Änderungen und Löschungen mit `If-Match` auf dem gespeicherten ETag. Ausgangspunkt ist immer das gespeicherte iCalendar-Original, Felder, die Lichtung nicht kennt, bleiben erhalten. Ein Schreibvorgang und der Abgleich desselben Kalenders laufen nie gleichzeitig.
+- **Konflikt (der Anbieter gewinnt):** Hat sich der Termin seit dem Stand der App geändert (andere `version`, oder der Anbieter antwortet 412 bzw. 404), holt der Server den Termin sofort neu, verwirft die Änderung und legt einen Konflikt an. Die App zeigt ihn mit der verworfenen Änderung, bis jemand ihn wegklickt (`POST /api/conflicts/{id}/dismiss`). Nichts verschwindet still; im Log steht `write conflict, provider wins`.
+- **Rechte:** Nur lesbare Kalender (geteilt ohne Schreibrecht, ICS-Abos) lehnen Änderungen ab. `mcp_write` gilt nur für Claude (`/mcp`).
+- **Anbieter nicht erreichbar:** Die App behält die Änderung und schickt sie später erneut. Lehnt der Anbieter das App-Passwort ab, steht das Konto auf `auth_failed`.
+
+## Aufbewahrung
+
+- **Löschungen** (Tombstones für den Pull der Apps) bleiben 90 Tage. Eine App, die länger nicht synchronisiert hat, bekommt `410 cursor_expired` und lädt ihren Cache neu; ausstehende Änderungen behält sie.
+- **Ergebnisse von Mutationen** (für die Idempotenz) bleiben 30 Tage.
+- **Konflikte** bleiben, bis sie weggeklickt werden.
+- Aufgeräumt wird nachts zusammen mit dem Backup.
+
 ## Backups
 
-Jede Nacht zur `LICHTUNG_BACKUP_HOUR` schreibt der Server `/data/backups/lichtung-<Datum>-<Zeit>.db` (konsistent per `VACUUM INTO`) und behält die letzten 14. Dabei räumt er abgelaufene Sitzungen und OAuth-Reste auf. Wiederherstellen: Container stoppen, Backup als `data/lichtung.db` ablegen (`-wal`/`-shm` entfernen), starten. Die Backups enthalten die verschlüsselten Zugangsdaten; lesbar sind sie nur mit dem passenden `LICHTUNG_SECRET_KEY`.
+Jede Nacht zur `LICHTUNG_BACKUP_HOUR` schreibt der Server `/data/backups/lichtung-<Datum>-<Zeit>.db` (konsistent per `VACUUM INTO`) und behält die letzten 14. Dabei räumt er abgelaufene Sitzungen, OAuth-Reste und alte Sync-Daten auf (siehe [Aufbewahrung](#aufbewahrung)). Wiederherstellen: Container stoppen, Backup als `data/lichtung.db` ablegen (`-wal`/`-shm` entfernen), starten. Die Backups enthalten die verschlüsselten Zugangsdaten; lesbar sind sie nur mit dem passenden `LICHTUNG_SECRET_KEY`.

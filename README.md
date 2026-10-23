@@ -6,7 +6,7 @@ Eine Lichtung ist die freie Stelle im Wald: die Lücke im Kalender, die andere b
 
 ## Stand
 
-Design-Phase. Die Spec steht unter [`docs/superpowers/specs/2026-10-23-lichtung-design.md`](docs/superpowers/specs/2026-10-23-lichtung-design.md). Noch kein Code.
+Im Aufbau. Die Spec steht unter [`docs/superpowers/specs/2026-10-23-lichtung-design.md`](docs/superpowers/specs/2026-10-23-lichtung-design.md). Der Server entsteht unter `server/`, die Apps unter `apple/`.
 
 ## Server
 

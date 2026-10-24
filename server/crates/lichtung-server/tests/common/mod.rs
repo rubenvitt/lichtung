@@ -1,6 +1,8 @@
 //! Shared helpers for the HTTP integration tests.
 #![allow(dead_code)]
 
+pub mod dav;
+
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Method, Request, StatusCode};
 use axum::Router;
@@ -192,7 +194,7 @@ pub async fn api_token(server: &TestServer, name: &str) -> String {
         .token
 }
 
-/// Whether `/mcp` (LIC-12) would accept this bearer token.
+/// Whether `/mcp` would accept this bearer token.
 pub async fn mcp_accepts(server: &TestServer, token: &str) -> bool {
     lichtung_server::oauth::authenticate_mcp(&server.app, token)
         .await
@@ -203,4 +205,22 @@ pub async fn mcp_accepts(server: &TestServer, token: &str) -> bool {
 /// The status of `GET /api/me` with this bearer token.
 pub async fn api_status(server: &TestServer, token: &str) -> StatusCode {
     server.get("/api/me", Auth::Bearer(token)).await.status
+}
+
+/// Registers a device of the app directly in the database and returns its
+/// raw device token (`ld_…`).
+pub fn device_token(server: &TestServer, name: &str) -> String {
+    let raw = format!("ld_testgeraet-{}", uuid::Uuid::now_v7().simple());
+    let conn = rusqlite::Connection::open(server.app.config().db_path()).unwrap();
+    let device = lichtung_server::db::DeviceRow {
+        id: uuid::Uuid::now_v7(),
+        user_id: server.app.owner_id(),
+        name: name.to_owned(),
+        family_id: format!("familie-{name}"),
+        created_at: 1,
+        last_used_at: None,
+    };
+    lichtung_server::db::insert_device(&conn, &device, &lichtung_server::auth::sha256_hex(&raw))
+        .unwrap();
+    raw
 }

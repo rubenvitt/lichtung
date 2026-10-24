@@ -22,6 +22,9 @@
 //!    it: nothing lost, nothing doubled (rows are keyed by calendar + href,
 //!    unchanged ETags are skipped).
 //!
+//! A round holds the calendar's lock ([`App::lock_calendars`]), so it never
+//! overlaps with a write of the same calendar ([`crate::writes`]).
+//!
 //! **Per account** ([`App::sync_account`]): discovery + calendar refresh
 //! (vanished calendars delete their events with tombstones), then every
 //! calendar. Status: `syncing` while running, then `ok` with
@@ -335,6 +338,9 @@ impl App {
         client: &Client,
         calendar_id: &str,
     ) -> Result<CalendarSyncReport, SyncError> {
+        // No write to this calendar while the round runs (see
+        // `App::lock_calendars`).
+        let _guard = self.lock_calendars(&[calendar_id]).await;
         let (href, state, stored) = {
             let calendar_id = calendar_id.to_owned();
             self.with_reader(move |conn| {

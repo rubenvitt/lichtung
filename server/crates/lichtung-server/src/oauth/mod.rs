@@ -30,7 +30,7 @@
 //!   replayed. The device is named after the client (`client_name`).
 //!
 //! API tokens (`lt_…`) work for `/mcp` and `/api`. The `/mcp` endpoint itself
-//! follows in LIC-12; it authenticates with [`authenticate_mcp`].
+//! (see [`crate::mcp`]) authenticates with [`authenticate_mcp`].
 
 pub mod routes;
 
@@ -893,8 +893,8 @@ pub async fn authenticate_access(app: &App, raw: &str) -> AppResult<Option<Princ
     }))
 }
 
-/// Authenticates a bearer token for `/mcp` (used by the endpoint in
-/// LIC-12): OAuth access tokens (`loa_…`) via the built-in authorization
+/// Authenticates a bearer token for `/mcp` (used by [`crate::mcp`]):
+/// OAuth access tokens (`loa_…`) via the built-in authorization
 /// server, everything else as API or bootstrap token. Device tokens of the
 /// app are only for `/api` and refused here.
 pub async fn authenticate_mcp(app: &App, token: &str) -> AppResult<Option<Principal>> {

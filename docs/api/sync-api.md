@@ -217,6 +217,7 @@ Eine eigene Änderung, die der Server nicht übernehmen konnte, weil der Anbiete
 - `origin`: `app:<Gerätename>`, `mcp:<Tokenname>` oder `server`.
 - `event_id` ist `null`, wenn das Event inzwischen gelöscht ist.
 - `mutation` ist die abgelehnte Mutation, wie sie geschickt wurde (für „noch mal anwenden“ in der App).
+- *Ergänzungen (LIC-10):* `origin` kann außerdem `web` (Browser-Sitzung) und `api:<Tokenname>` (API-Token) sein. `calendar_id` ist der Kalender des Events beim Konflikt. Wird das Event später gelöscht, kommt der Konflikt mit `event_id: null` erneut im Pull. Beim Konflikt holt der Server das Objekt sofort beim Anbieter neu; der neue Stand (höhere `version`) steht im Ergebnis und im Pull.
 
 ## 4. Lesen: Pull mit Cursor
 
@@ -245,6 +246,7 @@ Eine eigene Änderung, die der Server nicht übernehmen konnte, weil der Anbiete
 - Wird ein Kalender gelöscht, kommen auch die `delete`s seiner Events. Ein `delete` für ein unbekanntes Objekt ist kein Fehler.
 - **Kein Zeitfenster:** Der Pull liefert alle Events aller Kalender. Den Cache-Zeitraum der App (z. B. −3 bis +12 Monate) setzt der Client beim Speichern bzw. Anzeigen um. Serien, die in das Fenster hineinreichen, immer behalten.
 - **Cursor zu alt:** Hält der Server die Löschungen nicht mehr so weit zurück (mindestens 90 Tage), antwortet er `410` mit `code: cursor_expired`. Dann Cache leeren (ausstehende Mutationen behalten) und mit `since=0` neu ziehen.
+- *Ergänzungen (LIC-11):* `since` fehlt = `0`. `limit` über 2000 wird auf 2000 begrenzt; `limit=0`, negatives `since` und unbekannte Parameter ergeben `400 invalid_request`. Auf der letzten Seite (`has_more: false`) ist `cursor` der aktuelle Stand des Servers und kann größer sein als die `seq` der letzten Änderung. `410 cursor_expired` kommt auch, wenn `since` größer ist als der Cursor des Servers (z. B. nach dem Einspielen eines Backups). Löschungen hält der Server 90 Tage. Erlaubt für jedes Token für `/api`.
 
 ## 5. Live-Updates: SSE
 
@@ -264,6 +266,7 @@ data: 1837
 - Kommentarzeilen (`: …`) halten die Verbindung offen und werden ignoriert.
 - Bei Verbindungsabbruch mit Backoff neu verbinden (z. B. 1 s, 2 s, 4 s … bis 60 s). SSE ist nur für die offene App gedacht; im Hintergrund weckt künftig eine stille Push-Nachricht (APNs) die App für einen Pull (siehe Abschnitt 8).
 - Weitere Ereignistypen kann der Server ergänzen; unbekannte `event:`-Namen ignoriert der Client.
+- *Ergänzung (LIC-11):* Keep-alive als Kommentarzeile etwa alle 15 s, Antwort-Header `x-accel-buffering: no`. Beim Herunterfahren beendet der Server den Stream; der Client verbindet sich dann wie bei einem Abbruch neu. Erlaubt für jedes Token für `/api`.
 
 ## 6. Schreiben: Mutationen
 
@@ -354,6 +357,20 @@ Schreibbare Felder: `title` (Pflicht beim Anlegen), `location`, `notes`, `url`, 
 - Hängen weitere Mutationen in der Outbox am selben Event, schickt der Client sie nach einem `applied` mit der neuen `version` als `base_version`. Für ein noch nicht angelegtes Event wartet er, bis das `create_event` `applied` ist.
 - Alles, was eine Mutation ändert, kommt zusätzlich über Pull/SSE (mit höherer `version`). Doppelt anwenden ist harmlos.
 
+*Ergänzungen (LIC-10, LIC-11), keine bestehende Form geändert:*
+
+- **Wer darf:** Geräte, Browser-Sitzungen (mit `X-Lichtung-Client`) und API-Tokens. `origin` eines Konflikts: `app:<Gerätename>`, `web` bzw. `api:<Tokenname>`. Die Kalender-Einstellung `mcp_write` gilt nur für Schreiben über `/mcp`.
+- **Aufruf als Ganzes:** Body höchstens 4 MiB. Mehr als 100 Mutationen: `413 payload_too_large`, nichts wird bearbeitet. Jede Mutation braucht eine String-`id` (1 bis 200 Zeichen), sonst `400 invalid_request` für den ganzen Aufruf.
+- **Idempotenz:** Gespeichert (30 Tage) werden nur endgültige Ergebnisse (`applied`, `conflict`, `rejected`). Ein `retry` wird beim erneuten Senden neu versucht. Die gespeicherten `events` sind der Stand von damals; neuere Stände kommen über den Pull.
+- **Zeitlimit:** Nach etwa 25 s beginnt der Server keine weitere Mutation; die restlichen bekommen `retry` mit `not_attempted`.
+- **Fehlerhafte Mutation** (unbekannte `op`, fehlendes oder falsch typisiertes Feld, unbekanntes Feld in `event`/`changes`): `rejected` mit `invalid_request`. Inhaltliche Fehler (Ende vor Beginn, gemischte Formen, fehlender Titel, unbekannte Zeitzone, ungültige RRULE): `rejected` mit `invalid_event`.
+- **`create_event`:** Ohne `event.uid` vergibt der Server `<uuid>@lichtung`. Gibt es die UID im Kalender schon: `rejected` mit `invalid_event`. Antwortet der Anbieter auf das Anlegen mit 412, weil genau dieses Objekt schon dort liegt (verlorene Antwort), gilt es als `applied`.
+- **`update_event`/`delete_event`:** Ein Event, das der Server inzwischen gelöscht hat, ergibt `conflict` mit `event_id: null` und `events: []`; eine nie bekannte `event_id` ergibt `rejected` mit `event_not_found`. `delete_event` für ein Event, das beim Anbieter schon fehlt (404), ist `applied`.
+- **Kalenderwechsel** (`calendar_id` in `changes`): `applied` mit dem Event im Zielkalender (neue `id`) in `events` und der alten `id` in `deleted_event_ids`. Lässt sich das Original im Quellkalender nicht löschen, ist das Ergebnis `conflict`, und `events` enthält beide Fassungen.
+- **`respond`:** setzt `PARTSTAT` am eigenen `ATTENDEE` (Adressen aus der Discovery des Kontos, dazu der Anmeldename, wenn er eine E-Mail-Adresse ist), ohne `SEQUENCE` zu ändern. `occurrence: null` beantwortet alle Vorkommen, in denen ich eingeladen bin. `comment` wird als `COMMENT` gespeichert. Bin ich nicht eingeladen (oder selbst Organisator): `rejected` mit `invalid_event`.
+- **EventInput:** `all_day`, `utc` in `DateValue`s, `attendees[].status`/`is_self` und `recurrence.incomplete` dürfen mitgeschickt werden und werden ignoriert. Leerer Text bei optionalen Feldern gilt wie `null`, `travel_time_minutes: 0` wie keine Reisezeit. Bekannte Teilnehmer behalten ihren Status, neue bekommen `needs_action` und eine Einladung (`RSVP`); hat ein Termin Teilnehmer und keinen Organisator, wird die eigene Adresse Organisator.
+- **Anbieterfehler:** nicht erreichbar oder gedrosselt → `retry` mit `provider_unavailable` und `retry_after_seconds` (Wert des Anbieters, sonst 60); dauerhaft abgelehnt → `rejected` mit `provider_rejected`; Zugangsdaten abgelehnt → `retry` mit `provider_unavailable`, das Konto steht dann auf `auth_failed`. ICS-Abos und (noch) Microsoft-Kalender sind `calendar_read_only`.
+
 ## 7. Einstellungen und Verwaltung (nur online)
 
 Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte Objekt; die Änderung erscheint zusätzlich im Pull.
@@ -369,6 +386,7 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 | `PATCH /api/calendars/{id}` | `color` (oder `null` = Anbieterfarbe), `hidden`, `mcp_write`, `openings_busy`, `all_day_blocks`, `position` |
 | `POST /api/calendar-sets`, `PATCH /api/calendar-sets/{id}`, `DELETE /api/calendar-sets/{id}` | Kalender-Sets: `name`, `calendar_ids`, `position` |
 | `POST /api/conflicts/{id}/dismiss` | Konflikt wegklicken (erscheint im Pull als `delete`) |
+| *Ergänzung (LIC-11):* `GET /api/conflicts` | Komfort: offene Konflikte wie im Pull, neueste zuerst. `dismiss` antwortet `204`, ein unbekannter Konflikt `404`. Beides erlaubt für jedes Token für `/api`. |
 | `GET /api/occurrences?from=<datum>&to=<datum>&calendar_ids=cal_01,cal_02` | Komfort: vom Server expandierte Vorkommen im Zeitraum (`from` inklusiv, `to` exklusiv, ISO-Datum oder RFC 3339). Nicht für den Cache gedacht. |
 | `GET /api/devices`, `DELETE /api/devices/{id}` | angemeldete Geräte, einzeln abmelden |
 | *Ergänzung (LIC-7):* `GET /api/calendars`, `GET /api/calendar-sets` | Komfort: alle Kalender bzw. Sets wie im Pull (nach `position` sortiert) |
@@ -439,11 +457,14 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 
 Zusätzliche `code`s in Mutations-Ergebnissen (`rejected`/`retry`): `calendar_read_only`, `event_not_found`, `invalid_event` (z. B. Ende vor Beginn), `occurrence_not_found`, `scope_not_supported`, `provider_rejected` (Anbieter lehnt dauerhaft ab, `message` enthält den Grund), `provider_unavailable`, `not_attempted`.
 
+*Ergänzung (LIC-10):* außerdem `invalid_request` für eine fehlerhafte Mutation (Abschnitt 6).
+
 ## 10. Änderungsprotokoll
 
 | Datum | Änderung |
 |---|---|
 | 2026-10-23 | Version 1 (Entwurf) |
 | 2026-10-23 | Ergänzungen aus LIC-7 (keine bestehende Form geändert): `kind: caldav` mit `url`; `color` immer gesetzt, Standardwerte neuer Kalender, VTODO-Sammlungen ausgelassen; `GET /api/calendars`, `GET /api/calendar-sets`; Statuscodes und Rechte der Konten-, Kalender- und Set-Aufrufe (Abschnitt 7) |
+| 2026-10-23 | Ergänzungen aus LIC-10/LIC-11 (keine bestehende Form geändert): Conflict mit `origin` `web`/`api:…`, erneut im Pull bei gelöschtem Event; Pull-Parameter, Cursor der letzten Seite, `410` auch für Cursor aus der Zukunft, 90 Tage Löschungen; SSE-Keep-alive und Ende beim Herunterfahren; Push: wer darf, Body- und Zeitlimit, `400` ohne `id`, nur endgültige Ergebnisse idempotent, `invalid_request` für fehlerhafte Mutationen, Regeln für Anlegen, gelöschte Events, Kalenderwechsel, `respond`, ignorierte Felder in EventInput, Anbieterfehler; `GET /api/conflicts` |
 | 2026-10-23 | Ergänzungen aus LIC-8 (keine bestehende Form geändert): Sync-Rhythmus und Status der Konten; `DateValue` mit `time_zone: null` und `utc` (nicht übersetzbare Zone), `time_zone: "UTC"`; `rrule: null`, Objekte ohne Master; Form nicht lesbarer Termine mit `parse_error`; Form von `GET /api/occurrences` mit `time_zone` und `include_cancelled` (Abschnitt 7) |
 | 2026-10-23 | Ergänzungen aus LIC-14 (keine bestehende Form geändert): `kind: ics` mit `url`, optional `username`/`password` (Basic-Auth), Schemata `webcal`/`webcals`; `username` zeigt die URL ohne Query, Zugangsdaten und schlüsselartige Pfadteile, die volle URL bleibt verschlüsselt auf dem Server; ein Kalender pro Konto (nur lesbar, Name aus `X-WR-CALNAME`, Farbe aus `X-APPLE-CALENDAR-COLOR`); Abruf alle 15 Minuten mit ETag/Last-Modified; neuer Fehlercode `422 invalid_feed`; `availability` berücksichtigt `X-MICROSOFT-CDO-BUSYSTATUS`, wenn `TRANSP` fehlt (Abschnitte 3, 7, 9) |

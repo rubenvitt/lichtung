@@ -22,6 +22,9 @@ pub enum AppError {
     Conflict(String),
     #[error("{0}")]
     PayloadTooLarge(String),
+    /// The pull cursor is older than the kept deletions (410).
+    #[error("{0}")]
+    CursorExpired(String),
     /// The calendar provider rejected the credentials (422).
     #[error("{0}")]
     InvalidCredentials(String),
@@ -60,6 +63,7 @@ impl AppError {
             AppError::BadRequest { .. } => StatusCode::BAD_REQUEST,
             AppError::Conflict(_) => StatusCode::CONFLICT,
             AppError::PayloadTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
+            AppError::CursorExpired(_) => StatusCode::GONE,
             AppError::InvalidCredentials(_) => StatusCode::UNPROCESSABLE_ENTITY,
             AppError::ProviderUnavailable(_) => StatusCode::BAD_GATEWAY,
             AppError::InvalidFeed(_) => StatusCode::UNPROCESSABLE_ENTITY,
@@ -77,6 +81,7 @@ impl AppError {
             AppError::BadRequest { code, .. } => code,
             AppError::Conflict(_) => "conflict",
             AppError::PayloadTooLarge(_) => "payload_too_large",
+            AppError::CursorExpired(_) => "cursor_expired",
             AppError::InvalidCredentials(_) => "invalid_credentials",
             AppError::ProviderUnavailable(_) => "provider_unavailable",
             AppError::InvalidFeed(_) => "invalid_feed",

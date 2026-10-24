@@ -1,0 +1,121 @@
+//! Error type of the application layer and its JSON form
+//! `{"error":{"code":…,"message":…}}` (spec: German messages, stable codes).
+
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde_json::json;
+
+/// An error that maps to an HTTP status, a stable `code` and a German
+/// `message`. MCP tools (LIC-12) map the same variants to tool errors.
+#[derive(Debug, thiserror::Error)]
+pub enum AppError {
+    #[error("Anmeldung erforderlich")]
+    Unauthorized,
+    #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error("{message}")]
+    BadRequest { code: &'static str, message: String },
+    #[error("{0}")]
+    Conflict(String),
+    #[error("{0}")]
+    PayloadTooLarge(String),
+    /// The pull cursor is older than the kept deletions (410).
+    #[error("{0}")]
+    CursorExpired(String),
+    /// The calendar provider rejected the credentials (422).
+    #[error("{0}")]
+    InvalidCredentials(String),
+    /// The calendar provider is unreachable or answered with an error (502).
+    #[error("{0}")]
+    ProviderUnavailable(String),
+    /// Rate limit hit; the response carries `Retry-After` (seconds).
+    #[error("{message}")]
+    TooManyRequests {
+        message: String,
+        retry_after_secs: u64,
+    },
+    #[error("{0}")]
+    Unavailable(String),
+    #[error("interner Fehler")]
+    Internal(#[from] anyhow::Error),
+}
+
+impl AppError {
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        AppError::BadRequest {
+            code: "invalid_request",
+            message: message.into(),
+        }
+    }
+
+    pub fn status(&self) -> StatusCode {
+        match self {
+            AppError::Unauthorized => StatusCode::UNAUTHORIZED,
+            AppError::Forbidden(_) => StatusCode::FORBIDDEN,
+            AppError::NotFound(_) => StatusCode::NOT_FOUND,
+            AppError::BadRequest { .. } => StatusCode::BAD_REQUEST,
+            AppError::Conflict(_) => StatusCode::CONFLICT,
+            AppError::PayloadTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
+            AppError::CursorExpired(_) => StatusCode::GONE,
+            AppError::InvalidCredentials(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            AppError::ProviderUnavailable(_) => StatusCode::BAD_GATEWAY,
+            AppError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
+            AppError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    pub fn code(&self) -> &'static str {
+        match self {
+            AppError::Unauthorized => "unauthorized",
+            AppError::Forbidden(_) => "forbidden",
+            AppError::NotFound(_) => "not_found",
+            AppError::BadRequest { code, .. } => code,
+            AppError::Conflict(_) => "conflict",
+            AppError::PayloadTooLarge(_) => "payload_too_large",
+            AppError::CursorExpired(_) => "cursor_expired",
+            AppError::InvalidCredentials(_) => "invalid_credentials",
+            AppError::ProviderUnavailable(_) => "provider_unavailable",
+            AppError::TooManyRequests { .. } => "too_many_requests",
+            AppError::Unavailable(_) => "unavailable",
+            AppError::Internal(_) => "internal",
+        }
+    }
+}
+
+impl From<rusqlite::Error> for AppError {
+    fn from(e: rusqlite::Error) -> Self {
+        AppError::Internal(e.into())
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        if let AppError::Internal(e) = &self {
+            tracing::error!(error = ?e, "internal error");
+        }
+        let body = json!({"error": {"code": self.code(), "message": self.to_string()}});
+        let mut response = (self.status(), Json(body)).into_response();
+        if matches!(self, AppError::Unauthorized) {
+            response.headers_mut().insert(
+                axum::http::header::WWW_AUTHENTICATE,
+                axum::http::HeaderValue::from_static("Bearer realm=\"lichtung\""),
+            );
+        }
+        if let AppError::TooManyRequests {
+            retry_after_secs, ..
+        } = self
+        {
+            response.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from(retry_after_secs),
+            );
+        }
+        response
+    }
+}
+
+pub type AppResult<T> = Result<T, AppError>;

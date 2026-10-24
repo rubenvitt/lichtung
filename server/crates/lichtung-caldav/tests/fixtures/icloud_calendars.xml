@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Invented, iCloud-style PROPFIND Depth 1: default namespace, absolute hrefs, ETag-quoted ctags. -->
+<multistatus xmlns="DAV:">
+  <response>
+    <href>{BASE}/123456789/calendars/</href>
+    <propstat>
+      <prop>
+        <resourcetype><collection/></resourcetype>
+      </prop>
+      <status>HTTP/1.1 200 OK</status>
+    </propstat>
+  </response>
+  <response>
+    <href>{BASE}/123456789/calendars/home/</href>
+    <propstat>
+      <prop>
+        <resourcetype xmlns="DAV:"><collection/><calendar xmlns="urn:ietf:params:xml:ns:caldav"/></resourcetype>
+        <displayname>Privat</displayname>
+        <calendar-color xmlns="http://apple.com/ns/ical/" symbolic-color="blue">#1BADF8FF</calendar-color>
+        <calendar-order xmlns="http://apple.com/ns/ical/">0</calendar-order>
+        <getctag xmlns="http://calendarserver.org/ns/">HwoQEgwAAAAAAAAAAAAAABgBGAEoAQ==</getctag>
+        <sync-token>HwoQEgwAAAAAAAAAAAAAABgBGAEoAQ==</sync-token>
+        <current-user-privilege-set>
+          <privilege><all/></privilege>
+          <privilege><read/></privilege>
+        </current-user-privilege-set>
+        <supported-calendar-component-set xmlns="urn:ietf:params:xml:ns:caldav">
+          <comp name="VEVENT"/>
+        </supported-calendar-component-set>
+      </prop>
+      <status>HTTP/1.1 200 OK</status>
+    </propstat>
+  </response>
+  <response>
+    <href>/123456789/calendars/F0E1D2C3-0000-4000-8000-000000000001/</href>
+    <propstat>
+      <prop>
+        <resourcetype><collection/><calendar xmlns="urn:ietf:params:xml:ns:caldav"/></resourcetype>
+        <displayname>Familie</displayname>
+        <owner><href>/987654321/principal/</href></owner>
+        <current-user-privilege-set>
+          <privilege><read/></privilege>
+          <privilege><write-content/></privilege>
+        </current-user-privilege-set>
+      </prop>
+      <status>HTTP/1.1 200 OK</status>
+    </propstat>
+  </response>
+</multistatus>

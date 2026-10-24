@@ -1,0 +1,53 @@
+[package]
+name = "lichtung-server"
+description = "Server von Lichtung: Login, Geräte- und API-Tokens, OAuth, Konten, CalDAV-Sync, Persistenz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "lichtung_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lichtung-server"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+time.workspace = true
+url = { workspace = true, features = ["serde"] }
+sha2.workspace = true
+base64.workspace = true
+anyhow.workspace = true
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tokio-util = "0.7"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tower-http = { version = "0.6", features = ["compression-gzip", "compression-br", "trace", "set-header", "timeout"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+jsonwebtoken = "9"
+hmac = "0.12"
+getrandom = "0.3"
+cookie = "0.18"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+ring = "0.17"
+lichtung-caldav = { path = "../lichtung-caldav" }
+lichtung-ical = { path = "../lichtung-ical" }
+chrono-tz = "0.10"
+
+[dev-dependencies]
+tempfile.workspace = true
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+rsa = { version = "0.9", features = ["getrandom"] }
+wiremock = "0.6"
+
+[lints]
+workspace = true

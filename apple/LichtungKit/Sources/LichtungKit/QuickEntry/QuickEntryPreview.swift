@@ -43,9 +43,9 @@ public struct QuickEntryPreview: Equatable, Sendable {
         recurrence = entry.recurrence.map(Self.describe)
     }
 
-    static let weekdayShort = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
-    static let weekdayLong = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
-    static let monthShort = ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sep.", "Okt.", "Nov.", "Dez."]
+    public static let weekdayShort = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+    public static let weekdayLong = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+    public static let monthShort = ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sep.", "Okt.", "Nov.", "Dez."]
 
     static func day(_ d: LocalDate, today: LocalDate) -> String {
         let base = "\(weekdayShort[d.weekday.rawValue - 1]), \(d.day). \(monthShort[d.month - 1])"

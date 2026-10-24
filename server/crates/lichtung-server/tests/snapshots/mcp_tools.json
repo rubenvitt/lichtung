@@ -1,0 +1,555 @@
+[
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Kalender auflisten"
+    },
+    "description": "Listet alle Kalender mit id, Name, Konto (Art und Name), Farbe und Rechten. writable: der Anbieter erlaubt Schreiben. mcp_writable: Claude darf hier schreiben (writable und in der App freigegeben); nur solche Kalender kommen für create_event, update_event, delete_event und respond_to_invitation in Frage. hidden: in der App ausgeblendet. openings_busy: zählt für freie Zeiten. all_day_blocks: ganztägige Termine blockieren freie Zeiten.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "name": "list_calendars",
+    "title": "Kalender auflisten"
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Kalender-Sets auflisten"
+    },
+    "description": "Listet die Kalender-Sets (Gruppen wie „Arbeit“ oder „Privat“) mit id, Name und calendar_ids. Eine Set-ID passt als calendar_set_id in query_events und find_free_times.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "name": "list_calendar_sets",
+    "title": "Kalender-Sets auflisten"
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Termine abfragen"
+    },
+    "description": "Liefert die Termine eines Zeitraums, Serien als einzelne Vorkommen, nach Beginn sortiert. Ohne query kommt alles im Zeitraum; mit query nur Termine, deren Titel, Ort oder Notiz alle Wörter enthält (Groß- und Kleinschreibung egal). Ohne calendar_ids und calendar_set_id: alle nicht ausgeblendeten Kalender. Jedes Vorkommen hat event_id und recurrence_id (bei Serien; für occurrence in update_event, delete_event, respond_to_invitation), Titel, notes, Ort, url, start/end in time_zone (ganztägig als Datum, end dann einschließlich), duration_minutes, all_day, event_time_zone (Zeitzone des Termins), status (confirmed, tentative, cancelled), availability (busy, free), organizer, attendees, self_status (eigene Antwort; needs_action = offene Anfrage) und calendar.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calendar_ids": {
+          "description": "Nur diese Kalender (IDs aus list_calendars).",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "calendar_set_id": {
+          "description": "Nur die Kalender dieses Kalender-Sets (ID aus list_calendar_sets); nicht zusammen mit calendar_ids.",
+          "type": "string"
+        },
+        "end": {
+          "description": "Ende des Zeitraums: Datum JJJJ-MM-TT (dieser Tag zählt noch ganz mit) oder Zeitpunkt nach RFC 3339 mit Offset (ausschließlich). Höchstens 400 Tage nach start.",
+          "type": "string"
+        },
+        "include_cancelled": {
+          "description": "Auch abgesagte Termine liefern (Standard: false).",
+          "type": "boolean"
+        },
+        "limit": {
+          "default": 250,
+          "description": "Höchstzahl der Einträge; bei mehr ist truncated true.",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "query": {
+          "description": "Suchbegriff (Wörter, alle müssen vorkommen).",
+          "type": "string"
+        },
+        "start": {
+          "description": "Beginn des Zeitraums (einschließlich): Datum JJJJ-MM-TT (Tagesbeginn in time_zone) oder Zeitpunkt nach RFC 3339 mit Offset, z. B. 2026-11-03T08:00:00+01:00.",
+          "type": "string"
+        },
+        "time_zone": {
+          "description": "IANA-Zeitzone der Ausgabe und für Datumsangaben in start/end, z. B. Europe/Berlin. Standard: Zeitzone des Servers.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    "name": "query_events",
+    "title": "Termine abfragen"
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Freie Zeiten finden"
+    },
+    "description": "Sucht freie Zeiten von mindestens min_duration_minutes im Zeitraum, nach denselben Regeln wie Buchungslinks: Termine in den einbezogenen Kalendern blockieren, außer abgesagte, als frei markierte (availability free) und eigene abgelehnte Einladungen; ganztägige Termine blockieren nur in Kalendern mit all_day_blocks. Ohne calendar_ids und calendar_set_id zählen alle Kalender mit openings_busy. Optional nur innerhalb eines Tagesfensters (day_start bis day_end in time_zone) und an bestimmten Wochentagen, mit Puffer vor und nach jedem Termin. Liefert Zeitfenster mit start, end (in time_zone) und duration_minutes; ein Fenster kann länger als nötig sein.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "buffer_minutes": {
+          "default": 0,
+          "description": "Puffer vor und nach jedem Termin in Minuten.",
+          "maximum": 1440,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "calendar_ids": {
+          "description": "Nur diese Kalender (IDs aus list_calendars).",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "calendar_set_id": {
+          "description": "Nur die Kalender dieses Kalender-Sets (ID aus list_calendar_sets); nicht zusammen mit calendar_ids.",
+          "type": "string"
+        },
+        "day_end": {
+          "description": "Ende des Tagesfensters hh:mm in time_zone, z. B. 17:00; nach day_start.",
+          "type": "string"
+        },
+        "day_start": {
+          "description": "Beginn des Tagesfensters hh:mm in time_zone, z. B. 09:00; nur mit day_end.",
+          "type": "string"
+        },
+        "end": {
+          "description": "Ende des Zeitraums: Datum JJJJ-MM-TT (dieser Tag zählt noch ganz mit) oder Zeitpunkt nach RFC 3339 mit Offset (ausschließlich). Höchstens 400 Tage nach start.",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "description": "Höchstzahl der Einträge; bei mehr ist truncated true.",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "min_duration_minutes": {
+          "description": "Mindestdauer eines freien Fensters in Minuten.",
+          "maximum": 10080,
+          "minimum": 5,
+          "type": "integer"
+        },
+        "start": {
+          "description": "Beginn des Zeitraums (einschließlich): Datum JJJJ-MM-TT (Tagesbeginn in time_zone) oder Zeitpunkt nach RFC 3339 mit Offset, z. B. 2026-11-03T08:00:00+01:00.",
+          "type": "string"
+        },
+        "time_zone": {
+          "description": "IANA-Zeitzone der Ausgabe und für Datumsangaben in start/end, z. B. Europe/Berlin. Standard: Zeitzone des Servers.",
+          "type": "string"
+        },
+        "weekdays": {
+          "description": "Nur diese Wochentage (in time_zone), z. B. [\"mo\",\"tu\",\"we\",\"th\",\"fr\"] für werktags. Standard: alle.",
+          "items": {
+            "enum": [
+              "mo",
+              "tu",
+              "we",
+              "th",
+              "fr",
+              "sa",
+              "su"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "min_duration_minutes"
+      ],
+      "type": "object"
+    },
+    "name": "find_free_times",
+    "title": "Freie Zeiten finden"
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Offene Terminanfragen"
+    },
+    "description": "Listet offene Terminanfragen (eigene Antwort needs_action), die nicht abgesagt sind, ab jetzt (Standard: die nächsten 180 Tage). Eine Serie erscheint einmal (mit dem nächsten Vorkommen und pending_occurrences); ein einzeln geändertes Vorkommen mit eigener offener Anfrage erscheint mit occurrence. can_respond sagt, ob Claude in diesem Kalender antworten darf (mcp_writable).",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calendar_ids": {
+          "description": "Nur diese Kalender (IDs aus list_calendars).",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "end": {
+          "description": "Ende wie bei query_events; Standard: 180 Tage nach start.",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "description": "Höchstzahl der Einträge; bei mehr ist truncated true.",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "start": {
+          "description": "Beginn wie bei query_events; Standard: jetzt.",
+          "type": "string"
+        },
+        "time_zone": {
+          "description": "IANA-Zeitzone der Ausgabe und für Datumsangaben in start/end, z. B. Europe/Berlin. Standard: Zeitzone des Servers.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "name": "list_invitations",
+    "title": "Offene Terminanfragen"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Termin anlegen"
+    },
+    "description": "Legt einen Termin an. calendar_id ist Pflicht, es gibt keinen Standardkalender: vorher mit list_calendars einen Kalender mit mcp_writable = true wählen. Zeiten immer mit Offset (2026-11-03T14:00:00+01:00) oder ganztägig als Datum (end = letzter Tag, einschließlich). Mit attendees verschickt der Anbieter echte Einladungen. Liefert den angelegten Termin mit event_id.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "alarms": {
+          "description": "Erinnerungen in Minuten vor Beginn, z. B. [10, 60]; ersetzt alle Erinnerungen.",
+          "items": {
+            "maximum": 40320,
+            "minimum": -40320,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "attendees": {
+          "description": "Teilnehmer; der Anbieter verschickt echte Einladungen (bei Änderungen Aktualisierungen). Ersetzt die ganze Liste; bekannte Teilnehmer behalten ihre Antwort.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "description": "E-Mail-Adresse.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Anzeigename (optional).",
+                "type": "string"
+              },
+              "role": {
+                "description": "Standard: required.",
+                "enum": [
+                  "required",
+                  "optional",
+                  "chair",
+                  "non_participant"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "availability": {
+          "description": "busy (blockiert, Standard) oder free (zählt nicht als belegt, z. B. für Erinnerungen oder Fokuszeit, die Buchungen nicht verhindern soll).",
+          "enum": [
+            "busy",
+            "free"
+          ],
+          "type": "string"
+        },
+        "calendar_id": {
+          "description": "Zielkalender (id aus list_calendars, mcp_writable muss true sein).",
+          "type": "string"
+        },
+        "end": {
+          "description": "Ende in derselben Form wie start: Zeitpunkt mit Offset (ausschließlich) oder bei ganztägigen Terminen der letzte Tag als Datum (einschließlich; ein eintägiger Termin hat start = end).",
+          "type": "string"
+        },
+        "location": {
+          "description": "Ort.",
+          "type": "string"
+        },
+        "notes": {
+          "description": "Notiz bzw. Beschreibung.",
+          "type": "string"
+        },
+        "recurrence": {
+          "description": "Wiederholung als RRULE nach RFC 5545 (ohne „RRULE:“), z. B. FREQ=WEEKLY;BYDAY=MO;COUNT=10 oder FREQ=DAILY;UNTIL=20261130T225959Z.",
+          "type": "string"
+        },
+        "start": {
+          "description": "Beginn: Zeitpunkt nach RFC 3339 mit Offset, z. B. 2026-11-03T14:00:00+01:00, oder für ganztägige Termine ein Datum JJJJ-MM-TT. Ohne Offset gibt es einen Fehler.",
+          "type": "string"
+        },
+        "time_zone": {
+          "description": "IANA-Zeitzone, in der der Termin gespeichert wird (Wanduhrzeit, Sommerzeit bei Serien), z. B. Europe/Berlin. Der Zeitpunkt bleibt der angegebene. Standard: die Zeitzone des Servers, wenn ihr Offset zum angegebenen passt, sonst UTC.",
+          "type": "string"
+        },
+        "title": {
+          "description": "Titel.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Link (z. B. Videokonferenz).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "calendar_id",
+        "title",
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    "name": "create_event",
+    "title": "Termin anlegen"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Termin ändern"
+    },
+    "description": "Ändert einen Termin: nur die angegebenen Felder, der Rest bleibt (auch Felder, die Lichtung nicht kennt). Bei Serien ist scope Pflicht (this, this_and_following, all) und bei this bzw. this_and_following occurrence (recurrence_id aus query_events). Wird nur start geändert, bleibt die Dauer erhalten. move_to_calendar_id verschiebt den ganzen Termin in einen anderen Kalender. Hat sich der Termin inzwischen beim Anbieter geändert, gewinnt der Anbieter: Das Ergebnis ist ein Fehler (conflict) mit dem aktuellen Stand.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "alarms": {
+          "description": "Erinnerungen in Minuten vor Beginn, z. B. [10, 60]; ersetzt alle Erinnerungen. [] oder null entfernt alle.",
+          "items": {
+            "maximum": 40320,
+            "minimum": -40320,
+            "type": "integer"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "attendees": {
+          "description": "Teilnehmer; der Anbieter verschickt echte Einladungen (bei Änderungen Aktualisierungen). Ersetzt die ganze Liste; bekannte Teilnehmer behalten ihre Antwort. [] oder null entfernt alle.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "description": "E-Mail-Adresse.",
+                "type": "string"
+              },
+              "name": {
+                "description": "Anzeigename (optional).",
+                "type": "string"
+              },
+              "role": {
+                "description": "Standard: required.",
+                "enum": [
+                  "required",
+                  "optional",
+                  "chair",
+                  "non_participant"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "availability": {
+          "description": "busy (blockiert, Standard) oder free (zählt nicht als belegt, z. B. für Erinnerungen oder Fokuszeit, die Buchungen nicht verhindern soll).",
+          "enum": [
+            "busy",
+            "free"
+          ],
+          "type": "string"
+        },
+        "end": {
+          "description": "Ende in derselben Form wie start: Zeitpunkt mit Offset (ausschließlich) oder bei ganztägigen Terminen der letzte Tag als Datum (einschließlich; ein eintägiger Termin hat start = end).",
+          "type": "string"
+        },
+        "event_id": {
+          "description": "event_id aus query_events.",
+          "type": "string"
+        },
+        "location": {
+          "description": "Ort. null entfernt den Wert.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "move_to_calendar_id": {
+          "description": "In diesen Kalender verschieben (id aus list_calendars, mcp_writable muss true sein; nur ganze Termine, scope all).",
+          "type": "string"
+        },
+        "notes": {
+          "description": "Notiz bzw. Beschreibung. null entfernt den Wert.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "occurrence": {
+          "description": "Bei Serien das gemeinte Vorkommen: recurrence_id aus query_events (Zeitpunkt mit Offset oder Datum bei ganztägigen Serien).",
+          "type": "string"
+        },
+        "recurrence": {
+          "description": "Wiederholung als RRULE nach RFC 5545 (ohne „RRULE:“), z. B. FREQ=WEEKLY;BYDAY=MO;COUNT=10; ersetzt die Regel, Ausnahmen bleiben. null beendet die Wiederholung. Nicht mit scope this.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "description": "Geltungsbereich bei Serien (dort Pflicht): this = nur dieses Vorkommen, this_and_following = dieses und alle folgenden, all = die ganze Serie. this und this_and_following brauchen occurrence. Bei Einzelterminen weglassen (gilt als all).",
+          "enum": [
+            "this",
+            "this_and_following",
+            "all"
+          ],
+          "type": "string"
+        },
+        "start": {
+          "description": "Beginn: Zeitpunkt nach RFC 3339 mit Offset, z. B. 2026-11-03T14:00:00+01:00, oder für ganztägige Termine ein Datum JJJJ-MM-TT. Ohne Offset gibt es einen Fehler.",
+          "type": "string"
+        },
+        "time_zone": {
+          "description": "IANA-Zeitzone, in der der Termin gespeichert wird (Wanduhrzeit, Sommerzeit bei Serien), z. B. Europe/Berlin. Der Zeitpunkt bleibt der angegebene. Standard: die Zeitzone des Servers, wenn ihr Offset zum angegebenen passt, sonst UTC.",
+          "type": "string"
+        },
+        "title": {
+          "description": "Titel.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Link (z. B. Videokonferenz). null entfernt den Wert.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "event_id"
+      ],
+      "type": "object"
+    },
+    "name": "update_event",
+    "title": "Termin ändern"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Termin löschen"
+    },
+    "description": "Löscht einen Termin beim Anbieter. Bei Serien ist scope Pflicht: this (nur dieses Vorkommen), this_and_following (dieses und alle folgenden) oder all (die ganze Serie); this und this_and_following brauchen occurrence (recurrence_id aus query_events). Teilnehmer bekommen je nach Anbieter eine Absage.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "description": "event_id aus query_events.",
+          "type": "string"
+        },
+        "occurrence": {
+          "description": "Bei Serien das gemeinte Vorkommen: recurrence_id aus query_events (Zeitpunkt mit Offset oder Datum bei ganztägigen Serien).",
+          "type": "string"
+        },
+        "scope": {
+          "description": "Geltungsbereich bei Serien (dort Pflicht): this = nur dieses Vorkommen, this_and_following = dieses und alle folgenden, all = die ganze Serie. this und this_and_following brauchen occurrence. Bei Einzelterminen weglassen (gilt als all).",
+          "enum": [
+            "this",
+            "this_and_following",
+            "all"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id"
+      ],
+      "type": "object"
+    },
+    "name": "delete_event",
+    "title": "Termin löschen"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Auf Einladung antworten"
+    },
+    "description": "Beantwortet eine Terminanfrage: accepted (zusagen), tentative (vielleicht) oder declined (absagen); der Anbieter schickt die Antwort an den Organisator. Ohne occurrence gilt die Antwort für die ganze Serie, mit occurrence nur für dieses Vorkommen. Geht nur in Kalendern mit mcp_writable = true.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "comment": {
+          "description": "Optionaler Kommentar an den Organisator.",
+          "type": "string"
+        },
+        "event_id": {
+          "description": "event_id aus list_invitations oder query_events.",
+          "type": "string"
+        },
+        "occurrence": {
+          "description": "Bei Serien das gemeinte Vorkommen: recurrence_id aus query_events (Zeitpunkt mit Offset oder Datum bei ganztägigen Serien).",
+          "type": "string"
+        },
+        "response": {
+          "description": "accepted, tentative oder declined.",
+          "enum": [
+            "accepted",
+            "tentative",
+            "declined"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "response"
+      ],
+      "type": "object"
+    },
+    "name": "respond_to_invitation",
+    "title": "Auf Einladung antworten"
+  }
+]

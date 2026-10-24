@@ -194,7 +194,7 @@ pub async fn api_token(server: &TestServer, name: &str) -> String {
         .token
 }
 
-/// Whether `/mcp` (LIC-12) would accept this bearer token.
+/// Whether `/mcp` would accept this bearer token.
 pub async fn mcp_accepts(server: &TestServer, token: &str) -> bool {
     lichtung_server::oauth::authenticate_mcp(&server.app, token)
         .await

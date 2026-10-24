@@ -579,11 +579,10 @@ async fn read_only_calendars_and_the_mcp_guard() {
     let (_, r) = t
         .mutate_as(&Origin::Mcp("claude.ai".into()), change("m-mcp"))
         .await;
-    assert_eq!(r["error"]["code"], "calendar_read_only", "{r}");
-    assert!(r["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("mcp_write"));
+    assert_eq!(r["error"]["code"], "mcp_write_forbidden", "{r}");
+    let message = r["error"]["message"].as_str().unwrap();
+    assert!(message.contains("„Privat“"), "{message}");
+    assert!(message.contains("in der App"), "{message}");
     let (_, r) = t.mutate_as(&Origin::Web, change("m-web")).await;
     assert_eq!(r["status"], "applied", "{r}");
 }

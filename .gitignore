@@ -28,3 +28,7 @@ xcuserdata/
 # Swift Package Manager / xcodegen
 .swiftpm/
 DerivedInfo/
+
+# Python
+__pycache__/
+*.pyc

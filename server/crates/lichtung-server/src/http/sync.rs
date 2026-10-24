@@ -9,7 +9,7 @@
 //!
 //! Writes through API tokens are allowed: what a calendar accepts is
 //! decided per calendar (`writable`); the MCP guard `mcp_write` only
-//! applies to writes from `/mcp` (LIC-12).
+//! applies to writes from `/mcp` ([`crate::mcp`]).
 
 use std::convert::Infallible;
 

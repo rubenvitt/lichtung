@@ -1,0 +1,104 @@
+name: Lichtung
+
+# Xcode-Projekt entsteht mit `xcodegen generate` (im Ordner apple/) und wird
+# nicht eingecheckt. Aufbau wie Rudel: Logik im Package LichtungKit,
+# die App-Targets enthalten nur SwiftUI und Plattform-Anbindung.
+options:
+  bundleIdPrefix: dev.rubeen
+  deploymentTarget:
+    iOS: "18.0"
+    macOS: "15.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: true
+
+packages:
+  LichtungKit:
+    path: LichtungKit
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    # DEVELOPMENT_TEAM bitte lokal setzen (Xcode → Signing) oder hier eintragen.
+
+targets:
+  Lichtung-iOS:
+    type: application
+    platform: iOS
+    # Ordner-Globs: neue Dateien landen automatisch im Target.
+    sources:
+      - path: App/Shared
+      - path: App/iOS
+    dependencies:
+      - package: LichtungKit
+        product: LichtungKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.lichtung
+        PRODUCT_NAME: Lichtung
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Lichtung
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+    info:
+      path: DerivedInfo/Lichtung-iOS-Info.plist
+      properties:
+        CFBundleURLTypes:
+          # OAuth-Rückruf der Geräte-Anmeldung (docs/api/sync-api.md §2)
+          - CFBundleURLName: dev.rubeen.lichtung.oauth
+            CFBundleURLSchemes: [dev.rubeen.lichtung]
+        UIBackgroundModes: [remote-notification]
+
+  Lichtung-macOS:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/Shared
+      - path: App/macOS
+    dependencies:
+      - package: LichtungKit
+        product: LichtungKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.lichtung.mac
+        PRODUCT_NAME: Lichtung
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Lichtung
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+    entitlements:
+      path: DerivedInfo/Lichtung-macOS.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+    info:
+      path: DerivedInfo/Lichtung-macOS-Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.rubeen.lichtung.oauth
+            CFBundleURLSchemes: [dev.rubeen.lichtung]
+
+schemes:
+  Lichtung-iOS:
+    build:
+      targets:
+        Lichtung-iOS: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+  Lichtung-macOS:
+    build:
+      targets:
+        Lichtung-macOS: all
+    run:
+      config: Debug

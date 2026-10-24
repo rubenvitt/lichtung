@@ -7,8 +7,9 @@
 //! | `/auth/login`, `/auth/callback`, `/auth/logout` | OIDC login ([`auth_routes`]) |
 //! | `/.well-known/oauth-*`, `/oauth/*` | built-in authorization server ([`crate::oauth::routes`]) |
 //! | `/api/*` | session cookie, API/bootstrap token or device token ([`api`], [`accounts`], [`events`], [`sync`]) |
+//! | `POST /mcp` | API/bootstrap token or OAuth access token ([`crate::mcp`]) |
 //!
-//! `/mcp` follows in LIC-12. Protected routes use
+//! Protected routes under `/api` use
 //! [`crate::auth::middleware::require_auth`] and the
 //! [`crate::auth::Principal`] extractor and call into [`App`].
 
@@ -55,6 +56,7 @@ pub fn router(app: App, oidc: Option<Arc<OidcClient>>) -> Router {
         .route("/", get(index))
         .route("/healthz", get(healthz))
         .nest("/api", api)
+        .merge(crate::mcp::routes())
         .merge(crate::oauth::routes::routes(
             crate::oauth::routes::OAuthState::new(app.clone()),
         ))

@@ -906,7 +906,7 @@ async fn create_update_and_delete_single_events() {
         data.contains("DTEND;TZID=Europe/Berlin:20261112T193000"),
         "{data}"
     );
-    assert!(!data.contains("LOCATION"), "{data}");
+    assert!(!data.contains("\r\nLOCATION"), "{data}");
 
     // Nothing to change.
     let e = err(&t.s, &token, "update_event", json!({"event_id": id})).await;

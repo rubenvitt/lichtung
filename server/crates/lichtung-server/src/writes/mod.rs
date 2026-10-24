@@ -857,7 +857,7 @@ impl App {
         what: &str,
     ) -> Step<Written> {
         let etag = self.etag_for_write(ctx, client, target, row, what).await?;
-        let ics = object.to_ics();
+        let ics = ics_for_put(object);
         match client
             .put(&row.href, &ics, Precondition::IfMatch(etag))
             .await
@@ -882,7 +882,7 @@ impl App {
     ) -> Result<Written, DavError> {
         let uid = object.uid().unwrap_or_default();
         let href = client.new_resource_href(&target.calendar.remote_href, &uid)?;
-        let ics = object.to_ics();
+        let ics = ics_for_put(object);
         match client.put(href.as_str(), &ics, Precondition::Create).await {
             Ok(put) => Ok(Written::from_put(put, ics)),
             Err(DavError::PreconditionFailed) => {
@@ -1425,6 +1425,14 @@ impl App {
 /// built.
 fn unreachable_outcome() -> WriteOutcome {
     WriteOutcome::rejected("event_not_found", "Den Termin gibt es nicht mehr.")
+}
+
+/// The text sent with a PUT: the object plus a `VTIMEZONE` for every IANA
+/// `TZID` that lacks one (RFC 5545; Fastmail and iCloud insist, LIC-44).
+fn ics_for_put(object: &CalendarObject) -> String {
+    let mut object = object.clone();
+    lichtung_ical::ensure_vtimezones(&mut object);
+    object.to_ics()
 }
 
 /// Applies what `edit_event` does not know (attendees, alarms, RDATE and

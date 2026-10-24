@@ -31,6 +31,10 @@ pub enum AppError {
     /// The calendar provider is unreachable or answered with an error (502).
     #[error("{0}")]
     ProviderUnavailable(String),
+    /// The address of an ICS subscription holds no usable calendar (404,
+    /// no `VCALENDAR`, too large; 422, LIC-14).
+    #[error("{0}")]
+    InvalidFeed(String),
     /// Rate limit hit; the response carries `Retry-After` (seconds).
     #[error("{message}")]
     TooManyRequests {
@@ -62,6 +66,7 @@ impl AppError {
             AppError::CursorExpired(_) => StatusCode::GONE,
             AppError::InvalidCredentials(_) => StatusCode::UNPROCESSABLE_ENTITY,
             AppError::ProviderUnavailable(_) => StatusCode::BAD_GATEWAY,
+            AppError::InvalidFeed(_) => StatusCode::UNPROCESSABLE_ENTITY,
             AppError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             AppError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -79,6 +84,7 @@ impl AppError {
             AppError::CursorExpired(_) => "cursor_expired",
             AppError::InvalidCredentials(_) => "invalid_credentials",
             AppError::ProviderUnavailable(_) => "provider_unavailable",
+            AppError::InvalidFeed(_) => "invalid_feed",
             AppError::TooManyRequests { .. } => "too_many_requests",
             AppError::Unavailable(_) => "unavailable",
             AppError::Internal(_) => "internal",

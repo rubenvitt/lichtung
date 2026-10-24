@@ -353,7 +353,7 @@ fn new_id(prefix: &str) -> String {
     format!("{prefix}_{}", Uuid::now_v7().simple())
 }
 
-fn validate_name(raw: &str, what: &str) -> AppResult<String> {
+pub(crate) fn validate_name(raw: &str, what: &str) -> AppResult<String> {
     let name = raw.trim().to_owned();
     let len = name.chars().count();
     if len == 0 || len > MAX_NAME_CHARS {
@@ -441,9 +441,6 @@ pub fn validate_color(raw: &str) -> AppResult<String> {
 
 fn unsupported_kind(kind: AccountKind) -> Option<AppError> {
     match kind {
-        AccountKind::Ics => Some(AppError::bad_request(
-            "ICS-Abos werden noch nicht unterstützt (kommt mit LIC-14)",
-        )),
         AccountKind::Microsoft => Some(AppError::bad_request(
             "Microsoft-Konten werden noch nicht unterstützt (kommt mit der Graph-Anbindung)",
         )),
@@ -593,10 +590,13 @@ impl App {
     pub async fn create_account(&self, input: NewAccount) -> AppResult<Account> {
         let kind = AccountKind::parse(input.kind.trim()).ok_or_else(|| {
             AppError::bad_request(format!(
-                "Unbekannte Kontoart „{}“ (möglich: fastmail, icloud, caldav)",
+                "Unbekannte Kontoart „{}“ (möglich: fastmail, icloud, caldav, ics)",
                 input.kind
             ))
         })?;
+        if kind == AccountKind::Ics {
+            return self.create_ics_account(input).await;
+        }
         if let Some(e) = unsupported_kind(kind) {
             return Err(e);
         }
@@ -631,7 +631,11 @@ impl App {
 
         let id = new_id("acc");
         let now = now_ms();
-        let credentials = StoredCredentials { password }.seal(self.cipher(), &id);
+        let credentials = StoredCredentials {
+            password,
+            ..Default::default()
+        }
+        .seal(self.cipher(), &id);
         let mut row = AccountRow {
             id,
             kind,
@@ -705,6 +709,9 @@ impl App {
         }
 
         let kind = current.kind;
+        if kind == AccountKind::Ics {
+            return self.reconnect_ics_account(current, name, patch).await;
+        }
         let base_url = match patch.url.as_deref() {
             Some(url) => self.provider_base_url(kind, Some(url))?,
             None => current.base_url.clone(),
@@ -734,7 +741,11 @@ impl App {
         let remote = provider::fetch(kind, &base_url, &username, &password)
             .await
             .map_err(ProviderError::into_app_error)?;
-        let credentials = StoredCredentials { password }.seal(self.cipher(), &id);
+        let credentials = StoredCredentials {
+            password,
+            ..Default::default()
+        }
+        .seal(self.cipher(), &id);
         let account = self
             .with_change_tx(move |tx| {
                 let mut row = store::account(tx, &id)?.ok_or_else(not_found_account)?;
@@ -818,6 +829,10 @@ impl App {
             self.with_reader(move |conn| store::account(conn, &id)?.ok_or_else(not_found_account))
                 .await?
         };
+        if row.kind == AccountKind::Ics {
+            // One calendar, refreshed with its events by the feed sync.
+            return Ok(self.sync_account(id).await?.calendars);
+        }
         let Some(credentials) = self.decrypt_credentials(&row) else {
             let message = "Zugangsdaten fehlen, bitte das Konto neu verbinden".to_owned();
             self.set_status(id, StatusState::AuthFailed, Some(message.clone()))

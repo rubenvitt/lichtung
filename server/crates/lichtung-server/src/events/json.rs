@@ -325,7 +325,22 @@ pub(crate) fn status_name(status: &EventStatus) -> &'static str {
     }
 }
 
+/// `busy` or `free`: `TRANSP`, else Outlook's
+/// `X-MICROSOFT-CDO-BUSYSTATUS` (`FREE` and `WORKINGELSEWHERE` are free;
+/// `TENTATIVE`, `BUSY`, `OOF` block time), else busy.
 pub(crate) fn availability(ev: &Event<&Component>) -> &'static str {
+    if ev.component().property("TRANSP").is_none() {
+        if let Some(p) = ev.component().property("X-MICROSOFT-CDO-BUSYSTATUS") {
+            let value = p.value().trim();
+            return if value.eq_ignore_ascii_case("FREE")
+                || value.eq_ignore_ascii_case("WORKINGELSEWHERE")
+            {
+                "free"
+            } else {
+                "busy"
+            };
+        }
+    }
     match ev.transparency() {
         Transparency::Opaque => "busy",
         Transparency::Transparent => "free",

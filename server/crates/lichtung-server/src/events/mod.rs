@@ -161,10 +161,7 @@ pub fn derive(ics: &str, zone: Tz) -> Derivation {
         .status()
         .map(|s| json::status_name(&s).to_owned())
         .unwrap_or_else(|| "confirmed".to_owned());
-    let transparency = match base.transparency() {
-        lichtung_ical::Transparency::Opaque => "busy",
-        lichtung_ical::Transparency::Transparent => "free",
-    };
+    let transparency = json::availability(&base);
     Ok(Derived {
         uid: object.uid(),
         title: base.summary(),

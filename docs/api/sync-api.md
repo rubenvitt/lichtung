@@ -74,6 +74,7 @@ Die Apps melden sich wie die Zunder-App über den eingebauten OAuth-Server an (A
 - `status.state`: `ok`, `syncing`, `error` (vorübergehend, `message` sagt warum), `auth_failed` (Zugangsdaten erneuern).
 - *Ergänzung (LIC-8):* Der Server synchronisiert jedes Konto beim Start und danach alle 5 Minuten. Nach `error` versucht er es mit wachsendem Abstand erneut (1, 2, 4 … höchstens 60 Minuten), `last_sync_at` bleibt dabei der letzte erfolgreiche Abgleich. Ein Konto auf `auth_failed` versucht er nicht mehr von selbst, bis neue Zugangsdaten gespeichert sind (`PATCH /api/accounts/{id}`); `POST /api/accounts/{id}/sync` versucht es trotzdem. `message` bei `error` nennt den betroffenen Kalender, z. B. „Kalender „Privat“: Kalenderanbieter derzeit nicht erreichbar: HTTP 503“.
 - *Ergänzung (LIC-7):* `kind: caldav` ist ein beliebiger CalDAV-Server mit eigener Adresse (Selbsthoster, Radicale in Tests). Nur bei diesem `kind` enthält das Account zusätzlich `url` (Server-Adresse). Clients, die `caldav` nicht kennen, zeigen das Konto wie ein unbekanntes an.
+- *Ergänzung (LIC-14):* Bei `kind: ics` ist `username` die Feed-Adresse **zur Anzeige**: Schema, Host, Port und Pfad, ohne Zugangsdaten, ohne Query und ohne Fragment; Pfadteile, die wie Schlüssel aussehen (ab 32 Zeichen oder ab 16 Zeichen mit mindestens 4 Ziffern), stehen als `…`, z. B. `https://outlook.office365.com/owa/calendar/…/…/calendar.ics`. Die vollständige URL (sie enthält meist ein Token) liegt nur verschlüsselt auf dem Server und steht in keiner Antwort und keinem Log; ein `url`-Feld gibt es bei `ics` nicht. Ein ICS-Konto hat genau einen Kalender. Der Server ruft den Feed alle 15 Minuten ab (bedingt mit `If-None-Match`/`If-Modified-Since`), Status und Wiederholungen wie bei CalDAV; `auth_failed` heißt hier: der Feed-Server antwortet mit 401/403 (Link widerrufen oder Anmeldung geändert).
 
 ### Calendar
 
@@ -98,6 +99,7 @@ Die Apps melden sich wie die Zunder-App über den eingebauten OAuth-Server an (A
 - `can_invite`: Termine mit Teilnehmern verschicken echte Einladungen.
 - Einstellungen (in der App änderbar, Abschnitt 7): `color` (überschreibt `provider_color`), `hidden`, `mcp_write` (darf Claude hier schreiben; Standard `false` für den Arbeitskalender), `openings_busy` (zählt für freie Zeiten), `all_day_blocks` (ganztägige Termine blockieren), `position`.
 - *Ergänzung (LIC-7):* `color` ist immer gesetzt: die eigene Farbe, sonst `provider_color`, sonst eine feste Ersatzfarbe. `provider_color` ist `null`, wenn der Anbieter keine Farbe meldet. Farben haben die Form `#RRGGBB` (Großbuchstaben).
+- *Ergänzung (LIC-14):* Der Kalender eines ICS-Kontos hat `writable`, `can_invite` und `mcp_write` = `false`. `name` kommt aus `X-WR-CALNAME` des Feeds, sonst aus dem Kontonamen; `provider_color` aus `X-APPLE-CALENDAR-COLOR` (`#RRGGBBAA` wird zu `#RRGGBB`), sonst `null`.
 - *Ergänzung (LIC-7):* Standardwerte beim Anlegen: `mcp_write` = `writable` (bei `microsoft` später `false`), `openings_busy` `true`, `all_day_blocks` `false`, `hidden` `false`; `position` hängt neue Kalender hinten an (innerhalb eines Kontos in der Reihenfolge des Anbieters). Sammlungen, die nur Aufgaben (VTODO) halten, werden nicht als Kalender übernommen.
 - *Ergänzung (LIC-13):* Neues Feld `shared` (bool): `true` für Kalender anderer, die mit dem Konto geteilt sind (z. B. iCloud-Freigaben). Jede Freigabe ist ein eigener Kalender. Eigene Kalender, die man selbst mit anderen teilt, haben `shared: false`. Bei `writable: false` ist `mcp_write` immer `false`: `PATCH` mit `mcp_write: true` lässt den Wert auf `false`, und wird eine Freigabe beim Anbieter nur lesbar, setzt der nächste Abgleich `mcp_write` auf `false`.
 
@@ -194,6 +196,8 @@ Das iCalendar-Original hält der Server; Felder, die Lichtung nicht modelliert, 
    "parse_error": "iCalendar-Fehler in Zeile 12: END:VCALENDAR fehlt am Ende der Daten"}
   ```
   `parse_error` (deutsch) gibt es nur in dieser Form; `uid` kann `null` sein. Die App zeigt solche Events nicht im Kalender, höchstens in einer Liste zum Nachsehen. Wird das Original beim Anbieter repariert, kommt das Event mit höherer `version` in normaler Form.
+
+*Ergänzung (LIC-14):* **`availability`** folgt `TRANSP`. Fehlt `TRANSP`, entscheidet Outlooks `X-MICROSOFT-CDO-BUSYSTATUS`: `FREE` und `WORKINGELSEWHERE` → `free`, `TENTATIVE`, `BUSY`, `OOF` → `busy`. Ohne beides `busy`. Gilt für alle Konten, auch in `overrides` und Vorkommen.
 
 ### Conflict
 
@@ -391,10 +395,17 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 
 *Ergänzungen (LIC-7) zu den Konten-Aufrufen:*
 
-- `POST /api/accounts` mit `kind: caldav`: `{"kind": "caldav", "url": "https://dav.example.org/", "username": "…", "password": "…", "name": "…"}`. `name` ist bei allen Arten optional (Standard: „Fastmail“, „iCloud“ bzw. der Hostname). `kind: ics` antwortet bis LIC-14 mit `400 invalid_request`.
+- `POST /api/accounts` mit `kind: caldav`: `{"kind": "caldav", "url": "https://dav.example.org/", "username": "…", "password": "…", "name": "…"}`. `name` ist bei allen Arten optional (Standard: „Fastmail“, „iCloud“ bzw. der Hostname). `kind: ics` antwortet bis LIC-14 mit `400 invalid_request` (seit LIC-14 unterstützt, siehe unten).
 - Antwort auf `POST /api/accounts` ist `201` mit dem Account; die Kalender des Kontos kommen über den Pull bzw. `GET /api/calendars`. Dasselbe Konto (Art, Server, Benutzername) ein zweites Mal: `409 conflict`.
 - `PATCH /api/accounts/{id}`: Neue Zugangsdaten werden erst beim Anbieter geprüft (`422 invalid_credentials` bzw. `502 provider_unavailable`) und nur bei Erfolg gespeichert. Wer nur `username` oder `url` ändert, braucht `password` nicht erneut zu schicken, außer das Konto steht auf `auth_failed` ohne gespeicherte Zugangsdaten (dann `400`). `url` gibt es nur bei `kind: caldav`.
 - `POST /api/accounts/{id}/sync` antwortet `202` mit dem Account (`status.state: syncing`); das Ergebnis erscheint im Status (Pull/SSE).
+
+*Ergänzungen (LIC-14) zu ICS-Konten:*
+
+- `POST /api/accounts` mit `kind: ics`: `{"kind": "ics", "url": "https://…", "name": "…"}`, optional `username` und `password` für Feeds mit Basic-Auth (ohne `username` kein `password`). `url` darf mit `https://`, `http://`, `webcal://` oder `webcals://` beginnen: `webcals` wird `https`, `webcal` wird zuerst als `https` versucht und nur, wenn keine HTTPS-Verbindung zustande kommt, als `http`. Zugangsdaten in der URL (`https://user:pass@…`) gelten wie `username`/`password`. `name` ist optional (Standard: `X-WR-CALNAME`, sonst der Hostname).
+- Der Server ruft den Feed sofort ab und übernimmt Kalender und Termine, bevor er antwortet (`201`, `status.state: ok`). Fehler: `400 invalid_request` (URL ungültig oder falsches Schema), `422 invalid_credentials` (Feed antwortet 401/403), `422 invalid_feed` (404/410 oder andere 4xx, keine iCalendar-Daten wie bei einer HTML-Anmeldeseite, nicht lesbares iCalendar, größer als 20 MB, mehr als 5 Weiterleitungen), `502 provider_unavailable` (5xx, 429, Zeitlimit von 60 s, keine Verbindung), `409 conflict` (dieselbe URL ist schon verbunden). Meldungen nennen die URL nie.
+- `PATCH /api/accounts/{id}` bei `kind: ics`: `name`, `url`, `username`, `password`. Neue Werte werden erst mit einem Abruf geprüft (Fehler wie oben) und nur bei Erfolg gespeichert; die Termine folgen dann sofort dem neuen Feed. `username: ""` entfernt die Anmeldung.
+- Termine eines ICS-Kontos: ein Event pro `UID` des Feeds, mit dem Feed-Ausschnitt als eigenem iCalendar-Original (inkl. der benutzten `VTIMEZONE`s). Eine neue `version` gibt es nur, wenn sich der Termin außer im `DTSTAMP` geändert hat. Verschwindet eine `UID` aus dem Feed, kommt ein `delete`. Doppelt exportierte Vorkommen (gleiche `UID` und `RECURRENCE-ID`) zählen einmal (das neueste nach `SEQUENCE`).
 
 *Ergänzung (LIC-8) zu `GET /api/occurrences`:*
 
@@ -440,6 +451,7 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 | 410 | `cursor_expired` | Pull-Cursor zu alt, neu mit `since=0` |
 | 413 | `payload_too_large` | zu viele Mutationen oder zu großer Body |
 | 422 | `invalid_credentials` | Zugangsdaten vom Anbieter abgelehnt |
+| 422 | `invalid_feed` | *(LIC-14)* unter der Adresse eines ICS-Abos liegt kein brauchbarer Kalender (nicht gefunden, kein iCalendar, zu groß) |
 | 429 | `too_many_requests` | zu viele Anfragen, `Retry-After` beachten |
 | 502 | `provider_unavailable` | Anbieter nicht erreichbar oder Fehler beim Anbieter |
 | 503 | `unavailable` | Server fährt herunter oder ist überlastet |
@@ -457,3 +469,4 @@ Zusätzliche `code`s in Mutations-Ergebnissen (`rejected`/`retry`): `calendar_re
 | 2026-10-23 | Ergänzungen aus LIC-10/LIC-11 (keine bestehende Form geändert): Conflict mit `origin` `web`/`api:…`, erneut im Pull bei gelöschtem Event; Pull-Parameter, Cursor der letzten Seite, `410` auch für Cursor aus der Zukunft, 90 Tage Löschungen; SSE-Keep-alive und Ende beim Herunterfahren; Push: wer darf, Body- und Zeitlimit, `400` ohne `id`, nur endgültige Ergebnisse idempotent, `invalid_request` für fehlerhafte Mutationen, Regeln für Anlegen, gelöschte Events, Kalenderwechsel, `respond`, ignorierte Felder in EventInput, Anbieterfehler; `GET /api/conflicts` |
 | 2026-10-23 | Ergänzungen aus LIC-8 (keine bestehende Form geändert): Sync-Rhythmus und Status der Konten; `DateValue` mit `time_zone: null` und `utc` (nicht übersetzbare Zone), `time_zone: "UTC"`; `rrule: null`, Objekte ohne Master; Form nicht lesbarer Termine mit `parse_error`; Form von `GET /api/occurrences` mit `time_zone` und `include_cancelled` (Abschnitt 7) |
 | 2026-10-23 | Ergänzungen aus LIC-13 (keine bestehende Form geändert): Feld `shared` am Kalender; `mcp_write` ist bei nur lesbaren Kalendern immer `false` |
+| 2026-10-23 | Ergänzungen aus LIC-14 (keine bestehende Form geändert): `kind: ics` mit `url`, optional `username`/`password` (Basic-Auth), Schemata `webcal`/`webcals`; `username` zeigt die URL ohne Query, Zugangsdaten und schlüsselartige Pfadteile, die volle URL bleibt verschlüsselt auf dem Server; ein Kalender pro Konto (nur lesbar, Name aus `X-WR-CALNAME`, Farbe aus `X-APPLE-CALENDAR-COLOR`); Abruf alle 15 Minuten mit ETag/Last-Modified; neuer Fehlercode `422 invalid_feed`; `availability` berücksichtigt `X-MICROSOFT-CDO-BUSYSTATUS`, wenn `TRANSP` fehlt (Abschnitte 3, 7, 9) |

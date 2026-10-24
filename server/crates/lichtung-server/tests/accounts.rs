@@ -386,9 +386,10 @@ async fn account_input_is_validated() {
     let (s, _provider, session) = setup().await;
     let cases = [
         (
-            json!({"kind": "ics", "url": "https://example.org/feed.ics", "name": "Feed"}),
-            "LIC-14",
+            json!({"kind": "ics", "url": "ftp://example.org/feed.ics", "name": "Feed"}),
+            "webcal://",
         ),
+        (json!({"kind": "ics", "name": "Feed"}), "url fehlt"),
         (
             json!({"kind": "microsoft", "username": USER, "password": "x"}),
             "Microsoft",

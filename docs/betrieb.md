@@ -126,7 +126,15 @@ Fehler kommen als `{"error":{"code":"…","message":"…"}}` mit deutscher Meldu
 - **Verfahren:** CalDAV mit `sync-collection` (RFC 6578). Ohne Token, mit abgelaufenem Token oder bei Servern ohne `sync-collection` vergleicht der Server alle ETags (bei unverändertem ctag gar nicht). Neue und geänderte Termine holt er per `calendar-multiget`.
 - **Nichts geht verloren, nichts doppelt:** Gespeichert wird das iCalendar-Original (Zeilenenden auf CRLF vereinheitlicht), auch wenn es nicht lesbar ist. Die Änderungen einer Runde und der neue Sync-Token landen in einer Transaktion; bricht ein Lauf ab (Netz, Fehler beim Anbieter, Neustart), wiederholt der nächste die Runde.
 - **Status:** `syncing` während des Laufs, danach `ok`. Vorübergehende Fehler setzen `error` mit Meldung; der nächste Versuch kommt nach 1, 2, 4 … höchstens 60 Minuten. Bei `auth_failed` (Anbieter lehnt das App-Passwort ab) versucht es der Server erst wieder, wenn in der App neue Zugangsdaten gespeichert sind.
+- **Drosselung:** Antwortet ein Anbieter mit 429 oder 503 und `Retry-After` (iCloud tut das bei vielen Anfragen), bricht der Lauf ab, statt die übrigen Kalender weiter abzufragen. Der nächste Versuch kommt frühestens nach der verlangten Pause, mindestens aber nach dem üblichen Abstand.
 - **Zeitzone des Servers:** Floating-Zeiten und ganztägige Termine rechnet der Server in `TZ` (Image: `Europe/Berlin`), falls dort eine IANA-Zone steht, sonst in UTC.
+
+### iCloud
+
+- **App-spezifisches Passwort:** iCloud nimmt für CalDAV nur App-spezifische Passwörter an. Erzeugen unter appleid.apple.com → Anmelden und Sicherheit → App-spezifische Passwörter (die Apple-ID braucht dafür die Zwei-Faktor-Authentifizierung). In der App `iCloud` wählen, Benutzername ist die E-Mail-Adresse der Apple-ID. Wer das normale Apple-ID-Passwort eingibt, bekommt `invalid_credentials` mit genau diesem Hinweis. Wird das Passwort bei Apple widerrufen oder das Apple-ID-Passwort geändert (das widerruft alle App-spezifischen Passwörter), steht das Konto auf `auth_failed`. Dann ein neues Passwort erzeugen und in der App eintragen.
+- **Adressen:** Lichtung beginnt bei `https://caldav.icloud.com/`. iCloud leitet auf einen Partitions-Host weiter (`pNN-caldav.icloud.com`), dort liegen die Kalender. Die Zugangsdaten gehen nur per HTTPS an Hosts unter `icloud.com`.
+- **Geteilte Kalender:** Kalender, die andere mit dem Konto teilen, erscheinen als eigene Kalender mit `shared: true` und den Rechten der Freigabe. Bei einer nur lesenden Freigabe sind `writable` und `mcp_write` `false`, und `mcp_write` lässt sich dort auch nicht einschalten. Eigene Kalender, die man selbst mit anderen teilt, bleiben normale Kalender (`shared: false`). Eine Freigabe muss in der Kalender-App am Mac oder iPhone erst angenommen sein, bevor sie über CalDAV sichtbar wird. Zieht jemand die Freigabe zurück, verschwindet der Kalender beim nächsten Abgleich samt Terminen.
+- **Nicht übernommen:** Erinnerungslisten (nur Aufgaben), Eingang/Ausgang für Einladungen und Mitteilungen.
 
 ## Schreiben und Konflikte
 

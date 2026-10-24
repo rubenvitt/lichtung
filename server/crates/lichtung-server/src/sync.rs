@@ -29,7 +29,9 @@
 //! (vanished calendars delete their events with tombstones), then every
 //! calendar. Status: `syncing` while running, then `ok` with
 //! `last_sync_at`; `error` with a German message for temporary failures
-//! (retried with backoff); `auth_failed` on 401, after which the scheduler
+//! (retried with backoff, at least as long as a `Retry-After` of a
+//! throttling provider asks; a throttled run skips its remaining calendars);
+//! `auth_failed` on 401, after which the scheduler
 //! leaves the account alone until new credentials are stored.
 //!
 //! **Scheduler** ([`run_scheduler`]): at startup every account, then every
@@ -127,6 +129,12 @@ pub fn backoff(failures: u32) -> Duration {
     RETRY_BASE.saturating_mul(factor).min(MAX_BACKOFF)
 }
 
+/// Wait after a failed run: the backoff, or longer if the provider asked
+/// for it with `Retry-After` (capped at [`MAX_BACKOFF`]).
+pub fn retry_wait(failures: u32, retry_after: Option<Duration>) -> Duration {
+    backoff(failures).max(retry_after.unwrap_or_default().min(MAX_BACKOFF))
+}
+
 /// Ends the "sync running" mark of an account when dropped (also when the
 /// run is cancelled).
 struct Claim {
@@ -198,6 +206,12 @@ impl App {
         self.set_status(id, StatusState::Syncing, None).await?;
 
         let fail = |e: ProviderError| async move {
+            if let DavError::RateLimited {
+                retry_after: Some(wait),
+            } = &e.error
+            {
+                self.note_sync_retry_after(id, *wait);
+            }
             let (state, message) = e.status();
             tracing::warn!(account = %id, error = %e.error, "sync failed");
             self.set_status(id, state, Some(message)).await?;
@@ -264,8 +278,20 @@ impl App {
                         account = %id, calendar = %calendar.id, error = %e,
                         "calendar sync failed"
                     );
+                    // Throttled (iCloud: 503 with Retry-After): leave the
+                    // remaining calendars for the next run.
+                    let throttled = matches!(e, DavError::RateLimited { .. });
+                    if let DavError::RateLimited {
+                        retry_after: Some(wait),
+                    } = &e
+                    {
+                        self.note_sync_retry_after(id, *wait);
+                    }
                     if first_error.is_none() {
                         first_error = Some((calendar.name.clone(), e));
+                    }
+                    if throttled {
+                        break;
                     }
                 }
                 Err(SyncError::App(e)) => {
@@ -534,7 +560,8 @@ pub async fn run_scheduler(app: App) {
             () = shutdown.cancelled() => return,
             Some((id, ok)) = done_rx.recv() => {
                 let failures = if ok { 0 } else { plan.get(&id).map_or(0, |(_, f)| *f) + 1 };
-                let wait = if ok { SYNC_INTERVAL } else { backoff(failures) };
+                let retry_after = app.take_sync_retry_after(&id);
+                let wait = if ok { SYNC_INTERVAL } else { retry_wait(failures, retry_after) };
                 plan.insert(id, (Instant::now() + wait, failures));
             }
             () = app.sync_wakeup() => {}
@@ -554,5 +581,22 @@ mod tests {
         assert_eq!(backoff(4), Duration::from_secs(480));
         assert_eq!(backoff(7), MAX_BACKOFF);
         assert_eq!(backoff(40), MAX_BACKOFF);
+    }
+
+    #[test]
+    fn retry_after_extends_but_never_shortens_the_backoff() {
+        assert_eq!(retry_wait(1, None), Duration::from_secs(60));
+        assert_eq!(
+            retry_wait(1, Some(Duration::from_secs(10))),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            retry_wait(1, Some(Duration::from_secs(900))),
+            Duration::from_secs(900)
+        );
+        assert_eq!(
+            retry_wait(1, Some(Duration::from_secs(86_400))),
+            MAX_BACKOFF
+        );
     }
 }

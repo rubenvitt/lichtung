@@ -11,16 +11,19 @@ use crate::xml::{DavResponse, NS_APPLE, NS_CALDAV, NS_CS, NS_DAV};
 const CALENDAR_PROPS: &str = "<d:resourcetype/><d:displayname/><d:owner/>\
 <d:current-user-privilege-set/><d:sync-token/><d:supported-report-set/>\
 <c:calendar-description/><c:supported-calendar-component-set/>\
-<c:schedule-calendar-transp/><cs:getctag/><a:calendar-color/><a:calendar-order/>";
+<c:schedule-calendar-transp/><cs:getctag/><cs:invite/><a:calendar-color/><a:calendar-order/>";
 
 /// Sharing state of a calendar as seen from this account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sharing {
     /// Not shared (as far as the server tells).
     NotShared,
-    /// Owned by this account and shared with others (`cs:shared-owner`).
+    /// Owned by this account and shared with others (`cs:shared-owner`
+    /// resource type, or a `cs:invite` listing sharees without an
+    /// organizer other than this account).
     SharedByMe,
-    /// Someone else's calendar shared with this account (`cs:shared`, or a
+    /// Someone else's calendar shared with this account (`cs:shared`
+    /// resource type, a `cs:invite` organizer other than this account, or a
     /// `DAV:owner` different from the principal).
     SharedWithMe,
 }
@@ -173,12 +176,30 @@ fn calendar_info(r: &DavResponse, principal: Option<&Url>) -> CalendarInfo {
         .and_then(|o| o.href_text())
         .and_then(|h| crate::href::normalize_href(&r.href, &h).ok());
 
+    let is_me = |href: &Url| principal.is_none_or(|p| same_principal(href, p));
+    // `cs:invite` (CalendarServer sharing, used by iCloud): sharees as
+    // `cs:user`, the sharer as `cs:organizer` on the sharee's copy.
+    let invite = r.prop(NS_CS, "invite");
+    let invite_organizer = invite
+        .and_then(|i| i.child(NS_CS, "organizer"))
+        .and_then(|o| o.href_text())
+        .and_then(|h| crate::href::normalize_href(&r.href, &h).ok())
+        // A `mailto:` organizer cannot be compared with the principal.
+        .filter(|o| matches!(o.scheme(), "http" | "https"));
+    let invite_has_users = invite.is_some_and(|i| i.has_child(NS_CS, "user"));
+
     let sharing = if r.has_resource_type(NS_CS, "shared") {
         Sharing::SharedWithMe
     } else if r.has_resource_type(NS_CS, "shared-owner") {
         Sharing::SharedByMe
-    } else if matches!((&owner, principal), (Some(o), Some(p)) if !same_resource(o, p)) {
+    } else if invite_organizer
+        .iter()
+        .chain(owner.iter())
+        .any(|other| !is_me(other))
+    {
         Sharing::SharedWithMe
+    } else if invite_has_users {
+        Sharing::SharedByMe
     } else {
         Sharing::NotShared
     };
@@ -224,6 +245,18 @@ fn calendar_info(r: &DavResponse, principal: Option<&Url>) -> CalendarInfo {
         transparency,
         supported_reports,
     }
+}
+
+/// `true` if two principal URLs name the same principal. Besides
+/// [`same_resource`], equal paths on different hosts count as equal: iCloud
+/// reports the principal on `caldav.icloud.com` but resolves `DAV:owner`
+/// hrefs on the calendar listing against the partition host
+/// (`pNN-caldav.icloud.com`). Only hrefs of one account's server are
+/// compared here, so the path alone identifies the principal.
+fn same_principal(a: &Url, b: &Url) -> bool {
+    same_resource(a, b)
+        || crate::href::decoded_path(a).trim_end_matches('/')
+            == crate::href::decoded_path(b).trim_end_matches('/')
 }
 
 /// `#RRGGBBAA` / `#RRGGBB` / `#RGB` → `#RRGGBB` (upper-case); anything

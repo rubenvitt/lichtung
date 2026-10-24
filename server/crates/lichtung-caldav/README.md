@@ -9,7 +9,9 @@ cd server
 cargo test -p lichtung-caldav
 ```
 
-Die normalen Tests laufen gegen einen Mock-Server mit erfundenen Antworten im Stil von Fastmail und iCloud.
+Die normalen Tests laufen gegen einen Mock-Server mit erfundenen Antworten im Stil von Fastmail und iCloud. `tests/icloud.rs` deckt die iCloud-Besonderheiten ab: Discovery über einen Partitions-Host, Erinnerungslisten, `inbox`/`outbox`/`notification`, geteilte Kalender (`cs:shared`, `cs:shared-owner`, `cs:invite`, nur lesende Freigaben), Sync-Tokens im iCloud-Stil, 403 `valid-sync-token`, 401, 403 und 503 mit `Retry-After`.
+
+Zugangsdaten gehen an den Ursprung der Basis-URL und per HTTPS an Hosts derselben Elterndomain. Bei iCloud sind das `caldav.icloud.com` und `pNN-caldav.icloud.com`, auch wenn die href den Port `:443` ausdrücklich nennt. `DAV:owner` wird nur über den Pfad mit dem Principal verglichen, weil iCloud den Principal auf `caldav.icloud.com` meldet, die Kalender aber auf dem Partitions-Host liegen.
 
 ### Radicale-Integrationstest
 

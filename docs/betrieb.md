@@ -116,7 +116,7 @@ curl -s -X POST http://localhost:8080/api/tokens \
 - **Wer Zugänge verwalten darf:** eine Browser-Sitzung oder ein Gerät der App. API-, Bootstrap- und OAuth-Tokens dürfen keine Tokens anlegen oder widerrufen. Abweichung von Zunder (dort nur der Browser): Lichtung hat keine Weboberfläche, Tokens werden in der App erzeugt (Spec, Abschnitt 7).
 - **CSRF:** Mit Cookie angemeldete, ändernde Anfragen brauchen den Header `X-Lichtung-Client` (beliebiger Wert).
 - **Geräte-Login der App:** OAuth-Code-Flow mit PKCE über `ASWebAuthenticationSession`. Die App registriert sich unter `/oauth/register` mit `client_name` (= Gerätename) und einer Redirect-URI wie `dev.rubeen.lichtung:/oauth`, fragt `/oauth/authorize` mit `resource=<public>/api` und tauscht den Code unter `/oauth/token` gegen einen Geräte-Token. Geräte-Tokens gibt es nur für App-Schemata oder localhost, nie für Web-Dienste. Abmelden: `/oauth/revoke` mit dem eigenen Token.
-- **claude.ai:** Connector mit der URL `https://lichtung.rubeen.dev/mcp` anlegen (der Endpunkt folgt in LIC-12); Discovery, Registrierung und Freigabe laufen automatisch über die deutsche Freigabeseite.
+- **claude.ai:** Connector mit der URL `https://lichtung.rubeen.dev/mcp` anlegen; Discovery, Registrierung und Freigabe laufen automatisch über die deutsche Freigabeseite. Werkzeuge, Schreibschutz und Einrichtung per API-Token: [`docs/mcp.md`](mcp.md).
 
 Fehler kommen als `{"error":{"code":"…","message":"…"}}` mit deutscher Meldung; die OAuth-Endpunkte antworten im OAuth-Format `{"error","error_description"}`.
 
@@ -136,6 +136,20 @@ Fehler kommen als `{"error":{"code":"…","message":"…"}}` mit deutscher Meldu
 - **Geteilte Kalender:** Kalender, die andere mit dem Konto teilen, erscheinen als eigene Kalender mit `shared: true` und den Rechten der Freigabe. Bei einer nur lesenden Freigabe sind `writable` und `mcp_write` `false`, und `mcp_write` lässt sich dort auch nicht einschalten. Eigene Kalender, die man selbst mit anderen teilt, bleiben normale Kalender (`shared: false`). Eine Freigabe muss in der Kalender-App am Mac oder iPhone erst angenommen sein, bevor sie über CalDAV sichtbar wird. Zieht jemand die Freigabe zurück, verschwindet der Kalender beim nächsten Abgleich samt Terminen.
 - **Nicht übernommen:** Erinnerungslisten (nur Aufgaben), Eingang/Ausgang für Einladungen und Mitteilungen.
 
+## Schreiben und Konflikte
+
+- **Schreiben:** Änderungen aus den Apps und über MCP schreibt der Server sofort zum Anbieter: neue Termine mit `If-None-Match: *`, Änderungen und Löschungen mit `If-Match` auf dem gespeicherten ETag. Ausgangspunkt ist immer das gespeicherte iCalendar-Original, Felder, die Lichtung nicht kennt, bleiben erhalten. Ein Schreibvorgang und der Abgleich desselben Kalenders laufen nie gleichzeitig.
+- **Konflikt (der Anbieter gewinnt):** Hat sich der Termin seit dem Stand der App geändert (andere `version`, oder der Anbieter antwortet 412 bzw. 404), holt der Server den Termin sofort neu, verwirft die Änderung und legt einen Konflikt an. Die App zeigt ihn mit der verworfenen Änderung, bis jemand ihn wegklickt (`POST /api/conflicts/{id}/dismiss`). Nichts verschwindet still; im Log steht `write conflict, provider wins`.
+- **Rechte:** Nur lesbare Kalender (geteilt ohne Schreibrecht, ICS-Abos) lehnen Änderungen ab (`calendar_read_only`). `mcp_write` gilt nur für Claude (`/mcp`): Ist es aus, lehnt der Server jedes Schreiben über MCP in diesem Kalender ab, auch Antworten auf Einladungen (`mcp_write_forbidden`). Neue Kalender von ICS- und Microsoft-Konten (Arbeitskalender) starten mit `mcp_write` aus.
+- **Anbieter nicht erreichbar:** Die App behält die Änderung und schickt sie später erneut. Lehnt der Anbieter das App-Passwort ab, steht das Konto auf `auth_failed`.
+
+## Aufbewahrung
+
+- **Löschungen** (Tombstones für den Pull der Apps) bleiben 90 Tage. Eine App, die länger nicht synchronisiert hat, bekommt `410 cursor_expired` und lädt ihren Cache neu; ausstehende Änderungen behält sie.
+- **Ergebnisse von Mutationen** (für die Idempotenz) bleiben 30 Tage.
+- **Konflikte** bleiben, bis sie weggeklickt werden.
+- Aufgeräumt wird nachts zusammen mit dem Backup.
+
 ## Backups
 
-Jede Nacht zur `LICHTUNG_BACKUP_HOUR` schreibt der Server `/data/backups/lichtung-<Datum>-<Zeit>.db` (konsistent per `VACUUM INTO`) und behält die letzten 14. Dabei räumt er abgelaufene Sitzungen und OAuth-Reste auf. Wiederherstellen: Container stoppen, Backup als `data/lichtung.db` ablegen (`-wal`/`-shm` entfernen), starten. Die Backups enthalten die verschlüsselten Zugangsdaten; lesbar sind sie nur mit dem passenden `LICHTUNG_SECRET_KEY`.
+Jede Nacht zur `LICHTUNG_BACKUP_HOUR` schreibt der Server `/data/backups/lichtung-<Datum>-<Zeit>.db` (konsistent per `VACUUM INTO`) und behält die letzten 14. Dabei räumt er abgelaufene Sitzungen, OAuth-Reste und alte Sync-Daten auf (siehe [Aufbewahrung](#aufbewahrung)). Wiederherstellen: Container stoppen, Backup als `data/lichtung.db` ablegen (`-wal`/`-shm` entfernen), starten. Die Backups enthalten die verschlüsselten Zugangsdaten; lesbar sind sie nur mit dem passenden `LICHTUNG_SECRET_KEY`.

@@ -4,7 +4,7 @@
 //! |---|---|
 //! | `GET /api/occurrences?from&to&calendar_ids&time_zone&include_cancelled` | every principal of `/api` |
 //!
-//! Pull, push and SSE follow with LIC-10/LIC-11.
+//! Pull, push and SSE: [`super::sync`].
 
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};

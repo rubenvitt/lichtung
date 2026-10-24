@@ -231,8 +231,8 @@ pub fn upsert(
     }
 }
 
-/// Deletes the event at `href` with a tombstone; returns its ID if it
-/// existed.
+/// Deletes the event at `href` with a tombstone (its conflicts lose their
+/// `event_id`); returns its ID if it existed.
 pub fn delete_by_href(
     conn: &Connection,
     calendar_id: &str,
@@ -248,6 +248,7 @@ pub fn delete_by_href(
         .optional()?;
     if let Some(id) = &id {
         changes::tombstone(conn, ObjectType::Event, id, now)?;
+        crate::conflicts::detach_event(conn, id)?;
     }
     Ok(id)
 }
@@ -266,6 +267,7 @@ pub fn delete_calendar_events(
     for id in &ids {
         conn.execute("DELETE FROM events WHERE id = ?1", [id])?;
         changes::tombstone(conn, ObjectType::Event, id, now)?;
+        crate::conflicts::detach_event(conn, id)?;
     }
     Ok(ids.len())
 }

@@ -427,12 +427,21 @@ pub(crate) fn check_status(raw: RawResponse, ctx: Ctx) -> Result<RawResponse> {
     })
 }
 
+/// `Retry-After` as delay-seconds or HTTP-date (RFC 9110 §10.2.3); a date
+/// in the past yields zero.
 fn retry_after(headers: &HeaderMap) -> Option<Duration> {
-    headers
+    let raw = headers
         .get(RETRY_AFTER)
-        .and_then(|v: &HeaderValue| v.to_str().ok())
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(Duration::from_secs)
+        .and_then(|v: &HeaderValue| v.to_str().ok())?
+        .trim();
+    if let Ok(secs) = raw.parse::<u64>() {
+        return Some(Duration::from_secs(secs));
+    }
+    let at = httpdate::parse_http_date(raw).ok()?;
+    Some(
+        at.duration_since(std::time::SystemTime::now())
+            .unwrap_or(Duration::ZERO),
+    )
 }
 
 fn origin_key(url: &Url) -> String {
@@ -518,6 +527,50 @@ mod tests {
             headers: HeaderMap::new(),
             body: body.into(),
         }
+    }
+
+    #[test]
+    fn retry_after_accepts_seconds_and_dates() {
+        let mut h = HeaderMap::new();
+        h.insert(RETRY_AFTER, HeaderValue::from_static("120"));
+        assert_eq!(retry_after(&h), Some(Duration::from_secs(120)));
+        let later = std::time::SystemTime::now() + Duration::from_secs(600);
+        h.insert(
+            RETRY_AFTER,
+            HeaderValue::from_str(&httpdate::fmt_http_date(later)).unwrap(),
+        );
+        let d = retry_after(&h).unwrap();
+        assert!(
+            d > Duration::from_secs(590) && d <= Duration::from_secs(600),
+            "{d:?}"
+        );
+        h.insert(
+            RETRY_AFTER,
+            HeaderValue::from_static("Wed, 21 Oct 2015 07:28:00 GMT"),
+        );
+        assert_eq!(retry_after(&h), Some(Duration::ZERO));
+        h.insert(RETRY_AFTER, HeaderValue::from_static("bald"));
+        assert_eq!(retry_after(&h), None);
+    }
+
+    #[test]
+    fn icloud_partition_hosts_get_credentials() {
+        // Explicit :443 as iCloud writes it in calendar-home-set hrefs.
+        let c = client("https://caldav.icloud.com/");
+        let home = crate::href::normalize_href(
+            c.base_url(),
+            "https://p42-caldav.icloud.com:443/1234567890/calendars/",
+        )
+        .unwrap();
+        assert_eq!(
+            home.as_str(),
+            "https://p42-caldav.icloud.com/1234567890/calendars/"
+        );
+        assert!(c.credentials_allowed(&home));
+        let explicit = Url::parse("https://p07-caldav.icloud.com:443/x/").unwrap();
+        assert!(c.credentials_allowed(&explicit));
+        assert!(!c.credentials_allowed(&Url::parse("http://p42-caldav.icloud.com/").unwrap()));
+        assert!(!c.credentials_allowed(&Url::parse("https://icloud.com.example.org/").unwrap()));
     }
 
     #[test]

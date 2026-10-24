@@ -96,6 +96,25 @@ impl AccountKind {
             AccountKind::Microsoft => "Microsoft",
         }
     }
+
+    /// What to do when the provider refuses the password (401): both
+    /// providers only accept app passwords for CalDAV, the usual mistake is
+    /// the normal account password.
+    pub fn password_hint(self) -> Option<&'static str> {
+        match self {
+            AccountKind::Icloud => Some(
+                "iCloud braucht ein App-spezifisches Passwort, nicht das Passwort der Apple-ID: \
+                 unter appleid.apple.com → Anmelden und Sicherheit → App-spezifische Passwörter \
+                 eines erzeugen. Benutzername ist die E-Mail-Adresse der Apple-ID.",
+            ),
+            AccountKind::Fastmail => Some(
+                "Fastmail braucht ein App-Passwort, nicht das normale Passwort: in Fastmail unter \
+                 Einstellungen → Privatsphäre & Sicherheit → App-Passwörter eines mit Zugriff auf \
+                 Kalender (CalDAV) erzeugen. Benutzername ist die Fastmail-Adresse.",
+            ),
+            _ => None,
+        }
+    }
 }
 
 /// `status.state` of an account.
@@ -179,6 +198,8 @@ pub struct Calendar {
     pub provider_color: Option<String>,
     pub writable: bool,
     pub can_invite: bool,
+    /// Someone else's calendar shared with this account (LIC-13).
+    pub shared: bool,
     pub hidden: bool,
     pub mcp_write: bool,
     pub openings_busy: bool,
@@ -201,6 +222,7 @@ impl From<&CalendarRow> for Calendar {
             provider_color: row.provider_color.clone(),
             writable: row.writable,
             can_invite: row.can_invite,
+            shared: row.shared,
             hidden: row.hidden,
             mcp_write: row.mcp_write,
             openings_busy: row.openings_busy,
@@ -900,7 +922,8 @@ impl App {
                 row.hidden = v;
             }
             if let Some(v) = patch.mcp_write {
-                row.mcp_write = v;
+                // Nobody may write into a read-only calendar, Claude neither.
+                row.mcp_write = v && row.writable;
             }
             if let Some(v) = patch.openings_busy {
                 row.openings_busy = v;

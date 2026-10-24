@@ -8,7 +8,8 @@
 //! * a **typed view** on `VEVENT`s ([`Event`]) with setters that only touch
 //!   the affected properties,
 //! * **time zones** ([`ZoneResolver`]): IANA, Windows/Outlook names, path
-//!   prefixes, custom `VTIMEZONE`s, floating time,
+//!   prefixes, custom `VTIMEZONE`s, floating time; generated `VTIMEZONE`s
+//!   for written objects ([`ensure_vtimezones`]),
 //! * **expansion** of series into occurrences ([`expand`]): `RRULE`, `RDATE`,
 //!   `EXDATE`, overrides, DST-correct wall-clock semantics,
 //! * **scoped editing** ([`edit_event`], [`delete_event`]): only this, this
@@ -48,6 +49,7 @@ mod parser;
 mod rule;
 mod tz;
 mod value;
+mod vtimezone;
 mod windows_zones;
 
 pub use edit::{delete_event, edit_event, EditContext, EditOutcome, EditScope, EventChanges};
@@ -65,3 +67,4 @@ pub use parser::{escape_text, parse, serialize, unescape_text, Component, Param,
 pub use rule::{Frequency, RecurRule, WallClockIter};
 pub use tz::{resolve_known_tzid, CustomZone, ResolvedBy, Zone, ZoneResolver};
 pub use value::{CalTime, IcalDuration, Period, PeriodEnd, RDate, TimeZoneRef};
+pub use vtimezone::{ensure_vtimezones, vtimezone_for};

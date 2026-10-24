@@ -52,9 +52,12 @@ impl ProviderError {
         let provider = self.kind.provider_name();
         use lichtung_caldav::Error as E;
         match self.error {
-            E::Unauthorized => AppError::InvalidCredentials(format!(
-                "{provider} hat die Zugangsdaten abgelehnt. Benutzername und App-Passwort prüfen."
-            )),
+            E::Unauthorized => AppError::InvalidCredentials(match self.kind.password_hint() {
+                Some(hint) => format!("{provider} hat die Zugangsdaten abgelehnt. {hint}"),
+                None => format!(
+                    "{provider} hat die Zugangsdaten abgelehnt. Benutzername und App-Passwort prüfen."
+                ),
+            }),
             E::Unavailable { .. } => AppError::ProviderUnavailable(format!(
                 "{provider} ist gerade nicht erreichbar. Bitte später erneut versuchen."
             )),
@@ -76,10 +79,16 @@ impl ProviderError {
             StatusState::Error
         };
         let message = match &self.error {
-            lichtung_caldav::Error::Unauthorized => format!(
-                "{} hat die Zugangsdaten abgelehnt. Bitte neu verbinden.",
-                self.kind.provider_name()
-            ),
+            lichtung_caldav::Error::Unauthorized => match self.kind.password_hint() {
+                Some(hint) => format!(
+                    "{} hat die Zugangsdaten abgelehnt. Bitte neu verbinden. {hint}",
+                    self.kind.provider_name()
+                ),
+                None => format!(
+                    "{} hat die Zugangsdaten abgelehnt. Bitte neu verbinden.",
+                    self.kind.provider_name()
+                ),
+            },
             other => other.to_string(),
         };
         (state, message)

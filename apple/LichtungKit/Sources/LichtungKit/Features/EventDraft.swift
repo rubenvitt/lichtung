@@ -163,6 +163,18 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
         )
     }
 
+    /// Neuer Termin über einen Zeitraum, z. B. nach dem Aufziehen im Raster
+    /// (LIC-47): Beginn und Ende als Wanduhrzeit in der Zone des Geräts.
+    public static func new(
+        spanning interval: DateInterval, calendarId: String?, deviceTimeZone tz: TimeZone,
+        id: String = UUID().uuidString
+    ) -> EventDraft {
+        let cal = Calendar.lichtung(timeZone: tz)
+        var draft = new(startingAt: LocalDateTime(interval.start, calendar: cal), calendarId: calendarId, deviceTimeZone: tz, id: id)
+        draft.end = LocalDateTime(max(interval.end, interval.start.addingTimeInterval(60)), calendar: cal)
+        return draft
+    }
+
     /// Entwurf aus einem angezeigten Vorkommen. `event` ist der (sichtbare)
     /// Stand des Events dazu; ohne ihn gilt das Vorkommen als Einzeltermin.
     public init(editing occ: Occurrence, event: Event?, deviceTimeZone tz: TimeZone, id: String = UUID().uuidString) {

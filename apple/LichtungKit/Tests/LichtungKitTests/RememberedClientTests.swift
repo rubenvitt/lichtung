@@ -178,6 +178,34 @@ struct RememberedClientTests {
         #expect(store.client(for: URL(string: "https://andere.example.org")!) == nil)
     }
 
+    static func me(_ json: String) throws -> ServerInfo {
+        try APICoding.decoder.decode(ServerInfo.self, from: Data(json.utf8))
+    }
+
+    /// LIC-55: Ein anderes Gerät hat dieses umbenannt.
+    @Test func deviceNameFollowsTheServer() throws {
+        let renamed = try Self.me(#"{"auth": "app:Büro-Mac", "device": {"id": "d1", "name": "Büro-Mac"}}"#)
+        #expect(DeviceLoginFlow.deviceNameUpdate(remembered: "Rubens Mac", me: renamed) == "Büro-Mac")
+        #expect(DeviceLoginFlow.deviceNameUpdate(remembered: "Büro-Mac", me: renamed) == nil)
+        // Ohne Gerät (Browser, API-Token, älterer Server) oder ohne Namen bleibt der gemerkte.
+        #expect(DeviceLoginFlow.deviceNameUpdate(remembered: "Mac", me: try Self.me(#"{"auth": "web", "device": null}"#)) == nil)
+        #expect(DeviceLoginFlow.deviceNameUpdate(remembered: "Mac", me: try Self.me(#"{"device": {"id": "d1"}}"#)) == nil)
+        #expect(DeviceLoginFlow.deviceNameUpdate(remembered: "Mac", me: try Self.me(#"{"device": {"id": "d1", "name": "  "}}"#)) == nil)
+        #expect(DeviceLoginFlow.deviceNameUpdate(remembered: "Mac", me: try Self.me(#"{"device": {"id": "d1", "name": " Mac Mini "}}"#)) == "Mac Mini")
+
+        let store = InMemoryClientStore()
+        store.remember(RememberedClient(clientId: "cl_1", name: "Rubens Mac"), for: Self.server)
+        let flow = DeviceLoginFlow(transport: ScriptedTransport([]), clients: store)
+        #expect(flow.adoptDeviceName(from: renamed, for: Self.server) == "Büro-Mac")
+        #expect(store.client(for: Self.server) == RememberedClient(clientId: "cl_1", name: "Büro-Mac"))
+        #expect(flow.rememberedDeviceName(serverInput: "lichtung.example.org") == "Büro-Mac")
+        #expect(flow.adoptDeviceName(from: renamed, for: Self.server) == nil)
+        // Ohne gemerkten Client entsteht keiner.
+        let other = URL(string: "https://andere.example.org")!
+        #expect(flow.adoptDeviceName(from: renamed, for: other) == nil)
+        #expect(store.client(for: other) == nil)
+    }
+
     @Test func userDefaultsStore() throws {
         let suite = "lichtung-test-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

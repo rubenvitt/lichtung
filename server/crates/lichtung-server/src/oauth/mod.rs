@@ -69,6 +69,10 @@ pub const ACCESS_TOKEN_TTL_MS: i64 = HOUR_MS;
 pub const REFRESH_TOKEN_TTL_MS: i64 = 30 * DAY_MS;
 /// Registered clients without a live grant are removed after this time.
 pub const STALE_CLIENT_MS: i64 = DAY_MS;
+/// App clients (a device logged in with them) are removed this long after
+/// their last device was revoked, so logging out and in again keeps the
+/// client (LIC-55).
+pub const STALE_APP_CLIENT_MS: i64 = 30 * DAY_MS;
 /// Registered clients that were never used (no code, no token) are removed
 /// after this time, so throwaway registrations do not pile up.
 pub const UNUSED_CLIENT_MS: i64 = 30 * MINUTE_MS;
@@ -485,8 +489,15 @@ pub async fn register(app: &App, metadata: Value) -> Result<RegisteredClient, OA
     let stored = row.clone();
     app.with_writer(move |conn| {
         // Unused registrations do not pile up: never used clients disappear
-        // after half an hour, clients without a live grant after a day.
-        db::purge_oauth(conn, now, now - STALE_CLIENT_MS, now - UNUSED_CLIENT_MS)?;
+        // after half an hour, clients without a live grant after a day (app
+        // clients 30 days after their last device).
+        db::purge_oauth(
+            conn,
+            now,
+            now - STALE_CLIENT_MS,
+            now - STALE_APP_CLIENT_MS,
+            now - UNUSED_CLIENT_MS,
+        )?;
         if db::count_oauth_clients_since(conn, 0)? >= MAX_CLIENTS {
             return Ok(false);
         }

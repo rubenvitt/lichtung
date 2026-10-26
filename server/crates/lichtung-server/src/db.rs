@@ -610,27 +610,36 @@ pub fn revoke_oauth_family(conn: &Connection, family_id: &str, now: i64) -> anyh
 
 /// Removes expired codes and tokens and clients that can no longer be used:
 /// registered before `stale_before` without a live token, or registered
-/// before `unused_before` and never used (no code, no token). Returns the
-/// number of removed clients.
+/// before `unused_before` and never used (no code, no token). App clients
+/// (a device logged in with them) are kept until `app_stale_before` after
+/// their last device was revoked, so an app that logs out and in again
+/// weeks later reuses its client (LIC-55). Returns the number of removed
+/// clients.
 pub fn purge_oauth(
     conn: &Connection,
     now: i64,
     stale_before: i64,
+    app_stale_before: i64,
     unused_before: i64,
 ) -> anyhow::Result<usize> {
     conn.execute("DELETE FROM oauth_codes WHERE expires_at <= ?1", [now])?;
     conn.execute("DELETE FROM oauth_tokens WHERE expires_at <= ?1", [now])?;
     // A live grant is a token that has not expired or an active device: the
-    // app logs in again with the same client (LIC-49).
+    // app logs in again with the same client (LIC-49). A device revoked
+    // after `app_stale_before` still holds its client.
     let stale = conn.execute(
         "DELETE FROM oauth_clients
-         WHERE created_at < ?2 AND NOT EXISTS (
+         WHERE created_at < CASE
+                 WHEN EXISTS (SELECT 1 FROM devices d WHERE d.client_id = oauth_clients.id)
+                 THEN ?3 ELSE ?2 END
+           AND NOT EXISTS (
              SELECT 1 FROM oauth_tokens t
              WHERE t.client_id = oauth_clients.id AND t.revoked_at IS NULL AND t.expires_at > ?1)
            AND NOT EXISTS (
              SELECT 1 FROM devices d
-             WHERE d.client_id = oauth_clients.id AND d.revoked_at IS NULL)",
-        params![now, stale_before],
+             WHERE d.client_id = oauth_clients.id
+               AND (d.revoked_at IS NULL OR d.revoked_at >= ?3))",
+        params![now, stale_before, app_stale_before],
     )?;
     let unused = conn.execute(
         "DELETE FROM oauth_clients
@@ -886,7 +895,7 @@ mod tests {
         touch_oauth_client(&conn, "old-used", 2_000).unwrap();
 
         // stale_before far in the past: only the early rule applies
-        assert_eq!(purge_oauth(&conn, 6_000, 0, 4_000).unwrap(), 1);
+        assert_eq!(purge_oauth(&conn, 6_000, 0, 0, 4_000).unwrap(), 1);
         assert!(oauth_client(&conn, "old-unused").unwrap().is_none());
         assert!(oauth_client(&conn, "old-used").unwrap().is_some());
         assert!(oauth_client(&conn, "new-unused").unwrap().is_some());
@@ -927,7 +936,10 @@ mod tests {
 
         // Both rules apply (stale and unused before 10_000): the client of
         // the active device stays, the other one has no live grant left.
-        assert_eq!(purge_oauth(&conn, 10_000, 10_000, 10_000).unwrap(), 1);
+        assert_eq!(
+            purge_oauth(&conn, 10_000, 10_000, 10_000, 10_000).unwrap(),
+            1
+        );
         assert!(oauth_client(&conn, "app").unwrap().is_some());
         assert!(oauth_client(&conn, "app-alt").unwrap().is_none());
 
@@ -944,5 +956,64 @@ mod tests {
         assert!(rename_device(&conn, Uuid::now_v7(), active.id, "x")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn app_clients_outlive_logout() {
+        use crate::oauth::{STALE_APP_CLIENT_MS, STALE_CLIENT_MS, UNUSED_CLIENT_MS};
+        const DAY: i64 = 24 * 60 * 60 * 1000;
+        let (_dir, conn) = temp_db();
+        let owner = ensure_owner(&conn, 1).unwrap().id;
+        let client = |id: &str, redirect: &str| OAuthClientRow {
+            id: id.into(),
+            name: id.into(),
+            redirect_uris: vec![redirect.into()],
+            created_at: 0,
+            last_used_at: None,
+            revoked_at: None,
+        };
+        insert_oauth_client(&conn, &client("app", "dev.rubeen.lichtung:/oauth")).unwrap();
+        insert_oauth_client(
+            &conn,
+            &client("claude", "https://claude.ai/api/mcp/auth_callback"),
+        )
+        .unwrap();
+        touch_oauth_client(&conn, "app", 1_000).unwrap();
+        touch_oauth_client(&conn, "claude", 1_000).unwrap();
+        let device = DeviceRow {
+            id: Uuid::now_v7(),
+            user_id: owner,
+            name: "iPhone".into(),
+            family_id: "f1".into(),
+            created_at: 1_000,
+            last_used_at: None,
+            client_id: Some("app".into()),
+        };
+        insert_device(&conn, &device, "hash-1").unwrap();
+        // Logged out half an hour after the login.
+        assert!(revoke_device(&conn, owner, device.id, 2_000).unwrap());
+
+        let purge = |now: i64| {
+            purge_oauth(
+                &conn,
+                now,
+                now - STALE_CLIENT_MS,
+                now - STALE_APP_CLIENT_MS,
+                now - UNUSED_CLIENT_MS,
+            )
+            .unwrap()
+        };
+        let exists = |id: &str| oauth_client(&conn, id).unwrap().is_some();
+        // Other clients keep their lifetime of a day without a live grant.
+        assert_eq!(purge(DAY / 2), 0);
+        assert!(exists("claude"));
+        assert_eq!(purge(2 * DAY), 1);
+        assert!(!exists("claude"));
+        // The app client stays 30 days after its last device.
+        assert!(exists("app"));
+        assert_eq!(purge(30 * DAY), 0);
+        assert!(exists("app"));
+        assert_eq!(purge(31 * DAY), 1);
+        assert!(!exists("app"));
     }
 }

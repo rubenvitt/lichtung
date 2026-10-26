@@ -19,6 +19,22 @@ final class AppModel {
     var selectedOccurrence: Occurrence?
     var calendarSelection: CalendarQuery.Selection = .visible
 
+    // MARK: Tastatur und Kontextmenüs (LIC-24)
+
+    /// Ansicht im Mac-Hauptfenster; ⌘1–⌘4 im Menü „Darstellung“.
+    var viewMode: CalendarViewMode = .week
+    /// Markierter Termin (Mac): Klick, Tab, Pfeile. Getrennt von
+    /// `selectedOccurrence`, das das Detail-Blatt öffnet.
+    var highlightedOccurrence: Occurrence?
+    /// Ob das Kalenderfeld den Tastaturfokus hat (kein Textfeld). Setzt `MacRootView`.
+    var calendarHasKeyboardFocus = false
+    /// Bitte an `MacRootView`, den Fokus ins Kalenderfeld zu holen (Zähler wie `searchFocusRequests`).
+    var calendarFocusRequests = 0
+    /// Serientermin, für den die Frage nach dem Geltungsbereich beim Löschen offen ist.
+    var pendingDelete: Occurrence?
+    /// Zuletzt kopierter Termin (⌘C).
+    var clipboard: EventClipboard?
+
     init(engine: SyncEngine, timeZone: TimeZone = .current) {
         self.engine = engine
         self.timeZone = timeZone
@@ -30,6 +46,7 @@ final class AppModel {
     func observe() async {
         for await snapshot in await engine.updates() {
             state = snapshot
+            refreshHighlight() // LIC-24
         }
     }
 
@@ -87,8 +104,11 @@ final class AppModel {
         await engine.perform(.delete(eventId: occ.eventId, scope: scope, occurrence: occ.recurrenceId), label: "Termin löschen")
     }
 
+    /// Kopie, optional um `days` Tage verschoben. Aus einem schreibgeschützten
+    /// Kalender (Abo) landet sie im ersten beschreibbaren (LIC-24).
     func duplicate(_ occ: Occurrence, days: Int = 0) async {
-        await engine.perform(.create(calendarId: occ.calendarId, event: EventDuplicate.input(from: occ, shiftedByDays: days)), label: "Termin duplizieren")
+        guard let calendarId = OccurrenceActions.duplicateCalendar(for: occ, calendars: state.calendars, writable: writableCalendars) else { return }
+        await engine.perform(OccurrenceActions.duplicateIntent(occ, shiftedByDays: days, calendarId: calendarId), label: "Termin duplizieren")
     }
 
     func undo() async { await engine.undo() }
@@ -152,9 +172,10 @@ final class AppModel {
     }
 
     /// Springt zum Tag eines Vorkommens und öffnet sein Detail.
+    /// Am Mac bleibt er danach markiert (LIC-24).
     func show(_ occurrence: Occurrence) {
         selectedDay = LocalDate(occurrence.start, calendar: calendar)
-        selectedOccurrence = occurrence
+        open(occurrence)
     }
 
     // MARK: Editor (LIC-20)
@@ -212,5 +233,175 @@ final class AppModel {
     func delete(_ draft: EventDraft, scope: EditScope) async {
         guard let intent = draft.deleteIntent(scope: scope) else { return }
         await engine.perform(intent, label: "Termin löschen")
+    }
+}
+
+// MARK: Tastatur und Kontextmenüs (LIC-24)
+
+extension AppModel {
+    /// Sichtbarer Bereich der Mac-Ansicht (`nil` im Jahr).
+    var visibleSpan: DaySpan? { viewMode.visibleDays(around: selectedDay) }
+
+    /// Termine der Mac-Ansicht in der Reihenfolge, in der die Markierung wandert.
+    var visibleOccurrences: [Occurrence] {
+        guard let span = visibleSpan else { return [] }
+        return OccurrenceNavigation.ordered(occurrences(from: span.start, days: span.count))
+    }
+
+    /// Ziel für das Menü „Termin“ und die Tasten: die Markierung, solange das
+    /// Kalenderfeld den Fokus hat und kein Blatt offen ist. Mit Fokus in einem
+    /// Textfeld sind die Menüpunkte aus, damit ⌘⌫ dort weiter Text löscht.
+    var commandTarget: Occurrence? {
+        guard calendarHasKeyboardFocus, selectedOccurrence == nil, editorDraft == nil else { return nil }
+        return highlightedOccurrence
+    }
+
+    /// Einen Schritt der Ansicht vor oder zurück (⌘←/⌘→, ohne ⌘ im Kalenderfeld).
+    /// Eine Markierung außerhalb des neuen Bereichs fällt weg.
+    func step(_ direction: Int) {
+        selectedDay = viewMode.stepped(selectedDay, by: direction)
+        if let h = highlightedOccurrence, OccurrenceNavigation.refreshed(h, in: visibleOccurrences) == nil {
+            highlightedOccurrence = nil
+        }
+    }
+
+    /// Klick auf einen Termin (Mac): markieren, Fokus ins Kalenderfeld.
+    func highlight(_ occ: Occurrence) {
+        highlightedOccurrence = occ
+        calendarFocusRequests += 1
+    }
+
+    /// Klick in leere Fläche: Markierung weg. Am Mac wird der Tag gewählt
+    /// (Ziel für Einfügen); am iPhone nicht, dort beginnt das Raster mit dem Tag.
+    func tapEmptyArea(day: LocalDate) {
+        highlightedOccurrence = nil
+        #if os(macOS)
+        if selectedDay != day { selectedDay = day }
+        calendarFocusRequests += 1
+        #endif
+    }
+
+    /// Detail öffnen. Am Mac bleibt der Termin danach markiert.
+    func open(_ occ: Occurrence) {
+        #if os(macOS)
+        highlightedOccurrence = occ
+        #endif
+        selectedOccurrence = occ
+    }
+
+    /// Markierung aus der Tastatur wandern lassen. `false`, wenn nichts zu markieren ist.
+    @discardableResult
+    func highlightNeighbor(forward: Bool) -> Bool {
+        guard let next = OccurrenceNavigation.neighbor(of: highlightedOccurrence, in: visibleOccurrences, forward: forward) else { return false }
+        highlightedOccurrence = next
+        return true
+    }
+
+    /// Taste im Kalenderfeld. `false` heißt: nicht verbraucht (weiterreichen).
+    @discardableResult
+    func perform(_ command: CalendarKeyCommand) -> Bool {
+        switch command {
+        case .highlightNext:
+            return highlightNeighbor(forward: true)
+        case .highlightPrevious:
+            return highlightNeighbor(forward: false)
+        case .open:
+            guard let occ = highlightedOccurrence else { return false }
+            open(occ)
+            return true
+        case .delete:
+            guard let occ = highlightedOccurrence, canEdit(occ) else { return false }
+            requestDelete(occ)
+            return true
+        case .clearHighlight:
+            guard highlightedOccurrence != nil else { return false }
+            highlightedOccurrence = nil
+            return true
+        case .stepBackward:
+            step(-1)
+            return true
+        case .stepForward:
+            step(1)
+            return true
+        }
+    }
+
+    /// Nach jedem neuen Stand: Markierung auf den frischen Termin setzen
+    /// (z. B. nach dem Verschieben), gelöschte fallen weg.
+    func refreshHighlight() {
+        guard let h = highlightedOccurrence else { return }
+        let day = LocalDate(h.start, calendar: calendar).adding(days: -1)
+        let around = occurrences(from: day, days: 3)
+        highlightedOccurrence = OccurrenceNavigation.refreshed(h, in: visibleOccurrences)
+            ?? OccurrenceNavigation.refreshed(h, in: around)
+    }
+
+    // MARK: Löschen
+
+    /// Löschen aus Kontextmenü, Menü oder ⌫: Einzeltermine sofort (Rückgängig
+    /// geht), bei Serien erst nach der Frage nach dem Geltungsbereich.
+    func requestDelete(_ occ: Occurrence) {
+        guard canEdit(occ) else { return }
+        if OccurrenceActions.deleteScopes(occ).isEmpty {
+            Task { await delete(occ, scope: .all) }
+        } else {
+            pendingDelete = occ
+        }
+    }
+
+    func delete(_ occ: Occurrence, scope: EditScope) async {
+        if highlightedOccurrence?.id == occ.id { highlightedOccurrence = nil }
+        await engine.perform(OccurrenceActions.deleteIntent(occ, scope: scope), label: "Termin löschen")
+    }
+
+    /// Für `confirmationDialog(isPresented:)`.
+    var isConfirmingDelete: Bool {
+        get { pendingDelete != nil }
+        set { if !newValue { pendingDelete = nil } }
+    }
+
+    // MARK: Kalender wechseln
+
+    func moveTargets(for occ: Occurrence) -> [CalendarInfo] {
+        OccurrenceActions.moveTargets(for: occ, calendars: state.calendars)
+    }
+
+    func move(_ occ: Occurrence, toCalendar calendarId: String) async {
+        guard let intent = OccurrenceActions.moveIntent(occ, toCalendar: calendarId) else { return }
+        // Beim Wechsel vergibt der Server eine neue ID; die Markierung fällt weg.
+        if highlightedOccurrence?.id == occ.id { highlightedOccurrence = nil }
+        await engine.perform(intent, label: "Kalender wechseln")
+    }
+
+    // MARK: Neuer Termin hier
+
+    /// Editor für einen neuen Termin am Tag `day`, mit Beginn `start` (Raster)
+    /// oder der Vorgabe des Editors (Monat).
+    func newEvent(on day: LocalDate, at start: LocalDateTime?) {
+        let calendarId = writableCalendars.first?.id
+        if let start {
+            editorDraft = EventDraft.new(startingAt: start, calendarId: calendarId, deviceTimeZone: timeZone)
+        } else {
+            editorDraft = EventDraft.new(on: day, now: Date(), calendarId: calendarId, deviceTimeZone: timeZone)
+        }
+    }
+
+    // MARK: Kopieren und Einfügen
+
+    /// Merkt die Kopie und gibt den Text für die Zwischenablage zurück.
+    func copy(_ occ: Occurrence) -> String {
+        let clip = EventClipboard(occ, calendar: calendar)
+        clipboard = clip
+        return clip.text
+    }
+
+    /// Einfügen am Tag `day` (Standard: ausgewählter Tag), wenn die
+    /// Zwischenablage noch die Kopie hält (`pasteboardText`).
+    func paste(on day: LocalDate? = nil, pasteboardText: String?) async {
+        guard let clip = clipboard, clip.matches(pasteboardText),
+              let calendarId = OccurrenceActions.duplicateCalendar(for: clip.occurrence, calendars: state.calendars, writable: writableCalendars)
+        else { return }
+        let intent = clip.intent(pastingOn: day ?? selectedDay, calendarId: calendarId, calendar: calendar)
+        await engine.perform(intent, label: "Termin einfügen")
     }
 }

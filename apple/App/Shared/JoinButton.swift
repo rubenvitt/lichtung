@@ -66,7 +66,12 @@ struct JoinButton: View {
     }
 
     private func join(_ link: VideoLink) {
-        if let app = link.appURL, Self.canOpen(app) {
+        Self.join(link, with: openURL)
+    }
+
+    /// Anbieter-App, sonst Browser. Auch für Kontextmenü und Menü „Termin“ (LIC-24).
+    static func join(_ link: VideoLink, with openURL: OpenURLAction) {
+        if let app = link.appURL, canOpen(app) {
             openURL(app)
         } else {
             openURL(link.joinURL)

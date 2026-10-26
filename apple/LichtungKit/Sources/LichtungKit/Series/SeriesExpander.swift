@@ -88,6 +88,21 @@ public struct SeriesExpander: Sendable {
         return result.sorted { ($0.start, $0.end, $0.id) < ($1.start, $1.end, $1.id) }
     }
 
+    /// Vorkommen, die `rrule` vor `occurrence` erzeugt, DTSTART mitgezählt,
+    /// RDATE und EXDATE nicht. So zählt `COUNT` (RFC 5545), und so rechnet der
+    /// Server beim Teilen einer Serie die Restzahl (`split_series`, LIC-52).
+    public func ruleInstances(of rrule: String, seriesStart: DateValue, before occurrence: DateValue) -> Int {
+        let series = SeriesFrame(master: EventDetails(title: "", start: seriesStart, end: seriesStart), deviceTimeZone: deviceTimeZone)
+        let cut = series.key(occurrence)
+        guard series.start < cut else { return 0 }
+        guard let rule = RRule(rrule) else { return 1 }
+        let later = rule.instances(
+            after: series.start, allDay: series.allDay, from: series.start.date, through: cut.date,
+            until: rule.until.map(series.limit), maxPeriods: Self.maxPeriods
+        )
+        return 1 + later.filter { $0 < cut }.count
+    }
+
     /// Überschneidung mit dem Fenster (Ende exklusiv). Ein Termin ohne Dauer
     /// zählt, wenn er in `[window.start, window.end)` beginnt.
     static func overlaps(_ start: Date, _ end: Date, _ window: DateInterval) -> Bool {

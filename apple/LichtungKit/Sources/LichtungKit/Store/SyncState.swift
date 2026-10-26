@@ -42,12 +42,35 @@ public struct SyncState: Codable, Hashable, Sendable {
     /// Server-Stand der Events, ohne lokale Änderungen.
     public var events: [String: Event] = [:]
     public var conflicts: [String: Conflict] = [:]
+    /// Buchungslinks (LIC-35). Ältere Cache-Dateien haben sie noch nicht.
+    public var openings: [String: Opening] = [:]
     public var outbox: [PendingMutation] = []
     public var notices: [SyncNotice] = []
     /// Mutations-ID eines `create_event` → ID des Events beim Server.
     public var createdEventIds: [String: String] = [:]
 
     public init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case cursor, accounts, calendars, calendarSets, events, conflicts, openings, outbox, notices, createdEventIds
+    }
+
+    /// Fehlende Felder (Cache-Datei einer älteren Version, z. B. ohne
+    /// `openings`) sind leer. `FileCacheStore` zieht dann neu und behält die
+    /// Outbox.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        cursor = try c.decodeIfPresent(Int.self, forKey: .cursor) ?? 0
+        accounts = try c.decodeIfPresent([String: Account].self, forKey: .accounts) ?? [:]
+        calendars = try c.decodeIfPresent([String: CalendarInfo].self, forKey: .calendars) ?? [:]
+        calendarSets = try c.decodeIfPresent([String: CalendarSet].self, forKey: .calendarSets) ?? [:]
+        events = try c.decodeIfPresent([String: Event].self, forKey: .events) ?? [:]
+        conflicts = try c.decodeIfPresent([String: Conflict].self, forKey: .conflicts) ?? [:]
+        openings = try c.decodeIfPresent([String: Opening].self, forKey: .openings) ?? [:]
+        outbox = try c.decodeIfPresent([PendingMutation].self, forKey: .outbox) ?? []
+        notices = try c.decodeIfPresent([SyncNotice].self, forKey: .notices) ?? []
+        createdEventIds = try c.decodeIfPresent([String: String].self, forKey: .createdEventIds) ?? [:]
+    }
 
     // MARK: - Pull
 
@@ -61,6 +84,7 @@ public struct SyncState: Codable, Hashable, Sendable {
             case let .upsertCalendarSet(s): calendarSets[s.id] = s
             case let .upsertEvent(e): upsertServerEvent(e)
             case let .upsertConflict(c): conflicts[c.id] = c
+            case let .upsertOpening(o): openings[o.id] = o
             case let .delete(type, id):
                 switch type {
                 case "account": accounts[id] = nil
@@ -68,6 +92,7 @@ public struct SyncState: Codable, Hashable, Sendable {
                 case "calendar_set": calendarSets[id] = nil
                 case "event": events[id] = nil
                 case "conflict": conflicts[id] = nil
+                case "opening": openings[id] = nil
                 default: break
                 }
             case .unknown: break
@@ -91,6 +116,7 @@ public struct SyncState: Codable, Hashable, Sendable {
         calendarSets = [:]
         events = [:]
         conflicts = [:]
+        openings = [:]
     }
 
     // MARK: - Outbox

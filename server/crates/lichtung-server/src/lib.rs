@@ -13,6 +13,8 @@
 //! - [`crypto`]: encryption of provider credentials (AES-256-GCM)
 //! - [`free`]: free time (busy rules, windows), for MCP and openings
 //! - [`openings`]: booking links, their slots and placeholders (LIC-31/32)
+//! - [`booking`]: the public booking page `/o/<token>` and its protection
+//!   (LIC-33/34)
 //! - [`writes`]: writing events to the provider (create, update, delete,
 //!   respond) with conflict detection
 //! - [`conflicts`]: dropped own changes (provider wins), visible until dismissed
@@ -28,6 +30,7 @@ pub mod accounts;
 pub mod app;
 pub mod auth;
 pub mod backup;
+pub mod booking;
 pub mod changes;
 pub mod config;
 pub mod conflicts;

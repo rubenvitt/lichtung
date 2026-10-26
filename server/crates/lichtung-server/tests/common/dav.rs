@@ -607,6 +607,14 @@ pub struct Setup {
 /// A server with a CalDAV account on a fresh fake server, prepared by
 /// `prepare` before the account is connected.
 pub async fn setup_with(prepare: impl FnOnce(&FakeDav)) -> Setup {
+    setup_configured(prepare, |_| {}).await
+}
+
+/// [`setup_with`] with an adjusted server configuration.
+pub async fn setup_configured(
+    prepare: impl FnOnce(&FakeDav),
+    adjust: impl FnOnce(&mut lichtung_server::Config),
+) -> Setup {
     let server = MockServer::start().await;
     let dav = FakeDav::default();
     prepare(&dav);
@@ -614,7 +622,7 @@ pub async fn setup_with(prepare: impl FnOnce(&FakeDav)) -> Setup {
         .respond_with(dav.clone())
         .mount(&server)
         .await;
-    let s = TestServer::new().await;
+    let s = TestServer::with_config(adjust).await;
     let session = s.session().await;
     let r = s
         .post(

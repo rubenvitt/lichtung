@@ -8,6 +8,7 @@
 //! | `/.well-known/oauth-*`, `/oauth/*` | built-in authorization server ([`crate::oauth::routes`]) |
 //! | `/api/*` | session cookie, API/bootstrap token or device token ([`api`], [`accounts`], [`events`], [`openings`], [`sync`]) |
 //! | `POST /mcp` | API/bootstrap token or OAuth access token ([`crate::mcp`]) |
+//! | `/o/{token}` | none: public booking page, rate limited ([`crate::booking`]) |
 //!
 //! Protected routes under `/api` use
 //! [`crate::auth::middleware::require_auth`] and the
@@ -61,6 +62,9 @@ pub fn router(app: App, oidc: Option<Arc<OidcClient>>) -> Router {
         .merge(crate::oauth::routes::routes(
             crate::oauth::routes::OAuthState::new(app.clone()),
         ))
+        .merge(crate::booking::routes(crate::booking::BookingState::new(
+            app.clone(),
+        )))
         .merge(auth_routes::routes(auth_routes::AuthState {
             app: app.clone(),
             oidc,

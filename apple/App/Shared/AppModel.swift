@@ -79,7 +79,7 @@ final class AppModel {
 
     /// Termin aus der Schnelleingabe anlegen.
     func create(from entry: QuickEntry) async {
-        guard let calendarId = entry.calendarID ?? writableCalendars.first?.id else { return }
+        guard let calendarId = entry.calendarID ?? defaultCalendarId else { return }
         let tzID = timeZone.identifier
         let (start, end): (DateValue, DateValue)
         switch entry.timing {
@@ -125,21 +125,35 @@ final class AppModel {
         GridInteraction.isDraggable(occ, calendar: state.calendars[occ.calendarId])
     }
 
-    /// Verschieben oder Länge ändern aus dem Raster. Bei Serien nur dieses
-    /// Vorkommen (`scope .this`). Über `perform`, damit Rückgängig geht.
-    func move(_ occ: Occurrence, start: Date, end: Date) async {
+    /// Verschieben oder Länge ändern aus dem Raster. Bei Serien nach der
+    /// Rückfrage `.this` oder `.thisAndFollowing` (LIC-47, `GridInteraction.moveScopes`).
+    /// Über `perform`, damit Rückgängig geht. `false`, wenn sich nichts ändert.
+    @discardableResult
+    func move(_ occ: Occurrence, start: Date, end: Date, scope: EditScope = .this) async -> Bool {
         guard end >= start, start != occ.start || end != occ.end,
-              let intent = GridInteraction.moveIntent(occ, to: DateInterval(start: start, end: end), deviceTimeZone: timeZone)
-        else { return }
+              let intent = GridInteraction.moveIntent(occ, to: DateInterval(start: start, end: end), scope: scope, deviceTimeZone: timeZone)
+        else { return false }
         let sameLength = end.timeIntervalSince(start) == occ.end.timeIntervalSince(occ.start)
         await engine.perform(intent, label: sameLength ? "Termin verschieben" : "Termindauer ändern")
+        return true
     }
 
-    /// Termin aus einem Zug in leerer Fläche anlegen, im ersten beschreibbaren Kalender.
-    func createTimed(start: Date, end: Date) async {
-        guard end > start, let calendarId = writableCalendars.first?.id else { return }
-        let intent = GridInteraction.createIntent(calendarId: calendarId, interval: DateInterval(start: start, end: end), timeZone: timeZone)
-        await engine.perform(intent, label: "Termin anlegen")
+    /// Kalender für neue Termine: Wahl aus den Einstellungen
+    /// (`@AppStorage(DefaultCalendar.storageKey)`), sonst der erste beschreibbare (LIC-47).
+    var defaultCalendarId: String? {
+        DefaultCalendar.choose(stored: UserDefaults.standard.string(forKey: DefaultCalendar.storageKey), writable: writableCalendars)
+    }
+
+    /// Entwurf nach einem Zug in leerer Fläche (LIC-47). Das Raster öffnet
+    /// damit den Editor (`editorDraft`), statt sofort anzulegen.
+    func newEventDraft(spanning interval: DateInterval) -> EventDraft {
+        EventDraft.new(spanning: interval, calendarId: defaultCalendarId, deviceTimeZone: timeZone)
+    }
+
+    /// Entwurf nach einem Doppelklick in leere Fläche (Mac, LIC-47): Beginn
+    /// an der Stelle, Standarddauer des Editors.
+    func newEventDraft(startingAt start: LocalDateTime) -> EventDraft {
+        EventDraft.new(startingAt: start, calendarId: defaultCalendarId, deviceTimeZone: timeZone)
     }
 
     // MARK: Suche und Rückgängig (LIC-42)
@@ -181,9 +195,9 @@ final class AppModel {
     /// Sheets gleichzeitig zeigt SwiftUI nicht.
     private var pendingEditorDraft: EventDraft?
 
-    /// Neuer Termin am ausgewählten Tag im ersten beschreibbaren Kalender.
+    /// Neuer Termin am ausgewählten Tag im Standardkalender (LIC-47).
     func newEvent() {
-        editorDraft = EventDraft.new(on: selectedDay, now: Date(), calendarId: writableCalendars.first?.id, deviceTimeZone: timeZone)
+        editorDraft = EventDraft.new(on: selectedDay, now: Date(), calendarId: defaultCalendarId, deviceTimeZone: timeZone)
     }
 
     /// Editor für ein Vorkommen öffnen (aus der Detailansicht: nach deren Schließen).
@@ -402,7 +416,7 @@ extension AppModel {
     /// Editor für einen neuen Termin am Tag `day`, mit Beginn `start` (Raster)
     /// oder der Vorgabe des Editors (Monat).
     func newEvent(on day: LocalDate, at start: LocalDateTime?) {
-        let calendarId = writableCalendars.first?.id
+        let calendarId = defaultCalendarId
         if let start {
             editorDraft = EventDraft.new(startingAt: start, calendarId: calendarId, deviceTimeZone: timeZone)
         } else {

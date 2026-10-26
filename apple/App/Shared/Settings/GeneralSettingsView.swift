@@ -4,12 +4,15 @@
 import LichtungKit
 import SwiftUI
 
-/// Server, Gerät, zweite Zeitzone, Abmelden (LIC-43).
+/// Server, Gerät, zweite Zeitzone, Standardkalender (LIC-47), Abmelden (LIC-43).
 struct GeneralSettingsView: View {
     @Environment(AppSession.self) private var session
     /// IANA-ID der zweiten Zeitzone, leer = keine. Das Raster liest sie über
     /// `AppModel.secondaryTimeZone` (siehe `TimeZoneCatalog.zone(fromStored:)`).
     @AppStorage("secondaryTimeZone") private var secondaryTimeZone = ""
+    /// Kalender für neue Termine, leer = erster beschreibbarer (LIC-47).
+    /// `AppModel.defaultCalendarId` liest ihn beim Anlegen.
+    @AppStorage(DefaultCalendar.storageKey) private var defaultCalendarID = ""
     @State private var choosingZone = false
     @State private var confirmsSignOut = false
 
@@ -53,6 +56,8 @@ struct GeneralSettingsView: View {
                 Text("Erscheint als zusätzliche Uhrzeitspalte im Zeitraster.")
             }
 
+            newEventsSection
+
             if session.stage == .server {
                 Section {
                     Button("Abmelden …", role: .destructive) { confirmsSignOut = true }
@@ -74,6 +79,24 @@ struct GeneralSettingsView: View {
             Button("Abbrechen", role: .cancel) {}
         } message: {
             Text(signOutMessage)
+        }
+    }
+
+    /// Standardkalender für neue Termine (LIC-47).
+    private var newEventsSection: some View {
+        let writable = session.model.writableCalendars
+        return Section {
+            Picker("Kalender", selection: $defaultCalendarID) {
+                Text("Erster beschreibbarer").tag("")
+                ForEach(writable) { calendar in
+                    Text(calendar.name).tag(calendar.id)
+                }
+            }
+        } header: {
+            Text("Neue Termine")
+        } footer: {
+            Text(DefaultCalendar.fallbackNote(stored: defaultCalendarID, writable: writable)
+                ?? "Gilt für die Schnelleingabe, das Zeitraster und „Neuer Termin“.")
         }
     }
 

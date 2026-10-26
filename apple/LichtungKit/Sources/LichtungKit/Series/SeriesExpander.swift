@@ -46,7 +46,7 @@ public struct SeriesExpander: Sendable {
         let upper = LocalDate(window.end, calendar: series.calendar).adding(days: 1)
 
         var starts: Set<LocalDateTime> = [series.start]
-        if let rule = RRule(recurrence.rrule) {
+        if let rule = recurrence.rrule.flatMap({ RRule($0) }) {
             starts.formUnion(rule.instances(
                 after: series.start, allDay: series.allDay, from: lower, through: upper,
                 until: rule.until.map(series.limit), maxPeriods: Self.maxPeriods

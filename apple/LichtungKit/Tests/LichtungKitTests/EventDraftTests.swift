@@ -499,6 +499,90 @@ struct EventDraftSeriesTests {
         #expect(c?.recurrence == .set(Recurrence(rrule: "FREQ=WEEKLY;BYDAY=MO;COUNT=5", exdates: [F.at(16, 9)])))
     }
 
+    @Test func ruleAndTimeTogetherMoveExdates() async {
+        // LIC-48: Der Server ersetzt seine verschobenen EXDATEs durch die
+        // mitgeschickten. Sie müssen also schon verschoben ankommen.
+        var e = D.series()
+        e.recurrence?.exdates = [F.at(16, 9)]
+        var (_, d) = secondMonday(e)
+        d.repeatEnd = .count
+        d.repeatCount = 5
+        d.moveStart(to: D.time(9, 10, 30))
+        let c = D.changes(d.saveIntent(scope: .all))
+        #expect(c?.start == F.at(2, 10, 30))
+        #expect(c?.recurrence == .set(Recurrence(rrule: "FREQ=WEEKLY;BYDAY=MO;COUNT=5", exdates: [F.at(16, 10, 30)])))
+
+        // Das ausgelassene Vorkommen bleibt ausgelassen, auch in der Vorschau.
+        var s = SyncState()
+        s.events["ev_s"] = e
+        let engine = EngineFixtures.engine(ScriptedTransport([]), store: InMemoryCacheStore(s))
+        await engine.perform(d.saveIntent(scope: .all)!, label: d.saveLabel)
+        let moved = await engine.visibleEvents()["ev_s"]!
+        let days = D.occurrence(of: moved).map { LocalDate($0.start, calendar: .lichtung(timeZone: D.tz)).day }
+        #expect(days == [2, 9, 23], "16.11. fehlt weiter")
+    }
+
+    @Test func ruleAndDayTogetherMoveExdatesAcrossDays() {
+        var e = D.series()
+        e.recurrence?.exdates = [F.at(16, 9), .date(D.day(23))]
+        var (_, d) = secondMonday(e)
+        d.repeatFrequency = .daily
+        d.moveStart(to: D.time(10, 8)) // Di statt Mo, 8 statt 9 Uhr
+        let c = D.changes(d.saveIntent(scope: .all))
+        #expect(c?.start == F.at(3, 8))
+        // Ein reiner Tag bekommt die Uhrzeit der Serie und wandert mit.
+        #expect(c?.recurrence == .set(Recurrence(rrule: "FREQ=DAILY", exdates: [F.at(17, 8), F.at(24, 8)])))
+    }
+
+    @Test func thisAndFollowingKeepsOnlyLaterExdatesMoved() {
+        var e = D.series()
+        e.recurrence?.exdates = [F.at(2, 9), F.at(16, 9)]
+        e.recurrence?.rdates = [F.at(4, 9), F.at(18, 9)]
+        var (_, d) = secondMonday(e)
+        d.repeatEnd = .count
+        d.repeatCount = 3
+        d.moveStart(to: D.time(9, 11))
+        let c = D.changes(d.saveIntent(scope: .thisAndFollowing))
+        #expect(c?.start == F.at(9, 11))
+        #expect(c?.recurrence == .set(Recurrence(rrule: "FREQ=WEEKLY;BYDAY=MO;COUNT=3", rdates: [F.at(18, 11)], exdates: [F.at(16, 11)])))
+    }
+
+    @Test func ruleChangeAloneKeepsExdates() {
+        var e = D.series()
+        e.recurrence?.exdates = [F.at(16, 9)]
+        var (_, d) = secondMonday(e)
+        d.repeatInterval = 2
+        #expect(D.changes(d.saveIntent(scope: .all))?.recurrence == .set(Recurrence(rrule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO", exdates: [F.at(16, 9)])))
+    }
+
+    @Test func allDayToggleMovesExdatesToDays() {
+        var e = D.series()
+        e.recurrence?.exdates = [F.at(16, 9)]
+        var (_, d) = secondMonday(e)
+        d.allDay = true
+        let c = D.changes(d.saveIntent(scope: .all))
+        #expect(c?.start == .date(D.day(2)))
+        #expect(c?.recurrence?.value?.exdates == [.date(D.day(16))])
+    }
+
+    @Test func utcExdateStaysUtc() {
+        let berlin = D.tz
+        let utc = DateValue.dateTime(LocalDateTime(date: D.day(16), hour: 8, minute: 0), timeZone: "UTC")
+        let moved = SeriesShift.shift(utc, from: F.at(2, 9), to: F.at(2, 10), deviceTimeZone: berlin)
+        #expect(moved == .dateTime(LocalDateTime(date: D.day(16), hour: 9, minute: 0), timeZone: "UTC"))
+    }
+
+    @Test func seriesOnlyFromRdatesOpensAsCustom() {
+        var e = D.series()
+        e.recurrence = Recurrence(rrule: nil, rdates: [F.at(9, 9)])
+        let occ = D.occurrence(of: e)[0]
+        var d = D.draft(occ, e)
+        #expect(d.repetition == .custom(nil))
+        #expect(d.repeatFrequency == .custom)
+        d.title = "Kurs"
+        #expect(D.changes(d.saveIntent(scope: .all)) == EventChanges(title: "Kurs"))
+    }
+
     @Test func calendarChangeOnlyForAll() {
         var (_, d) = secondMonday()
         d.calendarId = "cal_2"

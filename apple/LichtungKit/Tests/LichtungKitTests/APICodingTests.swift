@@ -84,6 +84,25 @@ struct APICodingTests {
         #expect(e.updatedAt != nil)
     }
 
+    @Test func decodesSeriesWithoutRule() throws {
+        // Serie nur aus RDATEs (Vertrag §2): `rrule: null` (LIC-48).
+        let json = """
+        {"id": "ev_3", "calendar_id": "cal_1", "version": 1, "title": "Kurs",
+         "start": {"date_time": "2026-11-03T18:00:00", "time_zone": "Europe/Berlin"},
+         "end": {"date_time": "2026-11-03T19:00:00", "time_zone": "Europe/Berlin"},
+         "status": "confirmed", "availability": "busy", "overrides": [],
+         "recurrence": {"rrule": null, "rdates": [{"date_time": "2026-11-10T18:00:00", "time_zone": "Europe/Berlin"}], "exdates": []}}
+        """
+        let e = try APICoding.decoder.decode(Event.self, from: Data(json.utf8))
+        #expect(e.recurrence?.rrule == nil)
+        #expect(e.recurrence?.rdates.count == 1)
+        let tz = TimeZone(identifier: "Europe/Berlin")!
+        let window = DateInterval(start: APICoding.parseTimestamp("2026-11-01T00:00:00Z")!, duration: 30 * 86_400)
+        #expect(SeriesExpander(deviceTimeZone: tz).occurrences(of: e, in: window).count == 2)
+        let encoded = jsonObject(try APICoding.encoder.encode(e.recurrence!))
+        #expect(encoded["rrule"] == nil, "fehlt statt leerem Text")
+    }
+
     @Test func decodesAllDayAndFloating() throws {
         let json = """
         {"id": "ev_2", "calendar_id": "cal_1", "version": 1, "title": "Urlaub",

@@ -252,8 +252,14 @@ extension AppModel {
     /// Kalenderfeld den Fokus hat und kein Blatt offen ist. Mit Fokus in einem
     /// Textfeld sind die Menüpunkte aus, damit ⌘⌫ dort weiter Text löscht.
     var commandTarget: Occurrence? {
-        guard calendarHasKeyboardFocus, selectedOccurrence == nil, editorDraft == nil else { return nil }
+        guard calendarCommandsEnabled else { return nil }
         return highlightedOccurrence
+    }
+
+    /// Ob Menüpunkte mit Kürzeln, die auch Textfelder kennen (⌘←/⌘→, ⌘⌫),
+    /// fürs Kalenderfeld gelten: Fokus dort und kein Blatt offen (LIC-50).
+    var calendarCommandsEnabled: Bool {
+        calendarHasKeyboardFocus && selectedOccurrence == nil && editorDraft == nil
     }
 
     /// Einen Schritt der Ansicht vor oder zurück (⌘←/⌘→ im Menü „Darstellung“).

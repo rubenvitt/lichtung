@@ -89,6 +89,16 @@ final class SettingsModel {
         await session?.model.refresh()
     }
 
+    /// Nur `me` (Allgemein: Konto, Gerät, Server-Version).
+    func loadMe() async {
+        guard let api = session?.management else { return }
+        do {
+            me = try await api.me()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func loadOverview() async {
         guard let api = session?.management else { return }
         do {
@@ -210,6 +220,25 @@ final class SettingsModel {
     func removeDevice(_ id: String) async {
         if await run({ try await $0.removeDevice(id) }) {
             devices.removeAll { $0.id == id }
+        }
+    }
+
+    /// Umbenennen (LIC-46). Beim eigenen Gerät merkt sich die Sitzung den
+    /// Namen für die nächste Anmeldung.
+    @discardableResult
+    func renameDevice(_ id: String, to name: String) async -> Bool {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else {
+            errorMessage = "Der Gerätename darf nicht leer sein."
+            return false
+        }
+        return await run { api in
+            let updated = try await api.renameDevice(id, name: n)
+            if let i = self.devices.firstIndex(where: { $0.id == id }) { self.devices[i] = updated }
+            if updated.current == true || self.me?.device?.id == id {
+                self.me?.device?.name = updated.name
+                self.session?.currentDeviceRenamed(updated.name)
+            }
         }
     }
 

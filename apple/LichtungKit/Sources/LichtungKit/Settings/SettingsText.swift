@@ -81,13 +81,32 @@ public struct AccountStatusSummary: Hashable, Sendable {
 public enum MCPWriteGuard {
     private static let workWords = ["arbeit", "work", "büro", "buero", "office", "firma"]
 
-    /// Konten von Microsoft 365 (Graph) sind der Arbeitskalender; sonst
-    /// entscheidet der Name.
+    /// Der Arbeitskalender: das Kennzeichen des Servers (`is_work`, LIC-46),
+    /// bei älteren Servern ohne Kennzeichen die Schätzung.
     public static func isWorkCalendar(_ calendar: CalendarInfo, account: Account?) -> Bool {
+        calendar.isWork ?? looksLikeWorkCalendar(calendar, account: account)
+    }
+
+    /// Schätzung: Konten von Microsoft 365 (Graph) sind der Arbeitskalender,
+    /// sonst entscheidet der Name von Kalender oder Konto.
+    public static func looksLikeWorkCalendar(_ calendar: CalendarInfo, account: Account?) -> Bool {
         if account?.kind == .microsoft { return true }
         let names = [calendar.name, account?.name ?? ""].map { $0.lowercased() }
         return names.contains { name in workWords.contains { name.contains($0) } }
     }
+
+    /// Lässt sich das Kennzeichen setzen? Nur wenn der Server es kennt.
+    public static func canMark(_ calendar: CalendarInfo) -> Bool { calendar.isWork != nil }
+
+    /// Vorschlag, den Kalender als Arbeitskalender zu kennzeichnen: Der Server
+    /// kennt das Kennzeichen, es ist nicht gesetzt, der Name spricht dafür.
+    public static func suggestsMarking(_ calendar: CalendarInfo, account: Account?) -> Bool {
+        calendar.isWork == false && looksLikeWorkCalendar(calendar, account: account)
+    }
+
+    public static let markTitle = "Arbeitskalender"
+    public static let markExplanation = "Der Arbeitskalender ist für Claude standardmäßig gesperrt. Wer ihn kennzeichnet, nimmt Claude hier die Schreiberlaubnis; erlauben lässt sie sich danach bewusst wieder."
+    public static let suggestion = "Sieht nach dem Arbeitskalender aus. Als Arbeitskalender kennzeichnen?"
 
     public static let explanation = "Erlaubt Claude (MCP), in diesem Kalender Termine anzulegen, zu ändern, zu löschen und Einladungen zu beantworten. Ohne Erlaubnis kann Claude hier nur lesen."
 
@@ -95,7 +114,8 @@ public enum MCPWriteGuard {
     /// nötig ist (Schutz einschalten, privater Kalender).
     public static func confirmation(enabling: Bool, calendar: CalendarInfo, account: Account?) -> String? {
         guard enabling, isWorkCalendar(calendar, account: account) else { return nil }
-        return "„\(calendar.name)“ sieht nach dem Arbeitskalender aus. Erlaubst du Claude das Schreiben, landen Fehlgriffe dort, wo andere sie sehen, und Antworten auf Einladungen gehen an echte Teilnehmende. Wirklich erlauben?"
+        let what = calendar.isWork == true ? "ist als Arbeitskalender gekennzeichnet" : "sieht nach dem Arbeitskalender aus"
+        return "„\(calendar.name)“ \(what). Erlaubst du Claude das Schreiben, landen Fehlgriffe dort, wo andere sie sehen, und Antworten auf Einladungen gehen an echte Teilnehmende. Wirklich erlauben?"
     }
 }
 

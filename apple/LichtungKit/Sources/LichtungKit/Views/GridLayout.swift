@@ -264,6 +264,38 @@ public enum TimelineLayout {
             return labels.indices.contains(index) ? labels[index] : nil
         }
     }
+
+    /// Zweite Zeitzone über mehrere Tage (LIC-47). Die Spalte links trägt die
+    /// Beschriftung des ersten Tages. Wo ein Tag davon abweicht (eine der
+    /// Zonen stellt in dieser Woche die Uhr um), steht in `perDay` die eigene
+    /// Beschriftung dieser Zeilen, sonst `nil`. Ein Tag ganz ohne Abweichung
+    /// ist `nil`.
+    public static func secondaryHourLabels(for zone: TimeZone, home: TimeZone, days: [LocalDate]) -> SecondaryZoneLabels {
+        guard let first = days.first else { return SecondaryZoneLabels(gutter: Array(repeating: nil, count: 24), perDay: []) }
+        let gutter = secondaryHourLabels(for: zone, home: home, day: first)
+        let perDay: [[String?]?] = days.map { day in
+            guard day != first else { return nil }
+            let own = secondaryHourLabels(for: zone, home: home, day: day)
+            let differing = zip(own, gutter).map { mine, left in mine == left ? nil : mine }
+            return differing.allSatisfy { $0 == nil } ? nil : differing
+        }
+        return SecondaryZoneLabels(gutter: gutter, perDay: perDay)
+    }
+}
+
+/// Beschriftung der zweiten Zeitzone für die sichtbaren Tage
+/// (`TimelineLayout.secondaryHourLabels(for:home:days:)`).
+public struct SecondaryZoneLabels: Hashable, Sendable {
+    /// 24 Zeilen für die Spalte links (erster Tag).
+    public var gutter: [String?]
+    /// Je Tag die 24 Zeilen, die von der Spalte links abweichen; `nil`, wo
+    /// alles gleich ist.
+    public var perDay: [[String?]?]
+
+    public init(gutter: [String?], perDay: [[String?]?]) {
+        self.gutter = gutter
+        self.perDay = perDay
+    }
 }
 
 /// Ein Balken über mehrere Tagesspalten: ganztägige Zeile im Wochenraster,

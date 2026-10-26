@@ -54,6 +54,48 @@ public enum CalendarViewMode: String, CaseIterable, Identifiable, Hashable, Send
             return nil
         }
     }
+
+    /// Titel der Menüpunkte für ⌘← und ⌘→ (LIC-50), z. B. „Nächste Woche“.
+    public func stepTitle(forward: Bool) -> String {
+        switch self {
+        case .day: forward ? "Nächster Tag" : "Vorheriger Tag"
+        case .week: forward ? "Nächste Woche" : "Vorherige Woche"
+        case .month: forward ? "Nächster Monat" : "Vorheriger Monat"
+        case .year: forward ? "Nächstes Jahr" : "Vorheriges Jahr"
+        }
+    }
+
+    /// Ausgewählter Tag nach ← bzw. → im Kalenderfeld (LIC-50): in jeder
+    /// Ansicht ein Tag. In Woche und Monat wandert so die Markierung des Tages
+    /// von Spalte zu Spalte; geblättert wird erst, wenn der Tag den sichtbaren
+    /// Bereich verlässt (`pages(from:to:)`), weil der Bereich dem Tag folgt.
+    /// Die Pfeile bewegen also die Auswahl, ganze Seiten blättern ⌘← und ⌘→
+    /// (`stepped`). So lässt sich jeder Tag der Woche ansteuern, etwa als Ziel
+    /// für Einfügen (⌘V) und „Neuer Termin“ (⌘N).
+    public func movedSelection(_ day: LocalDate, forward: Bool) -> LocalDate {
+        day.adding(days: forward ? 1 : -1)
+    }
+
+    /// Ausgewählter Tag, nachdem die Markierung mit ↑/↓ zu `occ` gewandert ist
+    /// (LIC-50): sein erster Tag, bei früher beginnenden der erste sichtbare.
+    /// So setzen ←/→ dort an, wo die Markierung steht. Würde die Ansicht dabei
+    /// blättern (Monat: Tag aus dem Nachbarmonat im Raster), bleibt `day`.
+    public func selection(following occ: Occurrence, from day: LocalDate, calendar: Calendar) -> LocalDate {
+        guard let span = visibleDays(around: day) else { return day }
+        var target = LocalDate(occ.start, calendar: calendar)
+        if target < span.start { target = span.start }
+        if target >= span.end { target = span.end.adding(days: -1) }
+        return pages(from: day, to: target) ? day : target
+    }
+
+    /// Ob die Ansicht beim Wechsel des ausgewählten Tags von `old` nach `new`
+    /// blättert, also einen anderen Bereich zeigt.
+    public func pages(from old: LocalDate, to new: LocalDate) -> Bool {
+        switch self {
+        case .year: old.year != new.year
+        default: visibleDays(around: old) != visibleDays(around: new)
+        }
+    }
 }
 
 /// Zusammenhängende Tage, z. B. der sichtbare Bereich einer Ansicht.
@@ -112,6 +154,51 @@ public enum OccurrenceNavigation {
         return sorted.last { precedes($0, current) } ?? first
     }
 
+    /// Einstieg ohne Markierung (LIC-50): ↓ beginnt beim ersten Termin, der
+    /// am ausgewählten Tag `day` liegt oder später endet, ↑ beim letzten, der
+    /// spätestens an `day` beginnt. Gibt es dort keinen, der letzte bzw. erste
+    /// der Liste. `nil` nur bei leerer Liste.
+    public static func entry(in list: [Occurrence], forward: Bool, day: LocalDate, calendar: Calendar) -> Occurrence? {
+        let sorted = ordered(list)
+        let dayStart = day.startDate(in: calendar)
+        let dayEnd = day.adding(days: 1).startDate(in: calendar)
+        if forward {
+            return sorted.first { $0.end > dayStart || $0.start >= dayStart } ?? sorted.last
+        }
+        return sorted.last { $0.start < dayEnd } ?? sorted.first
+    }
+
+    /// Markierung nach ←/→ (LIC-50), wenn der ausgewählte Tag zu `day` wechselt:
+    /// Liegt `current` auch an `day` (mehrtägig), bleibt er markiert. Sonst
+    /// der Termin an `day` mit der nächstliegenden Uhrzeit (bei gleichem
+    /// Abstand der frühere), ein ganztägiger springt zum ersten ganztägigen.
+    /// So wandert die Markierung in der Woche seitwärts wie in einer Tabelle.
+    /// `nil`, wenn an `day` nichts liegt.
+    public static func counterpart(of current: Occurrence, on day: LocalDate, in list: [Occurrence], calendar: Calendar) -> Occurrence? {
+        let dayStart = day.startDate(in: calendar)
+        let dayEnd = day.adding(days: 1).startDate(in: calendar)
+        func touches(_ o: Occurrence) -> Bool {
+            o.start < dayEnd && (o.end > dayStart || o.start >= dayStart)
+        }
+        let onDay = ordered(list).filter(touches)
+        if touches(current) {
+            return onDay.first { $0.id == current.id } ?? current
+        }
+        if current.isAllDay {
+            return onDay.first(where: \.isAllDay) ?? onDay.first
+        }
+        let timed = onDay.filter { !$0.isAllDay }
+        guard !timed.isEmpty else { return onDay.first }
+        let target = LocalDateTime(current.start, calendar: calendar).secondsOfDay
+        func distance(_ o: Occurrence) -> Int {
+            // Begann der Termin am Vortag, zählt er ab Mitternacht.
+            let start = max(o.start, dayStart)
+            return abs(LocalDateTime(start, calendar: calendar).secondsOfDay - target)
+        }
+        // `min` liefert bei gleichem Abstand das erste Element, also den früheren.
+        return timed.min { distance($0) < distance($1) }
+    }
+
     /// Frischer Stand einer Markierung nach einer Änderung (gleiche ID);
     /// `nil`, wenn der Termin nicht mehr da ist.
     public static func refreshed(_ old: Occurrence, in list: [Occurrence]) -> Occurrence? {
@@ -135,10 +222,11 @@ public enum CalendarKeyCommand: Hashable, Sendable {
     case delete
     /// Markierung aufheben.
     case clearHighlight
-    /// Einen Tag bzw. eine Woche (je nach Ansicht) zurück oder weiter.
-    case stepBackward, stepForward
+    /// Ausgewählten Tag einen Tag zurück oder weiter (LIC-50, `movedSelection`).
+    /// Ganze Seiten blättern ⌘←/⌘→ über das Menü.
+    case previousDay, nextDay
 
-    /// Belegung: ↓/Tab weiter, ↑/⇧Tab zurück, ←/→ blättern, Return/Leertaste
+    /// Belegung: ↓/Tab weiter, ↑/⇧Tab zurück, ←/→ Tag für Tag, Return/Leertaste
     /// öffnen, ⌫ löschen, Esc hebt die Markierung auf.
     public init?(key: CalendarKey, shift: Bool = false) {
         switch key {
@@ -146,8 +234,8 @@ public enum CalendarKeyCommand: Hashable, Sendable {
         case .up: self = .highlightPrevious
         case .tab: self = shift ? .highlightPrevious : .highlightNext
         case .backTab: self = .highlightPrevious
-        case .left: self = .stepBackward
-        case .right: self = .stepForward
+        case .left: self = .previousDay
+        case .right: self = .nextDay
         case .enter, .space: self = .open
         case .delete: self = .delete
         case .escape: self = .clearHighlight

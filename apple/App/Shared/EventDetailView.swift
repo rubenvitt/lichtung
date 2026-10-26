@@ -9,6 +9,8 @@ struct EventDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let occurrence: Occurrence
+    /// Frage nach dem Geltungsbereich beim Löschen einer Serie (LIC-50).
+    @State private var confirmsSeriesDelete = false
 
     var body: some View {
         let d = occurrence.details
@@ -68,12 +70,31 @@ struct EventDetailView: View {
                         Task { await model.duplicate(occurrence) }
                         dismiss()
                     }
-                    Button("Löschen", role: .destructive) {
-                        Task { await model.delete(occurrence) }
+                    // Einfügen danach am Tag: ⌘V bzw. Kontextmenü (Mac),
+                    // Toolbar oder Monatstag (iPhone, LIC-50).
+                    Button("Kopieren") {
+                        Pasteboard.write(model.copy(occurrence))
                         dismiss()
                     }
+                    // Wie ⌫ und Kontextmenü (LIC-50): Einzeltermine sofort
+                    // (Rückgängig geht), bei Serien erst nach der Frage.
+                    Button(deleteTitle, role: .destructive) {
+                        if OccurrenceActions.deleteScopes(occurrence).isEmpty {
+                            Task { await model.delete(occurrence, scope: .all) }
+                            dismiss()
+                        } else {
+                            confirmsSeriesDelete = true
+                        }
+                    }
+                    .disabled(!model.canEdit(occurrence))
                 }
             }
+            .modifier(SeriesDeleteDialog(
+                model: model,
+                isPresented: $confirmsSeriesDelete,
+                occurrence: occurrence,
+                onDelete: { dismiss() }
+            ))
             .navigationTitle(model.state.calendars[occurrence.calendarId]?.name ?? "Termin")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -87,6 +108,13 @@ struct EventDetailView: View {
                 }
             }
         }
+    }
+}
+
+extension EventDetailView {
+    /// Mit Auslassungspunkten, wenn noch eine Frage folgt (wie im Kontextmenü).
+    private var deleteTitle: String {
+        OccurrenceActions.isSeries(occurrence) ? "Löschen …" : "Löschen"
     }
 }
 

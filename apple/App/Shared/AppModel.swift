@@ -32,7 +32,7 @@ final class AppModel {
     var calendarFocusRequests = 0
     /// Serientermin, für den die Frage nach dem Geltungsbereich beim Löschen offen ist.
     var pendingDelete: Occurrence?
-    /// Zuletzt kopierter Termin (⌘C).
+    /// Zuletzt kopierter Termin (⌘C, Kontextmenü „Kopieren“).
     var clipboard: EventClipboard?
 
     init(engine: SyncEngine, timeZone: TimeZone = .current) {
@@ -79,7 +79,7 @@ final class AppModel {
 
     /// Termin aus der Schnelleingabe anlegen.
     func create(from entry: QuickEntry) async {
-        guard let calendarId = entry.calendarID ?? writableCalendars.first?.id else { return }
+        guard let calendarId = entry.calendarID ?? defaultCalendarId else { return }
         let tzID = timeZone.identifier
         let (start, end): (DateValue, DateValue)
         switch entry.timing {
@@ -97,11 +97,6 @@ final class AppModel {
         let input = EventInput(title: entry.title.isEmpty ? "Neuer Termin" : entry.title, location: entry.location,
                                start: start, end: end, recurrence: recurrence)
         await engine.perform(.create(calendarId: calendarId, event: input), label: "Termin anlegen")
-    }
-
-    func delete(_ occ: Occurrence) async {
-        let scope: EditScope = occ.recurrenceId == nil ? .all : .this
-        await engine.perform(.delete(eventId: occ.eventId, scope: scope, occurrence: occ.recurrenceId), label: "Termin löschen")
     }
 
     /// Kopie, optional um `days` Tage verschoben. Aus einem schreibgeschützten
@@ -130,21 +125,35 @@ final class AppModel {
         GridInteraction.isDraggable(occ, calendar: state.calendars[occ.calendarId])
     }
 
-    /// Verschieben oder Länge ändern aus dem Raster. Bei Serien nur dieses
-    /// Vorkommen (`scope .this`). Über `perform`, damit Rückgängig geht.
-    func move(_ occ: Occurrence, start: Date, end: Date) async {
+    /// Verschieben oder Länge ändern aus dem Raster. Bei Serien nach der
+    /// Rückfrage `.this` oder `.thisAndFollowing` (LIC-47, `GridInteraction.moveScopes`).
+    /// Über `perform`, damit Rückgängig geht. `false`, wenn sich nichts ändert.
+    @discardableResult
+    func move(_ occ: Occurrence, start: Date, end: Date, scope: EditScope = .this) async -> Bool {
         guard end >= start, start != occ.start || end != occ.end,
-              let intent = GridInteraction.moveIntent(occ, to: DateInterval(start: start, end: end), deviceTimeZone: timeZone)
-        else { return }
+              let intent = GridInteraction.moveIntent(occ, to: DateInterval(start: start, end: end), scope: scope, deviceTimeZone: timeZone)
+        else { return false }
         let sameLength = end.timeIntervalSince(start) == occ.end.timeIntervalSince(occ.start)
         await engine.perform(intent, label: sameLength ? "Termin verschieben" : "Termindauer ändern")
+        return true
     }
 
-    /// Termin aus einem Zug in leerer Fläche anlegen, im ersten beschreibbaren Kalender.
-    func createTimed(start: Date, end: Date) async {
-        guard end > start, let calendarId = writableCalendars.first?.id else { return }
-        let intent = GridInteraction.createIntent(calendarId: calendarId, interval: DateInterval(start: start, end: end), timeZone: timeZone)
-        await engine.perform(intent, label: "Termin anlegen")
+    /// Kalender für neue Termine: Wahl aus den Einstellungen
+    /// (`@AppStorage(DefaultCalendar.storageKey)`), sonst der erste beschreibbare (LIC-47).
+    var defaultCalendarId: String? {
+        DefaultCalendar.choose(stored: UserDefaults.standard.string(forKey: DefaultCalendar.storageKey), writable: writableCalendars)
+    }
+
+    /// Entwurf nach einem Zug in leerer Fläche (LIC-47). Das Raster öffnet
+    /// damit den Editor (`editorDraft`), statt sofort anzulegen.
+    func newEventDraft(spanning interval: DateInterval) -> EventDraft {
+        EventDraft.new(spanning: interval, calendarId: defaultCalendarId, deviceTimeZone: timeZone)
+    }
+
+    /// Entwurf nach einem Doppelklick in leere Fläche (Mac, LIC-47): Beginn
+    /// an der Stelle, Standarddauer des Editors.
+    func newEventDraft(startingAt start: LocalDateTime) -> EventDraft {
+        EventDraft.new(startingAt: start, calendarId: defaultCalendarId, deviceTimeZone: timeZone)
     }
 
     // MARK: Suche und Rückgängig (LIC-42)
@@ -186,9 +195,9 @@ final class AppModel {
     /// Sheets gleichzeitig zeigt SwiftUI nicht.
     private var pendingEditorDraft: EventDraft?
 
-    /// Neuer Termin am ausgewählten Tag im ersten beschreibbaren Kalender.
+    /// Neuer Termin am ausgewählten Tag im Standardkalender (LIC-47).
     func newEvent() {
-        editorDraft = EventDraft.new(on: selectedDay, now: Date(), calendarId: writableCalendars.first?.id, deviceTimeZone: timeZone)
+        editorDraft = EventDraft.new(on: selectedDay, now: Date(), calendarId: defaultCalendarId, deviceTimeZone: timeZone)
     }
 
     /// Editor für ein Vorkommen öffnen (aus der Detailansicht: nach deren Schließen).
@@ -252,11 +261,17 @@ extension AppModel {
     /// Kalenderfeld den Fokus hat und kein Blatt offen ist. Mit Fokus in einem
     /// Textfeld sind die Menüpunkte aus, damit ⌘⌫ dort weiter Text löscht.
     var commandTarget: Occurrence? {
-        guard calendarHasKeyboardFocus, selectedOccurrence == nil, editorDraft == nil else { return nil }
+        guard calendarCommandsEnabled else { return nil }
         return highlightedOccurrence
     }
 
-    /// Einen Schritt der Ansicht vor oder zurück (⌘←/⌘→, ohne ⌘ im Kalenderfeld).
+    /// Ob Menüpunkte mit Kürzeln, die auch Textfelder kennen (⌘←/⌘→, ⌘⌫),
+    /// fürs Kalenderfeld gelten: Fokus dort und kein Blatt offen (LIC-50).
+    var calendarCommandsEnabled: Bool {
+        calendarHasKeyboardFocus && selectedOccurrence == nil && editorDraft == nil
+    }
+
+    /// Einen Schritt der Ansicht vor oder zurück (⌘←/⌘→ im Menü „Darstellung“).
     /// Eine Markierung außerhalb des neuen Bereichs fällt weg.
     func step(_ direction: Int) {
         selectedDay = viewMode.stepped(selectedDay, by: direction)
@@ -290,11 +305,34 @@ extension AppModel {
     }
 
     /// Markierung aus der Tastatur wandern lassen. `false`, wenn nichts zu markieren ist.
+    /// Ohne Markierung beginnt sie am ausgewählten Tag; der Tag folgt ihr, ohne
+    /// zu blättern (LIC-50).
     @discardableResult
     func highlightNeighbor(forward: Bool) -> Bool {
-        guard let next = OccurrenceNavigation.neighbor(of: highlightedOccurrence, in: visibleOccurrences, forward: forward) else { return false }
+        let list = visibleOccurrences
+        let next: Occurrence?
+        if let current = highlightedOccurrence {
+            next = OccurrenceNavigation.neighbor(of: current, in: list, forward: forward)
+        } else {
+            next = OccurrenceNavigation.entry(in: list, forward: forward, day: selectedDay, calendar: calendar)
+        }
+        guard let next else { return false }
         highlightedOccurrence = next
+        let day = viewMode.selection(following: next, from: selectedDay, calendar: calendar)
+        if day != selectedDay { selectedDay = day }
         return true
+    }
+
+    /// ←/→ im Kalenderfeld (LIC-50): der ausgewählte Tag wandert einen Tag,
+    /// in der Woche also von Spalte zu Spalte. Am Rand der Woche (des Monats)
+    /// blättert die Ansicht mit, weil sie dem Tag folgt. Eine Markierung
+    /// wandert seitwärts zum Termin dieses Tags mit der nächsten Uhrzeit.
+    func moveSelectedDay(forward: Bool) {
+        let day = viewMode.movedSelection(selectedDay, forward: forward)
+        selectedDay = day
+        if let current = highlightedOccurrence {
+            highlightedOccurrence = OccurrenceNavigation.counterpart(of: current, on: day, in: visibleOccurrences, calendar: calendar)
+        }
     }
 
     /// Taste im Kalenderfeld. `false` heißt: nicht verbraucht (weiterreichen).
@@ -317,11 +355,11 @@ extension AppModel {
             guard highlightedOccurrence != nil else { return false }
             highlightedOccurrence = nil
             return true
-        case .stepBackward:
-            step(-1)
+        case .previousDay:
+            moveSelectedDay(forward: false)
             return true
-        case .stepForward:
-            step(1)
+        case .nextDay:
+            moveSelectedDay(forward: true)
             return true
         }
     }
@@ -378,7 +416,7 @@ extension AppModel {
     /// Editor für einen neuen Termin am Tag `day`, mit Beginn `start` (Raster)
     /// oder der Vorgabe des Editors (Monat).
     func newEvent(on day: LocalDate, at start: LocalDateTime?) {
-        let calendarId = writableCalendars.first?.id
+        let calendarId = defaultCalendarId
         if let start {
             editorDraft = EventDraft.new(startingAt: start, calendarId: calendarId, deviceTimeZone: timeZone)
         } else {
@@ -396,10 +434,15 @@ extension AppModel {
     }
 
     /// Einfügen am Tag `day` (Standard: ausgewählter Tag), wenn die
-    /// Zwischenablage noch die Kopie hält (`pasteboardText`).
+    /// Zwischenablage noch die Kopie hält (`pasteboardText`). Hält sie etwas
+    /// anderes, gilt die Kopie nicht mehr; „Einfügen“ verschwindet (LIC-50).
     func paste(on day: LocalDate? = nil, pasteboardText: String?) async {
-        guard let clip = clipboard, clip.matches(pasteboardText),
-              let calendarId = OccurrenceActions.duplicateCalendar(for: clip.occurrence, calendars: state.calendars, writable: writableCalendars)
+        guard let clip = clipboard else { return }
+        guard clip.matches(pasteboardText) else {
+            clipboard = nil
+            return
+        }
+        guard let calendarId = OccurrenceActions.duplicateCalendar(for: clip.occurrence, calendars: state.calendars, writable: writableCalendars)
         else { return }
         let intent = clip.intent(pastingOn: day ?? selectedDay, calendarId: calendarId, calendar: calendar)
         await engine.perform(intent, label: "Termin einfügen")

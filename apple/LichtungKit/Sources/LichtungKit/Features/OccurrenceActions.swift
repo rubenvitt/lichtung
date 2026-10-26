@@ -54,7 +54,8 @@ public enum OccurrenceActions {
     }
 }
 
-/// Kopieren und Einfügen eines Termins (⌘C/⌘V am Mac, LIC-24).
+/// Kopieren und Einfügen eines Termins (⌘C/⌘V am Mac, LIC-24; iPhone über
+/// Kontextmenü und Toolbar, LIC-50).
 ///
 /// In die Zwischenablage des Systems geht ein lesbarer Text; eingefügt wird
 /// aus dieser Kopie, solange die Zwischenablage noch genau diesen Text hält
@@ -83,6 +84,13 @@ public struct EventClipboard: Hashable, Sendable {
     /// Teilnehmende (wie Duplizieren).
     public func intent(pastingOn day: LocalDate, calendarId: String, calendar: Calendar) -> EditIntent {
         OccurrenceActions.duplicateIntent(occurrence, shiftedByDays: dayShift(to: day, calendar: calendar), calendarId: calendarId)
+    }
+
+    /// Menüpunkt zum Einfügen am Tag `day`, z. B. „„Team-Sync“ einfügen am Di 27.10.“
+    /// (iPhone, LIC-50).
+    public func pasteTitle(on day: LocalDate) -> String {
+        let weekday = QuickEntryPreview.weekdayShort[day.weekday.rawValue - 1]
+        return "„\(occurrence.title)“ einfügen am \(weekday) \(day.day).\(day.month)."
     }
 
     static func text(for occ: Occurrence, calendar: Calendar) -> String {

@@ -3,9 +3,9 @@ import Foundation
 // Einstellungen und Verwaltung (docs/api/sync-api.md §7). Diese Aufrufe gehen
 // nicht über die Outbox, sie brauchen eine Verbindung.
 //
-// Der Vertrag beschreibt `me`, Geräte und Tokens nur knapp. Felder, die er
-// nicht nennt, sind hier optional, damit kleine Abweichungen des Servers
-// nicht zum Fehler führen.
+// `me` und Geräte stehen seit LIC-46 vollständig im Vertrag, Tokens nur
+// knapp. Felder sind hier großzügig optional, damit ältere Server oder kleine
+// Abweichungen nicht zum Fehler führen.
 
 public struct ServerInfo: Decodable, Hashable, Sendable {
     /// Gerät hinter dem Token (nur bei Geräte-Tokens).
@@ -17,25 +17,29 @@ public struct ServerInfo: Decodable, Hashable, Sendable {
     public var userId: String?
     public var name: String?
     public var email: String?
-    /// Art des Zugangs, z. B. „device“.
+    /// Art des Zugangs: „app:<Gerätename>“, „web“ oder „api:<Tokenname>“.
     public var auth: String?
     public var device: DeviceRef?
-    /// Nennt der Vertrag (§7), liefert der Server bisher nicht.
+    /// Name und Version der Server-Software (§7, seit LIC-46; ältere Server
+    /// liefern sie nicht).
     public var serverName: String?
     public var serverVersion: String?
+
+    /// „lichtung-server 0.1.0“, `nil` ohne Version.
+    public var serverDescription: String? {
+        guard let serverVersion, !serverVersion.isEmpty else { return nil }
+        return [serverName, serverVersion].compactMap { $0 }.joined(separator: " ")
+    }
 }
 
 public struct Device: Decodable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
     public var createdAt: Date?
-    /// So heißt das Feld beim Server.
+    /// Letzte Nutzung des Tokens (Vertrag §7), `nil` vor der ersten.
     public var lastUsedAt: Date?
-    public var lastSeenAt: Date?
+    /// Das Gerät, das gefragt hat.
     public var current: Bool?
-
-    /// Letzte Nutzung, gleich unter welchem Namen der Server sie liefert.
-    public var lastActivity: Date? { lastUsedAt ?? lastSeenAt }
 }
 
 /// API-Token für MCP-Clients (`lt_…`).
@@ -83,18 +87,22 @@ public struct CalendarSettings: Encodable, Hashable, Sendable {
     public var openingsBusy: Bool?
     public var allDayBlocks: Bool?
     public var position: Int?
+    /// Arbeitskalender kennzeichnen (LIC-46). Kennzeichnen sperrt beim
+    /// Server auch MCP-Schreiben, außer `mcpWrite` ist mitgesetzt.
+    public var isWork: Bool?
 
     public init(color: Patch<String>? = nil, hidden: Bool? = nil, mcpWrite: Bool? = nil,
-                openingsBusy: Bool? = nil, allDayBlocks: Bool? = nil, position: Int? = nil) {
+                openingsBusy: Bool? = nil, allDayBlocks: Bool? = nil, position: Int? = nil, isWork: Bool? = nil) {
         self.color = color
         self.hidden = hidden
         self.mcpWrite = mcpWrite
         self.openingsBusy = openingsBusy
         self.allDayBlocks = allDayBlocks
         self.position = position
+        self.isWork = isWork
     }
 
-    private enum CodingKeys: String, CodingKey { case color, hidden, mcpWrite, openingsBusy, allDayBlocks, position }
+    private enum CodingKeys: String, CodingKey { case color, hidden, mcpWrite, openingsBusy, allDayBlocks, position, isWork }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -108,6 +116,7 @@ public struct CalendarSettings: Encodable, Hashable, Sendable {
         try c.encodeIfPresent(openingsBusy, forKey: .openingsBusy)
         try c.encodeIfPresent(allDayBlocks, forKey: .allDayBlocks)
         try c.encodeIfPresent(position, forKey: .position)
+        try c.encodeIfPresent(isWork, forKey: .isWork)
     }
 }
 
@@ -180,6 +189,12 @@ public struct ManagementAPI: Sendable {
 
     public func removeDevice(_ id: String) async throws {
         try await sendEmpty("DELETE", "api/devices/\(id)")
+    }
+
+    /// Gerät umbenennen (LIC-46). Der Server kürzt Leerraum und benennt auch
+    /// den OAuth-Client des Geräts um, eine neue Anmeldung behält den Namen.
+    public func renameDevice(_ id: String, name: String) async throws -> Device {
+        try await send("PATCH", "api/devices/\(id)", body: ["name": name])
     }
 
     public func tokens() async throws -> [APIToken] {

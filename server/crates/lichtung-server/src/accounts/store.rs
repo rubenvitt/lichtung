@@ -219,6 +219,8 @@ pub struct CalendarRow {
     pub mcp_write: bool,
     pub openings_busy: bool,
     pub all_day_blocks: bool,
+    /// Marked as the work calendar (spec section 7, LIC-46).
+    pub is_work: bool,
     pub position: i64,
     pub created_at: i64,
     pub updated_at: i64,
@@ -227,7 +229,7 @@ pub struct CalendarRow {
 
 const CALENDAR_COLUMNS: &str = "id, account_id, remote_href, name, description, provider_color, \
      color, writable, can_invite, shared, hidden, mcp_write, openings_busy, all_day_blocks, \
-     position, created_at, updated_at, seq";
+     position, created_at, updated_at, seq, is_work";
 
 fn row_to_calendar(row: &Row<'_>) -> rusqlite::Result<CalendarRow> {
     Ok(CalendarRow {
@@ -249,6 +251,7 @@ fn row_to_calendar(row: &Row<'_>) -> rusqlite::Result<CalendarRow> {
         created_at: row.get(15)?,
         updated_at: row.get(16)?,
         seq: row.get(17)?,
+        is_work: row.get(18)?,
     })
 }
 
@@ -288,7 +291,7 @@ pub fn insert_calendar(conn: &Connection, c: &CalendarRow) -> rusqlite::Result<i
     conn.execute(
         &format!(
             "INSERT INTO calendars ({CALENDAR_COLUMNS})
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)"
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)"
         ),
         params![
             c.id,
@@ -308,7 +311,8 @@ pub fn insert_calendar(conn: &Connection, c: &CalendarRow) -> rusqlite::Result<i
             c.position,
             c.created_at,
             c.updated_at,
-            seq
+            seq,
+            c.is_work
         ],
     )?;
     Ok(seq)
@@ -322,7 +326,7 @@ pub fn update_calendar(conn: &Connection, c: &CalendarRow) -> rusqlite::Result<i
         "UPDATE calendars SET name = ?2, description = ?3, provider_color = ?4, color = ?5,
              writable = ?6, can_invite = ?7, shared = ?8, hidden = ?9, mcp_write = ?10,
              openings_busy = ?11, all_day_blocks = ?12, position = ?13, updated_at = ?14,
-             seq = ?15
+             seq = ?15, is_work = ?16
          WHERE id = ?1",
         params![
             c.id,
@@ -339,7 +343,8 @@ pub fn update_calendar(conn: &Connection, c: &CalendarRow) -> rusqlite::Result<i
             c.all_day_blocks,
             c.position,
             c.updated_at,
-            seq
+            seq,
+            c.is_work
         ],
     )?;
     Ok(seq)

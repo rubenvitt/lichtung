@@ -204,6 +204,9 @@ pub struct Calendar {
     pub mcp_write: bool,
     pub openings_busy: bool,
     pub all_day_blocks: bool,
+    /// The work calendar (spec section 7, LIC-46): marked in the app,
+    /// default for calendars of Microsoft accounts.
+    pub is_work: bool,
     pub position: i64,
 }
 
@@ -227,6 +230,7 @@ impl From<&CalendarRow> for Calendar {
             mcp_write: row.mcp_write,
             openings_busy: row.openings_busy,
             all_day_blocks: row.all_day_blocks,
+            is_work: row.is_work,
             position: row.position,
         }
     }
@@ -311,6 +315,10 @@ pub struct CalendarPatch {
     pub openings_busy: Option<bool>,
     #[serde(default)]
     pub all_day_blocks: Option<bool>,
+    /// Marking a calendar as the work calendar also locks it for MCP
+    /// (`mcp_write: false`) unless the same patch sets `mcp_write`.
+    #[serde(default)]
+    pub is_work: Option<bool>,
     #[serde(default)]
     pub position: Option<i64>,
 }
@@ -475,6 +483,13 @@ pub fn default_mcp_write(kind: AccountKind, writable: bool) -> bool {
     writable && !matches!(kind, AccountKind::Ics | AccountKind::Microsoft)
 }
 
+/// `is_work` of a new calendar: calendars of the work account (Microsoft
+/// Graph) are the work calendar. An ICS feed can be anything (holidays,
+/// the work calendar until the Graph approval); the owner marks it.
+pub fn default_is_work(kind: AccountKind) -> bool {
+    matches!(kind, AccountKind::Microsoft)
+}
+
 /// Brings the stored calendars of `account` in line with `remote`.
 pub(crate) fn reconcile(
     conn: &Connection,
@@ -513,6 +528,7 @@ pub(crate) fn reconcile(
                     mcp_write: default_mcp_write(account.kind, rc.writable),
                     openings_busy: true,
                     all_day_blocks: false,
+                    is_work: default_is_work(account.kind),
                     position: next_position,
                     created_at: now,
                     updated_at: now,
@@ -931,6 +947,15 @@ impl App {
             if let Some(v) = patch.all_day_blocks {
                 row.all_day_blocks = v;
             }
+            if let Some(v) = patch.is_work {
+                // Spec section 7: the work calendar is locked for Claude by
+                // default. Marking it applies that default; an explicit
+                // `mcp_write` in the same patch wins.
+                if v && !row.is_work && patch.mcp_write.is_none() {
+                    row.mcp_write = false;
+                }
+                row.is_work = v;
+            }
             if let Some(v) = position {
                 row.position = v;
             }
@@ -1149,6 +1174,8 @@ mod tests {
             let cals = store::calendars(&conn, Some(id)).unwrap();
             assert_eq!(cals.len(), 1);
             assert_eq!(cals[0].mcp_write, expected, "{kind:?}");
+            // Only the Microsoft account is the work calendar by default.
+            assert_eq!(cals[0].is_work, kind == AccountKind::Microsoft, "{kind:?}");
         }
     }
 

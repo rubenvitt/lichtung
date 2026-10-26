@@ -152,22 +152,86 @@ public enum GridInteraction {
 
     // MARK: - Änderungen
 
+    /// Geltungsbereiche, nach denen vor dem Verschieben gefragt wird (LIC-47):
+    /// bei Serien „Nur dieser“ und „Dieser und alle folgenden“, sonst keine.
+    public static func moveScopes(_ occ: Occurrence) -> [EditScope] {
+        occ.recurrenceId == nil ? [] : [.this, .thisAndFollowing]
+    }
+
     /// Verschieben oder Länge ändern als Absicht für `SyncEngine.perform`.
     ///
-    /// Bei Serien gilt die Änderung nur für dieses Vorkommen (`scope: .this`
-    /// mit der ursprünglichen `recurrenceId`), so wie Fantastical beim Ziehen.
-    /// Die Zeitzone des Termins bleibt; floating bleibt floating.
-    /// `nil` bei ganztägigen Terminen.
-    public static func moveIntent(_ occ: Occurrence, to new: DateInterval, deviceTimeZone: TimeZone) -> EditIntent? {
+    /// Bei Serien gilt die Änderung für dieses Vorkommen (`scope: .this`) oder
+    /// ab hier (`.thisAndFollowing`), jeweils mit der ursprünglichen
+    /// `recurrenceId`. Die Zeitzone des Termins bleibt; floating bleibt
+    /// floating. `nil` bei ganztägigen Terminen und bei einem Bereich, den
+    /// `moveScopes` nicht anbietet; Einzeltermine gelten immer ganz.
+    public static func moveIntent(_ occ: Occurrence, to new: DateInterval, scope: EditScope = .this, deviceTimeZone: TimeZone) -> EditIntent? {
         guard !occ.isAllDay else { return nil }
         let changes = EventChanges(
             start: dateValue(new.start, like: occ.details.start, deviceTimeZone: deviceTimeZone),
             end: dateValue(new.end, like: occ.details.end, deviceTimeZone: deviceTimeZone)
         )
         if let recurrenceId = occ.recurrenceId {
-            return .update(eventId: occ.eventId, scope: .this, occurrence: recurrenceId, changes: changes)
+            guard moveScopes(occ).contains(scope) else { return nil }
+            return .update(eventId: occ.eventId, scope: scope, occurrence: recurrenceId, changes: changes)
         }
         return .update(eventId: occ.eventId, scope: .all, changes: changes)
+    }
+
+    // MARK: - Bedienhilfen
+
+    /// Schritt der Bedienhilfen-Aktionen „15 Minuten früher/später“ (LIC-47).
+    public static let nudgeMinutes = snapMinutes
+
+    /// Eine Bedienhilfen-Aktion am Block: Name für VoiceOver und Minuten.
+    public struct NudgeAction: Hashable, Sendable, Identifiable {
+        public var name: String
+        public var minutes: Int
+        public var id: Int { minutes }
+    }
+
+    /// Aktionen für VoiceOver am Block.
+    public static let nudgeActions: [NudgeAction] = [
+        NudgeAction(name: "\(nudgeMinutes) Minuten früher", minutes: -nudgeMinutes),
+        NudgeAction(name: "\(nudgeMinutes) Minuten später", minutes: nudgeMinutes),
+    ]
+
+    /// Termin um `minutes` verschoben (wie Ziehen, Dauer bleibt).
+    public static func nudged(start: Date, end: Date, minutes: Int, calendar: Calendar) -> DateInterval {
+        moved(start: start, end: end, deltaMinutes: Double(minutes), dayOffset: 0, calendar: calendar)
+    }
+
+    // MARK: - Automatisch scrollen
+
+    /// Randzone oben und unten im sichtbaren Ausschnitt, in der beim Ziehen
+    /// gescrollt wird (Punkte).
+    public static let autoScrollEdge: Double = 44
+    /// Größter Schritt pro Takt (Punkte, etwa 60 Takte pro Sekunde).
+    public static let autoScrollMaxStep: Double = 16
+
+    /// Schritt pro Takt, wenn der Zeiger beim Ziehen bei `pointerY` steht
+    /// (im sichtbaren Ausschnitt der Höhe `viewportHeight`, oben = 0):
+    /// negativ nach oben, positiv nach unten, 0 außerhalb der Randzonen. Je
+    /// tiefer im Rand (oder darüber hinaus), desto schneller. Bei kleinen
+    /// Ausschnitten wird die Zone schmaler (höchstens ein Viertel).
+    public static func autoScrollStep(pointerY: Double, viewportHeight: Double) -> Double {
+        guard viewportHeight > 0 else { return 0 }
+        let edge = min(autoScrollEdge, viewportHeight / 4)
+        let depth: Double
+        if pointerY < edge {
+            depth = -(edge - pointerY) / edge
+        } else if pointerY > viewportHeight - edge {
+            depth = (pointerY - (viewportHeight - edge)) / edge
+        } else {
+            return 0
+        }
+        return autoScrollMaxStep * min(1, max(-1, depth))
+    }
+
+    /// Versatz nach einem Schritt, begrenzt auf den Inhalt
+    /// (0 … `contentHeight − viewportHeight`).
+    public static func autoScrolledOffset(_ offset: Double, step: Double, contentHeight: Double, viewportHeight: Double) -> Double {
+        min(max(0, contentHeight - viewportHeight), max(0, offset + step))
     }
 
     /// Neuer Termin aus einem Zug in leerer Fläche, in der Zone des Geräts.

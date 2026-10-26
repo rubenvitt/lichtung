@@ -9,6 +9,8 @@ struct AccessSettingsView: View {
     @Environment(AppSession.self) private var session
     @State private var newTokenName = ""
     @State private var removingDevice: Device?
+    @State private var renamingDevice: Device?
+    @State private var newDeviceName = ""
     @State private var revokingToken: APIToken?
 
     var body: some View {
@@ -24,11 +26,20 @@ struct AccessSettingsView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(device.current == true ? "\(device.name) (dieses Gerät)" : device.name)
-                            Text(Self.activity(created: device.createdAt, used: device.lastActivity))
+                            Text(Self.activity(created: device.createdAt, used: device.lastUsedAt))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
+                        Button {
+                            newDeviceName = device.name
+                            renamingDevice = device
+                        } label: {
+                            Image(systemName: "pencil")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(!settings.isAvailable)
+                        .accessibilityLabel("\(device.name) umbenennen")
                         if device.current != true {
                             Button(role: .destructive) {
                                 removingDevice = device
@@ -43,7 +54,7 @@ struct AccessSettingsView: View {
             } header: {
                 Text("Geräte")
             } footer: {
-                Text("Jedes Gerät hat ein eigenes Token. Ein verlorenes Gerät hier abmelden; dieses Gerät meldest du unter „Allgemein“ ab.")
+                Text("Jedes Gerät hat ein eigenes Token. Ein verlorenes Gerät hier abmelden; dieses Gerät meldest du unter „Allgemein“ ab. Der Name erscheint in der Liste und bei Konflikten.")
             }
 
             Section {
@@ -98,6 +109,21 @@ struct AccessSettingsView: View {
             Button("Abbrechen", role: .cancel) {}
         } message: { _ in
             Text("Das Gerät muss sich danach neu anmelden. Seine noch nicht gesendeten Änderungen bleiben dort liegen.")
+        }
+        .alert(
+            "Gerät umbenennen",
+            isPresented: Binding(get: { renamingDevice != nil }, set: { if !$0 { renamingDevice = nil } }),
+            presenting: renamingDevice
+        ) { device in
+            TextField("Gerätename", text: $newDeviceName)
+            Button("Umbenennen") {
+                let name = newDeviceName
+                Task { await settings.renameDevice(device.id, to: name) }
+            }
+            .disabled(newDeviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Abbrechen", role: .cancel) {}
+        } message: { device in
+            Text("Neuer Name für „\(device.name)“. Meldet sich das Gerät später neu an, behält es den Namen.")
         }
         .confirmationDialog(
             "Token widerrufen?",

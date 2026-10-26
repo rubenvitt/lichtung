@@ -18,6 +18,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0003_events.sql"),
     include_str!("../migrations/0004_conflicts.sql"),
     include_str!("../migrations/0005_sync_api.sql"),
+    include_str!("../migrations/0006_settings_api.sql"),
 ];
 
 /// The schema version this binary expects.
@@ -619,18 +620,24 @@ pub fn purge_oauth(
 ) -> anyhow::Result<usize> {
     conn.execute("DELETE FROM oauth_codes WHERE expires_at <= ?1", [now])?;
     conn.execute("DELETE FROM oauth_tokens WHERE expires_at <= ?1", [now])?;
+    // A live grant is a token that has not expired or an active device: the
+    // app logs in again with the same client (LIC-49).
     let stale = conn.execute(
         "DELETE FROM oauth_clients
          WHERE created_at < ?2 AND NOT EXISTS (
              SELECT 1 FROM oauth_tokens t
-             WHERE t.client_id = oauth_clients.id AND t.revoked_at IS NULL AND t.expires_at > ?1)",
+             WHERE t.client_id = oauth_clients.id AND t.revoked_at IS NULL AND t.expires_at > ?1)
+           AND NOT EXISTS (
+             SELECT 1 FROM devices d
+             WHERE d.client_id = oauth_clients.id AND d.revoked_at IS NULL)",
         params![now, stale_before],
     )?;
     let unused = conn.execute(
         "DELETE FROM oauth_clients
          WHERE created_at < ?1 AND last_used_at IS NULL
            AND NOT EXISTS (SELECT 1 FROM oauth_codes c WHERE c.client_id = oauth_clients.id)
-           AND NOT EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.client_id = oauth_clients.id)",
+           AND NOT EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.client_id = oauth_clients.id)
+           AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.client_id = oauth_clients.id)",
         [unused_before],
     )?;
     Ok(stale + unused)
@@ -646,9 +653,12 @@ pub struct DeviceRow {
     pub family_id: String,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
+    /// The OAuth client the device logged in with (`None` for devices from
+    /// before schema version 6). Keeps the client from being purged.
+    pub client_id: Option<String>,
 }
 
-const DEVICE_COLUMNS: &str = "id, user_id, name, family_id, created_at, last_used_at";
+const DEVICE_COLUMNS: &str = "id, user_id, name, family_id, created_at, last_used_at, client_id";
 
 fn row_to_device(row: &Row<'_>) -> rusqlite::Result<DeviceRow> {
     Ok(DeviceRow {
@@ -658,20 +668,22 @@ fn row_to_device(row: &Row<'_>) -> rusqlite::Result<DeviceRow> {
         family_id: row.get(3)?,
         created_at: row.get(4)?,
         last_used_at: row.get(5)?,
+        client_id: row.get(6)?,
     })
 }
 
 pub fn insert_device(conn: &Connection, device: &DeviceRow, hash: &str) -> anyhow::Result<()> {
     conn.execute(
-        "INSERT INTO devices (id, user_id, name, token_hash, family_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO devices (id, user_id, name, token_hash, family_id, created_at, client_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             device.id.to_string(),
             device.user_id.to_string(),
             device.name,
             hash,
             device.family_id,
-            device.created_at
+            device.created_at,
+            device.client_id
         ],
     )?;
     Ok(())
@@ -716,6 +728,36 @@ pub fn revoke_device_by_hash(conn: &Connection, hash: &str, now: i64) -> anyhow:
         params![hash, now],
     )?;
     Ok(n > 0)
+}
+
+/// Renames an active device of the user and the OAuth client it logged in
+/// with, so a new login through that client keeps the name. Returns the
+/// device, `None` if the user has no such active device.
+pub fn rename_device(
+    conn: &Connection,
+    user_id: Uuid,
+    id: Uuid,
+    name: &str,
+) -> anyhow::Result<Option<DeviceRow>> {
+    let n = conn.execute(
+        "UPDATE devices SET name = ?3 WHERE id = ?1 AND user_id = ?2 AND revoked_at IS NULL",
+        params![id.to_string(), user_id.to_string(), name],
+    )?;
+    if n == 0 {
+        return Ok(None);
+    }
+    let device = conn.query_row(
+        &format!("SELECT {DEVICE_COLUMNS} FROM devices WHERE id = ?1"),
+        [id.to_string()],
+        row_to_device,
+    )?;
+    if let Some(client_id) = &device.client_id {
+        conn.execute(
+            "UPDATE oauth_clients SET name = ?2 WHERE id = ?1",
+            params![client_id, name],
+        )?;
+    }
+    Ok(Some(device))
 }
 
 pub fn touch_device(conn: &Connection, id: Uuid, now: i64) -> anyhow::Result<()> {
@@ -818,6 +860,7 @@ mod tests {
             family_id: "familie".into(),
             created_at: 1,
             last_used_at: None,
+            client_id: Some("client-1".into()),
         };
         insert_device(&conn, &device, "hash-d").unwrap();
         assert_eq!(list_devices(&conn, owner).unwrap(), vec![device.clone()]);
@@ -847,5 +890,59 @@ mod tests {
         assert!(oauth_client(&conn, "old-unused").unwrap().is_none());
         assert!(oauth_client(&conn, "old-used").unwrap().is_some());
         assert!(oauth_client(&conn, "new-unused").unwrap().is_some());
+    }
+
+    #[test]
+    fn clients_of_active_devices_are_kept() {
+        let (_dir, conn) = temp_db();
+        let owner = ensure_owner(&conn, 1).unwrap().id;
+        for id in ["app", "app-alt"] {
+            insert_oauth_client(
+                &conn,
+                &OAuthClientRow {
+                    id: id.into(),
+                    name: "iPhone".into(),
+                    redirect_uris: vec!["dev.rubeen.lichtung:/oauth".into()],
+                    created_at: 1_000,
+                    last_used_at: None,
+                    revoked_at: None,
+                },
+            )
+            .unwrap();
+        }
+        let device = |client: &str, family: &str| DeviceRow {
+            id: Uuid::now_v7(),
+            user_id: owner,
+            name: "iPhone".into(),
+            family_id: family.into(),
+            created_at: 1_500,
+            last_used_at: None,
+            client_id: Some(client.into()),
+        };
+        let active = device("app", "f1");
+        let gone = device("app-alt", "f2");
+        insert_device(&conn, &active, "hash-1").unwrap();
+        insert_device(&conn, &gone, "hash-2").unwrap();
+        assert!(revoke_device(&conn, owner, gone.id, 2_000).unwrap());
+
+        // Both rules apply (stale and unused before 10_000): the client of
+        // the active device stays, the other one has no live grant left.
+        assert_eq!(purge_oauth(&conn, 10_000, 10_000, 10_000).unwrap(), 1);
+        assert!(oauth_client(&conn, "app").unwrap().is_some());
+        assert!(oauth_client(&conn, "app-alt").unwrap().is_none());
+
+        // Renaming the device renames its client as well.
+        let renamed = rename_device(&conn, owner, active.id, "Rubens iPhone")
+            .unwrap()
+            .unwrap();
+        assert_eq!(renamed.name, "Rubens iPhone");
+        assert_eq!(
+            oauth_client(&conn, "app").unwrap().unwrap().name,
+            "Rubens iPhone"
+        );
+        assert!(rename_device(&conn, owner, gone.id, "x").unwrap().is_none());
+        assert!(rename_device(&conn, Uuid::now_v7(), active.id, "x")
+            .unwrap()
+            .is_none());
     }
 }

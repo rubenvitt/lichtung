@@ -13,7 +13,7 @@ Der Server ist die Autorität. Die Apps halten einen lokalen Cache, lesen ihn ü
 | Basis | `https://<server>/api/…`, nur HTTPS (lokal auch `http://localhost`) |
 | Format | JSON, UTF-8. Unbekannte Felder in Antworten ignoriert der Client (der Server darf Felder ergänzen, ohne die Version zu erhöhen). |
 | Zeitpunkte | RFC 3339 in UTC mit `Z`, z. B. `2026-11-03T13:00:00Z` |
-| IDs | undurchsichtige Strings mit Präfix (`acc_…`, `cal_…`, `set_…`, `ev_…`, `cf_…`). Nie parsen. |
+| IDs | undurchsichtige Strings mit Präfix (`acc_…`, `cal_…`, `set_…`, `ev_…`, `cf_…`, *(LIC-31)* `opn_…`, `sug_…`). Nie parsen. |
 | Fehler | HTTP-Status plus `{"error": {"code": "…", "message": "…"}}`. `code` ist stabil (snake_case, Tabelle in Abschnitt 9), `message` ist deutsch und für Menschen. |
 | Auth | `Authorization: Bearer ld_…` (Geräte-Token, Abschnitt 2). Ohne gültiges Token: `401` mit `code: unauthorized`. |
 
@@ -250,7 +250,7 @@ Eine eigene Änderung, die der Server nicht übernehmen konnte, weil der Anbiete
 }
 ```
 
-- `type`: `account`, `calendar`, `calendar_set`, `event`, `conflict`. `op`: `upsert` (vollständiges Objekt) oder `delete` (nur `id`).
+- `type`: `account`, `calendar`, `calendar_set`, `event`, `conflict`, *(LIC-31)* `opening` ([`openings.md`](openings.md)). Unbekannte Typen überspringt der Client. `op`: `upsert` (vollständiges Objekt) oder `delete` (nur `id`).
 - Änderungen kommen in der Reihenfolge, in der sie passiert sind; jedes Objekt höchstens einmal pro Seite, in seinem neuesten Stand.
 - Der Client wendet eine Seite **atomar** an und speichert danach `cursor`. Bei `has_more: true` sofort weiter mit `since=<cursor>`.
 - Wird ein Kalender gelöscht, kommen auch die `delete`s seiner Events. Ein `delete` für ein unbekanntes Objekt ist kein Fehler.
@@ -402,6 +402,7 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 | *Ergänzung (LIC-46):* `PATCH /api/devices/{id}` | Gerät umbenennen: `{"name": "…"}` |
 | *Ergänzung (LIC-7):* `GET /api/calendars`, `GET /api/calendar-sets` | Komfort: alle Kalender bzw. Sets wie im Pull (nach `position` sortiert) |
 | `GET /api/tokens`, `POST /api/tokens`, `DELETE /api/tokens/{id}` | API-Tokens (`lt_…`) für MCP-Clients; das Token steht nur in der Antwort auf `POST` |
+| *Ergänzung (LIC-31):* `GET`/`POST /api/openings`, `GET`/`PATCH`/`DELETE /api/openings/{id}` | Buchungslinks (Einmal-Links und Vorlagen), siehe [`openings.md`](openings.md) |
 
 *Ergänzungen (LIC-46) zu `me` und Geräten:*
 
@@ -464,7 +465,7 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 ## 8. Geplant (noch nicht verbindlich)
 
 - `PUT /api/devices/current/push` mit `{"apns_token": "…", "environment": "sandbox"|"production"}`: stille Push-Nachrichten, damit Erinnerungen auch für Termine kommen, die die App noch nicht gesehen hat (Spec Abschnitt 5). Kommt mit dem Erinnerungs-Teil von E2.
-- Openings (E3) bekommen eigene Objekttypen im Pull.
+- ~~Openings (E3) bekommen eigene Objekttypen im Pull.~~ Umgesetzt (LIC-31): Typ `opening` im Pull, Verwaltung über `/api/openings`, siehe [`openings.md`](openings.md).
 
 ## 9. Fehlercodes
 
@@ -478,6 +479,7 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 | 410 | `cursor_expired` | Pull-Cursor zu alt, neu mit `since=0` |
 | 413 | `payload_too_large` | zu viele Mutationen oder zu großer Body |
 | 422 | `invalid_credentials` | Zugangsdaten vom Anbieter abgelehnt |
+| 400 | `calendar_not_found`, `calendar_read_only`, `calendar_cannot_invite` | *(LIC-31)* Zielkalender eines Buchungslinks ungeeignet ([`openings.md`](openings.md)) |
 | 422 | `invalid_feed` | *(LIC-14)* unter der Adresse eines ICS-Abos liegt kein brauchbarer Kalender (nicht gefunden, kein iCalendar, zu groß) |
 | 429 | `too_many_requests` | zu viele Anfragen, `Retry-After` beachten |
 | 502 | `provider_unavailable` | Anbieter nicht erreichbar oder Fehler beim Anbieter |
@@ -497,4 +499,5 @@ Zusätzliche `code`s in Mutations-Ergebnissen (`rejected`/`retry`): `calendar_re
 | 2026-10-23 | Ergänzungen aus LIC-8 (keine bestehende Form geändert): Sync-Rhythmus und Status der Konten; `DateValue` mit `time_zone: null` und `utc` (nicht übersetzbare Zone), `time_zone: "UTC"`; `rrule: null`, Objekte ohne Master; Form nicht lesbarer Termine mit `parse_error`; Form von `GET /api/occurrences` mit `time_zone` und `include_cancelled` (Abschnitt 7) |
 | 2026-10-23 | Ergänzungen aus LIC-13 (keine bestehende Form geändert): Feld `shared` am Kalender; `mcp_write` ist bei nur lesbaren Kalendern immer `false` |
 | 2026-10-23 | Ergänzungen aus LIC-14 (keine bestehende Form geändert): `kind: ics` mit `url`, optional `username`/`password` (Basic-Auth), Schemata `webcal`/`webcals`; `username` zeigt die URL ohne Query, Zugangsdaten und schlüsselartige Pfadteile, die volle URL bleibt verschlüsselt auf dem Server; ein Kalender pro Konto (nur lesbar, Name aus `X-WR-CALNAME`, Farbe aus `X-APPLE-CALENDAR-COLOR`); Abruf alle 15 Minuten mit ETag/Last-Modified; neuer Fehlercode `422 invalid_feed`; `availability` berücksichtigt `X-MICROSOFT-CDO-BUSYSTATUS`, wenn `TRANSP` fehlt (Abschnitte 3, 7, 9) |
+| 2026-10-26 | Ergänzungen aus LIC-31 und LIC-32 (keine bestehende Form geändert): Openings (Buchungslinks) mit eigenem Vertrag [`openings.md`](openings.md); neuer Objekttyp `opening` im Pull; `GET`/`POST /api/openings`, `GET`/`PATCH`/`DELETE /api/openings/{id}`; ID-Präfixe `opn_`, `sug_`; Fehlercodes `calendar_not_found`, `calendar_read_only`, `calendar_cannot_invite` für Zielkalender; Platzhalter-Termine („Reserviert: …“) erscheinen als normale Events, Konflikte ihrer Schreibvorgänge mit `origin: server` (Abschnitte 1, 7, 8, 9) |
 | 2026-10-26 | Ergänzungen aus LIC-46 und LIC-49 (keine bestehende Form geändert): Feld `is_work` am Kalender (Arbeitskalender, per `PATCH` setzbar, Kennzeichnen sperrt MCP); `GET /api/me` mit `server_name` und `server_version`; Felder von `GET /api/devices`; `PATCH /api/devices/{id}` zum Umbenennen; `client_id` je Server merken, Lebensdauer der Clients, Prüfung über `invalid_client` am Token-Endpunkt (Abschnitte 2, 3, 7) |

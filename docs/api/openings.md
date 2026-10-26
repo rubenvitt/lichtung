@@ -1,9 +1,9 @@
 # Openings (Buchungslinks) in der API von lichtung-server
 
-- **Stand:** 2026-10-26 (LIC-31, LIC-32). Ergänzt die [Sync-API](sync-api.md); Grundlagen (Format, Zeitpunkte, Fehlerform, Anmeldung) gelten wie dort.
+- **Stand:** 2026-10-26 (LIC-31, LIC-32; öffentliche Buchungsseite LIC-33, LIC-34). Ergänzt die [Sync-API](sync-api.md); Grundlagen (Format, Zeitpunkte, Fehlerform, Anmeldung) gelten wie dort.
 - Spec: [`docs/superpowers/specs/2026-10-23-lichtung-design.md`](../superpowers/specs/2026-10-23-lichtung-design.md), Abschnitt 6.
 
-Ein Opening ist ein Buchungslink. Gäste buchen über die öffentliche Seite `<öffentliche URL>/o/<token>` (LIC-33, nicht Teil dieses Dokuments) einen freien Termin im Zielkalender; der Anbieter verschickt die Einladung. Die App verwaltet die Links über `/api/openings`.
+Ein Opening ist ein Buchungslink. Gäste buchen über die öffentliche Seite `<öffentliche URL>/o/<token>` (Abschnitt 7) einen freien Termin im Zielkalender; der Anbieter verschickt die Einladung. Die App verwaltet die Links über `/api/openings`.
 
 ## 1. Arten
 
@@ -65,7 +65,7 @@ Ein Opening ist ein Buchungslink. Gäste buchen über die öffentliche Seite `<�
 
 ## 3. Regeln für freie Zeit
 
-- **Frei** heißt wie bei `find_free_times` (Spec Abschnitt 6): kein Termin in einem Kalender mit `openings_busy`; abgesagte Termine, Termine mit `availability: free` und eigene abgelehnte Einladungen blockieren nicht; ganztägige Termine nur in Kalendern mit `all_day_blocks`. Termine ohne Dauer blockieren eine Minute.
+- **Frei** heißt wie bei `find_free_times` (Spec Abschnitt 6): kein Termin in einem Kalender mit `openings_busy` und im Zielkalender des Links (der zählt für seinen Link immer, damit eine Buchung ihre Zeit auch dann blockiert, wenn er sonst nicht für Openings zählt); abgesagte Termine, Termine mit `availability: free` und eigene abgelehnte Einladungen blockieren nicht; ganztägige Termine nur in Kalendern mit `all_day_blocks`. Termine ohne Dauer blockieren eine Minute.
 - **Platzhalter** anderer Einmal-Links blockieren immer, auch wenn ihr Kalender nicht für Openings zählt. Die eigenen Platzhalter eines Links blockieren ihn nicht.
 - **Slots** einer Vorlage oder eines Einmal-Links ohne Vorschläge: Termine der Länge `duration_minutes` innerhalb der Fenster. Beginne liegen im Raster ab Fensterbeginn: alle 15 Minuten bei Links bis 15 Minuten, sonst alle 30 Minuten (Fenster ab 09:00 → 09:00, 09:30, …). Frühester Beginn jetzt + Mindestvorlauf (aufgerundet aufs Raster), spätester Beginn vor jetzt + Horizont, Ende innerhalb des Fensters.
 - **Vorschläge:** buchbar, solange sie nicht begonnen haben und frei sind (mit Puffern).
@@ -131,6 +131,49 @@ Verliert ein Zielkalender später diese Eigenschaften oder verschwindet er, blei
 
 Links kommen über den Pull der Sync-API als eigener Objekttyp `opening` (Daten wie in Abschnitt 2), Löschungen als `{"type": "opening", "op": "delete", "id": …}`. Jede Änderung (Anlegen, Ändern, Platzhalter angelegt, Vorschlag verfallen, Buchung) erscheint dort, also auch Links, die Claude anlegt. Clients, die den Typ nicht kennen, überspringen ihn.
 
-## 7. Für die Buchungsseite (LIC-33, serverintern)
+## 7. Öffentliche Buchungsseite (LIC-33, LIC-34)
 
-Die Seite liest den Link über `App::opening_by_token`, die Slots über `App::opening_slots` (Zeitraum und „jetzt“ als Parameter) und bucht so: `App::opening_booking_guard` halten, `App::check_opening_slot` prüft den Slot erneut, Termin anlegen, `App::complete_opening_booking` markiert einen Einmal-Link als gebucht und entfernt seine Platzhalter (`409 conflict`, wenn er schon gebucht ist). Siehe `server/crates/lichtung-server/src/openings/mod.rs`.
+Der einzige Teil von Lichtung ohne Anmeldung. Server-gerendertes HTML ohne externe Quellen; Code: `server/crates/lichtung-server/src/booking/`.
+
+| Aufruf | Zweck |
+|---|---|
+| `GET /o/{token}` | freie Zeiten, sieben Tage pro Seite, nach Tagen in der Zeitzone des Gastes gruppiert |
+| `GET /o/{token}?slot=<Beginn>` | Formular für eine Zeit (Name, E-Mail, optional Notiz) |
+| `POST /o/{token}` | buchen (Formular, `application/x-www-form-urlencoded`) |
+
+**Parameter** (`GET`): `lang` (`de`/`en`; sonst `Accept-Language`, sonst Englisch), `tz` (IANA-Zone des Gastes), `from` (`YYYY-MM-DD`, erster Tag der Seite in `tz`), `slot` (Beginn nach RFC 3339). Ohne `tz` setzt ein kleines Inline-Skript die Zone des Browsers (`Intl`) und lädt neu; ohne JavaScript gilt die Zone des Links. Die Seite zeigt die Zone und bietet eine Auswahl zum Ändern an. Ohne `from` beginnt die Seite beim ersten möglichen Tag (erster Vorschlag bzw. jetzt + Mindestvorlauf) und springt bei einer leeren ersten Woche bis zu vier Wochen weiter. Links „Früher“/„Später“ blättern bis zum Buchungshorizont.
+
+**Was die Seite zeigt:** Titel und Dauer des Links und freie Zeiten. Nie Titel, Orte, Teilnehmer oder sonst etwas aus Terminen; belegte Zeit zeigt sich nur als fehlender Slot. Auch Kalender-ID, Link-ID und Videolink stehen nicht auf der Seite (der Videolink steht in der Einladung).
+
+**Buchen** (`POST`, Felder `slot`, `tz`, `lang`, `form`, `name`, `email`, `note`, `website`):
+
+1. Herkunft: ein fremdes `Origin` oder `Sec-Fetch-Site: cross-site` → `403`. (`Origin: null` ist erlaubt: Unter `Referrer-Policy: no-referrer` schicken Browser bei Formularen `null`.)
+2. Formular-Token `form`: `<ausgestellt ms>.<HMAC-SHA256>` über Link-Kennung, Slot-Beginn und Ausstellungszeit, Schlüssel abgeleitet aus `LICHTUNG_SECRET_KEY`. Gefälscht, für einen anderen Link oder Slot → `400`. Schneller als 3 Sekunden nach dem Laden zurückgeschickt oder älter als 2 Stunden → `400` mit dem Formular und einem frischen Token.
+3. Honeypot `website` (für Menschen unsichtbar) gefüllt → `400`.
+4. Eingaben: Name 1 bis 100 Zeichen ohne Steuerzeichen, Links (`://`, `www.`, `domain/pfad`), `@` oder `<>`; E-Mail-Adresse syntaktisch (ASCII, `local@domain.tld`, höchstens 254 Zeichen); Notiz höchstens 1000 Zeichen. Fehler → `400` mit dem ausgefüllten Formular und den Meldungen.
+5. Unter `App::opening_booking_guard` (eine Buchung nach der anderen): Buchungsgrenzen (unten) → `429`; `App::check_opening_slot` prüft den Slot gegen den aktuellen Stand; vergeben, vergangen oder kein gültiger Slot → `409` mit der Seite und frischen Zeiten.
+6. Termin über den Schreibpfad (`create_event`, Herkunft `server`) im Zielkalender, in der Zone des Links: Titel `<Titel des Links> (<Name>)`, Beschreibung mit Name, E-Mail und Notiz des Gastes (in der Sprache der Seite), Videolink als Ort und `URL`, `availability: busy`, der Gast als `ATTENDEE` (`CN`, `ROLE=REQ-PARTICIPANT`, `PARTSTAT=NEEDS-ACTION`, `RSVP=TRUE`) und die eigene Adresse des Kontos (erste aus `calendar-user-address-set`, sonst der Login, wenn er eine E-Mail-Adresse ist) als `ORGANIZER`. Hat das Konto keine eigene Adresse, bucht die Seite nicht (`503`), weil keine Einladung herausginge. Den Versand übernimmt der Anbieter (CalDAV-Scheduling, RFC 6638; deshalb nur Zielkalender mit `can_invite`).
+7. `App::complete_opening_booking`: ein Einmal-Link ist verbraucht, seine Platzhalter gehen.
+8. Antwort `200`: gebuchte Zeit in der Zone des Gastes, Hinweis, dass die Einladung per E-Mail kommt und Absagen über sie läuft.
+
+Anbieter nicht erreichbar oder Schreiben abgelehnt → `503` („gerade nicht möglich“).
+
+**Antworten ohne Buchung:** unbekannte, gelöschte und falsch geformte Kennungen sind nicht zu unterscheiden (`404`, gleiche Seite). Ein gebuchter Einmal-Link sagt „bereits genutzt“ (`410`).
+
+**Grenzen** (im Speicher, ein Container; ein Neustart setzt sie zurück; Adresse = Client-IP, IPv6 als /64, hinter Traefik der von ihm angehängte letzte `X-Forwarded-For`-Eintrag):
+
+| Was | Grenze | Antwort |
+|---|---|---|
+| Seitenaufrufe pro Adresse | 120 in 10 Minuten | `429`, `Retry-After: 600` |
+| Buchungsversuche (`POST`) pro Adresse | 20 in 10 Minuten | `429`, `Retry-After: 600` |
+| unbekannte Kennungen pro Adresse | 20 pro Stunde, danach jede Buchungsseite für diese Adresse gesperrt | `429`, `Retry-After: 3600` |
+| Buchungen pro Adresse | 5 in 24 Stunden | `429`, `Retry-After: 3600` |
+| Buchungen pro Link | 20 in 24 Stunden | `429` |
+| Buchungen pro Gast-E-Mail (alle Links) | 3 in 24 Stunden | `429` |
+| Buchungen insgesamt | 50 in 24 Stunden | `429` |
+
+Gezählt werden nur erfolgreiche Buchungen. Die Werte stehen in `BookingLimits` (`server/crates/lichtung-server/src/config.rs`), nicht in der Umgebung.
+
+**Header** aller Seiten: `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-…'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` (die Kennung in der URL geht nicht weiter), `X-Robots-Tag: noindex, nofollow`, `Cache-Control: no-store`.
+
+**Serverintern:** Die Seite liest den Link über `App::opening_by_token`, die Slots über `App::opening_slots` (Zeitraum und „jetzt“ als Parameter) und bucht so: `App::opening_booking_guard` halten, `App::check_opening_slot` prüft den Slot erneut, Termin anlegen, `App::complete_opening_booking` markiert einen Einmal-Link als gebucht und entfernt seine Platzhalter (`409 conflict`, wenn er schon gebucht ist). Siehe `server/crates/lichtung-server/src/openings/mod.rs`.

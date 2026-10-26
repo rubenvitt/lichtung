@@ -170,7 +170,7 @@ async fn authorization_server(State(state): State<OAuthState>) -> Response {
 /// The address a request comes from: the peer, or behind a reverse proxy on
 /// a loopback or private address (Traefik in the same Docker network) the
 /// right-most `X-Forwarded-For` entry, which the proxy itself appended.
-fn client_source(peer: Option<SocketAddr>, headers: &HeaderMap) -> Option<IpAddr> {
+pub(crate) fn client_source(peer: Option<SocketAddr>, headers: &HeaderMap) -> Option<IpAddr> {
     let peer = peer?.ip();
     let behind_proxy = match peer {
         IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),

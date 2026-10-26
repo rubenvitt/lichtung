@@ -985,7 +985,9 @@ impl App {
             .list_calendars()
             .await?
             .into_iter()
-            .filter(|c| c.openings_busy)
+            // The target calendar always counts for its own link, so a
+            // booking blocks its time even there.
+            .filter(|c| c.openings_busy || c.id == row.calendar_id)
             .map(|c| c.id)
             .collect();
         let busy = self

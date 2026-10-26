@@ -183,10 +183,17 @@ public enum GridInteraction {
     /// Schritt der Bedienhilfen-Aktionen „15 Minuten früher/später“ (LIC-47).
     public static let nudgeMinutes = snapMinutes
 
-    /// Aktionen für VoiceOver am Block: Name und Minuten.
-    public static let nudgeActions: [(name: String, minutes: Int)] = [
-        ("\(nudgeMinutes) Minuten früher", -nudgeMinutes),
-        ("\(nudgeMinutes) Minuten später", nudgeMinutes),
+    /// Eine Bedienhilfen-Aktion am Block: Name für VoiceOver und Minuten.
+    public struct NudgeAction: Hashable, Sendable, Identifiable {
+        public var name: String
+        public var minutes: Int
+        public var id: Int { minutes }
+    }
+
+    /// Aktionen für VoiceOver am Block.
+    public static let nudgeActions: [NudgeAction] = [
+        NudgeAction(name: "\(nudgeMinutes) Minuten früher", minutes: -nudgeMinutes),
+        NudgeAction(name: "\(nudgeMinutes) Minuten später", minutes: nudgeMinutes),
     ]
 
     /// Termin um `minutes` verschoben (wie Ziehen, Dauer bleibt).

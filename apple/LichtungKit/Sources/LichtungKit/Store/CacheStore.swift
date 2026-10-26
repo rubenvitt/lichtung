@@ -24,7 +24,9 @@ public final class InMemoryCacheStore: CacheStore, @unchecked Sendable {
 /// Für eine Person mit einigen tausend Terminen reicht das: eine Datei von
 /// wenigen MB, in Millisekunden gelesen. Wird es zu groß, kommt SQLite.
 public struct FileCacheStore: CacheStore {
-    public static let formatVersion = 1
+    /// 2: Buchungslinks im Stand (LIC-35). Ein älterer Stand hat die Links,
+    /// die vorher schon angelegt waren, übersprungen; deshalb neu ziehen.
+    public static let formatVersion = 2
 
     public let url: URL
 

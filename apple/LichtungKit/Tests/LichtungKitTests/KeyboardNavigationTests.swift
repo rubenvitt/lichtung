@@ -43,6 +43,118 @@ struct CalendarViewModeTests {
     }
 }
 
+/// LIC-50: ←/→ wandern Tag für Tag, ⌘←/⌘→ blättern über das Menü.
+@Suite("Tastatur: Tag für Tag")
+struct DaySelectionTests {
+    typealias L = LayoutFixtures
+    typealias N = OccurrenceNavigation
+
+    @Test func arrowsMoveOneDayInEveryView() {
+        for mode in CalendarViewMode.allCases {
+            #expect(mode.movedSelection(L.day(23), forward: true) == L.day(24))
+            #expect(mode.movedSelection(L.day(23), forward: false) == L.day(22))
+        }
+        #expect(CalendarViewMode.month.movedSelection(L.day(31), forward: true) == L.day(1, month: 11))
+    }
+
+    @Test func weekPagesOnlyAtItsEdges() {
+        let week = CalendarViewMode.week
+        // Fr → Sa → So bleibt in der Woche Mo 19.–So 25.10.
+        var day = L.day(23)
+        for _ in 0..<2 {
+            let next = week.movedSelection(day, forward: true)
+            #expect(!week.pages(from: day, to: next))
+            #expect(week.visibleDays(around: next)?.start == L.day(19))
+            day = next
+        }
+        // So → Mo blättert in die nächste Woche.
+        let monday = week.movedSelection(day, forward: true)
+        #expect(monday == L.day(26))
+        #expect(week.pages(from: day, to: monday))
+        #expect(week.visibleDays(around: monday)?.start == L.day(26))
+        // Mo ← blättert zurück.
+        #expect(week.pages(from: L.day(19), to: week.movedSelection(L.day(19), forward: false)))
+    }
+
+    @Test func otherViewsPage() {
+        // Tag: jeder Schritt ist eine neue Seite.
+        #expect(CalendarViewMode.day.pages(from: L.day(23), to: L.day(24)))
+        // Monat: erst am Monatswechsel, auch wenn der Tag schon im Raster stand.
+        #expect(!CalendarViewMode.month.pages(from: L.day(23), to: L.day(24)))
+        #expect(CalendarViewMode.month.pages(from: L.day(31), to: L.day(1, month: 11)))
+        // Jahr: erst am Jahreswechsel.
+        #expect(!CalendarViewMode.year.pages(from: L.day(23), to: L.day(24)))
+        #expect(CalendarViewMode.year.pages(from: LocalDate(year: 2026, month: 12, day: 31), to: LocalDate(year: 2027, month: 1, day: 1)))
+    }
+
+    @Test func stepTitles() {
+        #expect(CalendarViewMode.allCases.map { $0.stepTitle(forward: true) } == ["Nächster Tag", "Nächste Woche", "Nächster Monat", "Nächstes Jahr"])
+        #expect(CalendarViewMode.allCases.map { $0.stepTitle(forward: false) } == ["Vorheriger Tag", "Vorherige Woche", "Vorheriger Monat", "Vorheriges Jahr"])
+    }
+
+    let week = [
+        L.allDay("Bereitschaft", 20),
+        L.timed("Frühstück", 21, 8, to: 9),
+        L.timed("Team-Sync", 21, 9, to: 9, 30),
+        L.timed("Mittag", 21, 12, to: 13),
+        L.allDay("Messe", 22, through: 23),
+        L.timed("Workshop", 23, 10, to: 11),
+        L.timed("Nachtschicht", 23, 22, to: 6, endDay: 24),
+    ]
+
+    @Test func highlightMovesSidewaysToNearestTime() {
+        // Di 20. ganztägig → Mi 21.: kein ganztägiger, also der erste Termin.
+        #expect(N.counterpart(of: week[0], on: L.day(21), in: week, calendar: L.cal)?.title == "Frühstück")
+        // Workshop Fr 10 Uhr → Mi 21.: Team-Sync (9:00) liegt näher als Mittag (12:00).
+        #expect(N.counterpart(of: week[5], on: L.day(21), in: week, calendar: L.cal)?.title == "Team-Sync")
+        // Gleicher Abstand (Team-Sync 9:00 → 8:00 und 10:00 am Do): der frühere.
+        let tie = week + [L.timed("Früh", 22, 8, to: 8, 30), L.timed("Spät", 22, 10, to: 10, 30)]
+        #expect(N.counterpart(of: week[2], on: L.day(22), in: tie, calendar: L.cal)?.title == "Früh")
+        // Ganztägig → ganztägig.
+        #expect(N.counterpart(of: week[0], on: L.day(22), in: week, calendar: L.cal)?.title == "Messe")
+        // Nur ganztägige am Ziel: der erste davon.
+        #expect(N.counterpart(of: week[3], on: L.day(22), in: week, calendar: L.cal)?.title == "Messe")
+    }
+
+    @Test func highlightStaysOnMultiDayAndDropsOnEmptyDay() {
+        // Messe Do–Fr bleibt markiert, wenn der Tag auf Fr wechselt.
+        #expect(N.counterpart(of: week[4], on: L.day(23), in: week, calendar: L.cal)?.title == "Messe")
+        // Nachtschicht reicht in den Sa 24. hinein.
+        #expect(N.counterpart(of: week[6], on: L.day(24), in: week, calendar: L.cal)?.title == "Nachtschicht")
+        // Am So 25. liegt nichts.
+        #expect(N.counterpart(of: week[5], on: L.day(25), in: week, calendar: L.cal) == nil)
+        // Vom Vortag hereinreichend zählt ab Mitternacht: Workshop 10 Uhr → Sa 24.
+        let saturday = week + [L.timed("Brunch", 24, 11, to: 12)]
+        #expect(N.counterpart(of: week[5], on: L.day(24), in: saturday, calendar: L.cal)?.title == "Brunch")
+        #expect(N.counterpart(of: L.timed("Nachts", 22, 1, to: 2), on: L.day(24), in: saturday, calendar: L.cal)?.title == "Nachtschicht")
+    }
+
+    @Test func selectedDayFollowsHighlight() {
+        let week = CalendarViewMode.week
+        // Markierung wandert auf den Workshop am Fr: Tag springt von Di auf Fr.
+        #expect(week.selection(following: self.week[5], from: L.day(20), calendar: L.cal) == L.day(23))
+        // Beginnt vor der Woche (So 18.): erster sichtbarer Tag.
+        let early = L.allDay("Reise", 18, through: 21)
+        #expect(week.selection(following: early, from: L.day(23), calendar: L.cal) == L.day(19))
+        // Monat: Tag aus dem September im Oktober-Raster würde blättern, bleibt also.
+        #expect(CalendarViewMode.month.selection(following: L.timed("Herbst", 29, 9, to: 10, month: 9), from: L.day(23), calendar: L.cal) == L.day(23))
+        #expect(CalendarViewMode.month.selection(following: self.week[1], from: L.day(23), calendar: L.cal) == L.day(21))
+        // Jahr: keine Termine, Tag bleibt.
+        #expect(CalendarViewMode.year.selection(following: self.week[1], from: L.day(23), calendar: L.cal) == L.day(23))
+    }
+
+    @Test func entryWithoutHighlightStartsAtSelectedDay() {
+        #expect(N.entry(in: week, forward: true, day: L.day(21), calendar: L.cal)?.title == "Frühstück")
+        #expect(N.entry(in: week, forward: false, day: L.day(21), calendar: L.cal)?.title == "Mittag")
+        // Messe (Do–Fr) liegt am Fr noch an.
+        #expect(N.entry(in: week, forward: true, day: L.day(23), calendar: L.cal)?.title == "Messe")
+        // Nach dem letzten Termin bzw. vor dem ersten: das jeweilige Ende.
+        #expect(N.entry(in: week, forward: true, day: L.day(25), calendar: L.cal)?.title == "Nachtschicht")
+        #expect(N.entry(in: week, forward: false, day: L.day(19), calendar: L.cal)?.title == "Bereitschaft")
+        #expect(N.entry(in: [], forward: true, day: L.day(19), calendar: L.cal) == nil)
+    }
+}
+
 @Suite("Tastatur: Markierung wandern")
 struct OccurrenceNavigationTests {
     typealias L = LayoutFixtures
@@ -104,8 +216,8 @@ struct CalendarKeyCommandTests {
         #expect(CalendarKeyCommand(key: .up) == .highlightPrevious)
         #expect(CalendarKeyCommand(key: .tab, shift: true) == .highlightPrevious)
         #expect(CalendarKeyCommand(key: .backTab) == .highlightPrevious)
-        #expect(CalendarKeyCommand(key: .left) == .stepBackward)
-        #expect(CalendarKeyCommand(key: .right) == .stepForward)
+        #expect(CalendarKeyCommand(key: .left) == .previousDay)
+        #expect(CalendarKeyCommand(key: .right) == .nextDay)
         #expect(CalendarKeyCommand(key: .enter) == .open)
         #expect(CalendarKeyCommand(key: .space) == .open)
         #expect(CalendarKeyCommand(key: .delete) == .delete)
@@ -201,6 +313,11 @@ struct EventClipboardTests {
         #expect(clip.matches(clip.text))
         #expect(!clip.matches("etwas anderes"))
         #expect(!clip.matches(nil))
+    }
+
+    @Test func pasteTitleNamesEventAndDay() {
+        let clip = EventClipboard(L.timed("Team-Sync", 23, 9, to: 9, 30), calendar: L.cal)
+        #expect(clip.pasteTitle(on: L.day(27)) == "„Team-Sync“ einfügen am Di 27.10.")
     }
 
     @Test func pasteKeepsTimeOnTargetDay() {

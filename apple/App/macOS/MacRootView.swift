@@ -11,9 +11,9 @@ import UniformTypeIdentifiers
 ///
 /// Tastatur (LIC-24): Das Kalenderfeld rechts nimmt den Fokus, sobald ein
 /// Termin markiert oder leere Fläche angeklickt wird. Dann gelten ↑/↓ und
-/// Tab/⇧Tab (Markierung wandern), ←/→ (blättern), Return/Leertaste (öffnen),
-/// ⌫ (löschen), Esc (Markierung weg), ⌘C/⌘V. In Textfeldern bleiben die
-/// Tasten beim Text. Belegung in `CalendarKeyCommand` (LichtungKit).
+/// Tab/⇧Tab (Markierung wandern), ←/→ (Tag für Tag, LIC-50), Return/Leertaste
+/// (öffnen), ⌫ (löschen), Esc (Markierung weg), ⌘C/⌘V. In Textfeldern bleiben
+/// die Tasten beim Text. Belegung in `CalendarKeyCommand` (LichtungKit).
 struct MacRootView: View {
     @Environment(AppModel.self) private var model
 

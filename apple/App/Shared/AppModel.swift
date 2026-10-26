@@ -256,7 +256,7 @@ extension AppModel {
         return highlightedOccurrence
     }
 
-    /// Einen Schritt der Ansicht vor oder zurück (⌘←/⌘→, ohne ⌘ im Kalenderfeld).
+    /// Einen Schritt der Ansicht vor oder zurück (⌘←/⌘→ im Menü „Darstellung“).
     /// Eine Markierung außerhalb des neuen Bereichs fällt weg.
     func step(_ direction: Int) {
         selectedDay = viewMode.stepped(selectedDay, by: direction)
@@ -290,11 +290,34 @@ extension AppModel {
     }
 
     /// Markierung aus der Tastatur wandern lassen. `false`, wenn nichts zu markieren ist.
+    /// Ohne Markierung beginnt sie am ausgewählten Tag; der Tag folgt ihr, ohne
+    /// zu blättern (LIC-50).
     @discardableResult
     func highlightNeighbor(forward: Bool) -> Bool {
-        guard let next = OccurrenceNavigation.neighbor(of: highlightedOccurrence, in: visibleOccurrences, forward: forward) else { return false }
+        let list = visibleOccurrences
+        let next: Occurrence?
+        if let current = highlightedOccurrence {
+            next = OccurrenceNavigation.neighbor(of: current, in: list, forward: forward)
+        } else {
+            next = OccurrenceNavigation.entry(in: list, forward: forward, day: selectedDay, calendar: calendar)
+        }
+        guard let next else { return false }
         highlightedOccurrence = next
+        let day = viewMode.selection(following: next, from: selectedDay, calendar: calendar)
+        if day != selectedDay { selectedDay = day }
         return true
+    }
+
+    /// ←/→ im Kalenderfeld (LIC-50): der ausgewählte Tag wandert einen Tag,
+    /// in der Woche also von Spalte zu Spalte. Am Rand der Woche (des Monats)
+    /// blättert die Ansicht mit, weil sie dem Tag folgt. Eine Markierung
+    /// wandert seitwärts zum Termin dieses Tags mit der nächsten Uhrzeit.
+    func moveSelectedDay(forward: Bool) {
+        let day = viewMode.movedSelection(selectedDay, forward: forward)
+        selectedDay = day
+        if let current = highlightedOccurrence {
+            highlightedOccurrence = OccurrenceNavigation.counterpart(of: current, on: day, in: visibleOccurrences, calendar: calendar)
+        }
     }
 
     /// Taste im Kalenderfeld. `false` heißt: nicht verbraucht (weiterreichen).
@@ -317,11 +340,11 @@ extension AppModel {
             guard highlightedOccurrence != nil else { return false }
             highlightedOccurrence = nil
             return true
-        case .stepBackward:
-            step(-1)
+        case .previousDay:
+            moveSelectedDay(forward: false)
             return true
-        case .stepForward:
-            step(1)
+        case .nextDay:
+            moveSelectedDay(forward: true)
             return true
         }
     }

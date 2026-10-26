@@ -8,7 +8,7 @@ name: TestFlight
 on:
   workflow_dispatch:
   push:
-    branches: [main, ci/testflight-upload]  # TEMP: Test vom PR-Branch
+    branches: [main]
     paths:
       - "apple/**"
       - ".github/workflows/testflight.yml"

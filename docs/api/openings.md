@@ -92,7 +92,7 @@ Ein Opening ist ein Buchungslink. Gäste buchen über die öffentliche Seite `<�
 | `PATCH /api/openings/{id}` | Link ändern → `200` mit dem Opening | Geräte der App und Browser-Sitzungen |
 | `DELETE /api/openings/{id}` | Link löschen, Platzhalter entfernen → `204` | Geräte der App und Browser-Sitzungen |
 
-API-Tokens (`lt_…`) dürfen Links nur lesen (`403 forbidden`): Ein Link schreibt Platzhalter in seinen Zielkalender, unabhängig von `mcp_write`, und API-Tokens öffnen auch `/mcp`. Claude legt Einmal-Links später über das MCP-Werkzeug `create_opening_link` an (LIC-45).
+API-Tokens (`lt_…`) dürfen Links nur lesen (`403 forbidden`): Ein Link schreibt Platzhalter in seinen Zielkalender, unabhängig von `mcp_write`, und API-Tokens öffnen auch `/mcp`. Claude legt Einmal-Links über das MCP-Werkzeug `create_opening_link` an (LIC-45, [`mcp.md`](../mcp.md)); es prüft zusätzlich `mcp_write` des Zielkalenders.
 
 **Anlegen:**
 

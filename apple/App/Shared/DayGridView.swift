@@ -504,13 +504,18 @@ struct AllDayRow: View {
             ZStack(alignment: .topLeading) {
                 ForEach(bars.filter { $0.lane < visibleLanes }) { bar in
                     let color = model.color(for: bar.occurrence.calendarId)
+                    // Getrennt berechnet: Als ein Ausdruck sprengt das den Type-Checker (Xcode 26.6, Release).
+                    let span = CGFloat(bar.lastColumn - bar.firstColumn + 1)
+                    let width: CGFloat = max(0, columnWidth * span - 4)
+                    let x: CGFloat = leadingInset + columnWidth * CGFloat(bar.firstColumn) + 2
+                    let y: CGFloat = CGFloat(bar.lane) * laneHeight
                     Text(bar.occurrence.title)
                         .font(.caption2.weight(.semibold))
                         .lineLimit(1)
                         .padding(.horizontal, 4)
-                        .frame(width: max(0, columnWidth * CGFloat(bar.lastColumn - bar.firstColumn + 1) - 4), height: laneHeight - 2, alignment: .leading)
+                        .frame(width: width, height: laneHeight - 2, alignment: .leading)
                         .background(RoundedRectangle(cornerRadius: 4).fill(color.opacity(0.3)))
-                        .offset(x: leadingInset + columnWidth * CGFloat(bar.firstColumn) + 2, y: CGFloat(bar.lane) * laneHeight)
+                        .offset(x: x, y: y)
                         .onTapGesture { model.selectedOccurrence = bar.occurrence }
                 }
                 ForEach(0..<columns, id: \.self) { column in

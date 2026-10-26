@@ -20,11 +20,12 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1"
+    # Build-Nummer: scripts/testflight.sh überschreibt sie per CURRENT_PROJECT_VERSION=…
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     DEAD_CODE_STRIPPING: YES
-    # DEVELOPMENT_TEAM bitte lokal setzen (Xcode → Signing) oder hier eintragen.
+    DEVELOPMENT_TEAM: H95J852PKP
 
 targets:
   Lichtung-iOS:
@@ -46,10 +47,26 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
     info:
       path: DerivedInfo/Lichtung-iOS-Info.plist
       properties:
+        # Ohne diese Zuordnung schreibt xcodegen feste Werte, und die Build-Nummer bliebe 1.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Nur Standard-Verschlüsselung (HTTPS); sonst hängt jeder Build in TestFlight bei „Missing Compliance“.
+        ITSAppUsesNonExemptEncryption: false
+        # iPad-Multitasking verlangt alle vier Ausrichtungen, sonst lehnt App Store Connect ab.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         CFBundleURLTypes:
           # OAuth-Rückruf der Geräte-Anmeldung (docs/api/sync-api.md §2)
           - CFBundleURLName: dev.rubeen.lichtung.oauth

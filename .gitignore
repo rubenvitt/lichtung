@@ -32,3 +32,6 @@ DerivedInfo/
 # Python
 __pycache__/
 *.pyc
+
+# TestFlight-Archiv (apple/scripts/testflight.sh)
+/apple/build/

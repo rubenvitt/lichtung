@@ -10,6 +10,7 @@
   - `Session/`: Server-Adresse, Ablauf der Anmeldung (Discovery, Registrierung, Token), Geräte-Token mit 401-Signal, Live-Abgleich (SSE + Senden), Startentscheidung.
   - `Settings/`: Regeln und Texte der Einstellungen (Reihenfolge, Kontostatus, Schreibschutz für Claude, Zeitzonen-Auswahl).
 - `project.yml`: xcodegen-Projekt mit `Lichtung-iOS` und `Lichtung-macOS` (Bundle-Präfix `dev.rubeen`). Das `.xcodeproj` wird nicht eingecheckt.
+- `scripts/testflight.sh`: archiviert, signiert und lädt die iOS-App zu TestFlight hoch. Die CI ruft es bei jedem Push auf `main` auf, der `apple/` ändert (`.github/workflows/testflight.yml`); lokal mit `XCODE_ACCOUNT=1`.
 - `App/`: SwiftUI-Code der Apps (Ansichten A–D, Jahr, Schnelleingabe, Demo-Daten, Anmeldung, Einstellungen). Ohne Mac/Xcode entstanden: Gebaut wird er nur in der CI (Job `apps-macos`), auf einem Gerät gelaufen ist er noch nie.
   - Erster Start: Server-Adresse eingeben, Anmeldung im Browserfenster (`webAuthenticationSession`), Token in der Keychain. „Ohne Server ausprobieren“ startet den Demo-Modus.
   - Stand in `Application Support/Lichtung/cache.json`, SSE solange die App offen ist. Bei `401` bleiben Termine und Outbox, die App bittet um neue Anmeldung.

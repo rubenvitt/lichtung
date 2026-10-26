@@ -6,7 +6,7 @@
 //! | `GET /healthz` | none |
 //! | `/auth/login`, `/auth/callback`, `/auth/logout` | OIDC login ([`auth_routes`]) |
 //! | `/.well-known/oauth-*`, `/oauth/*` | built-in authorization server ([`crate::oauth::routes`]) |
-//! | `/api/*` | session cookie, API/bootstrap token or device token ([`api`], [`accounts`], [`events`], [`sync`]) |
+//! | `/api/*` | session cookie, API/bootstrap token or device token ([`api`], [`accounts`], [`events`], [`openings`], [`sync`]) |
 //! | `POST /mcp` | API/bootstrap token or OAuth access token ([`crate::mcp`]) |
 //!
 //! Protected routes under `/api` use
@@ -18,6 +18,7 @@ pub mod api;
 pub mod auth_routes;
 pub mod events;
 pub mod extract;
+pub mod openings;
 pub mod sync;
 
 use std::sync::Arc;

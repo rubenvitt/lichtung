@@ -145,6 +145,11 @@ Fehler kommen als `{"error":{"code":"…","message":"…"}}` mit deutscher Meldu
 - **Rechte:** Nur lesbare Kalender (geteilt ohne Schreibrecht, ICS-Abos) lehnen Änderungen ab (`calendar_read_only`). `mcp_write` gilt nur für Claude (`/mcp`): Ist es aus, lehnt der Server jedes Schreiben über MCP in diesem Kalender ab, auch Antworten auf Einladungen (`mcp_write_forbidden`). Neue Kalender von ICS- und Microsoft-Konten (Arbeitskalender) starten mit `mcp_write` aus.
 - **Anbieter nicht erreichbar:** Die App behält die Änderung und schickt sie später erneut. Lehnt der Anbieter das App-Passwort ab, steht das Konto auf `auth_failed`.
 
+## Openings (Buchungslinks)
+
+- **Links und Vorlagen** pflegt die App (`/api/openings`, [`api/openings.md`](api/openings.md)). Die öffentliche Adresse ist `<LICHTUNG_PUBLIC_URL>/o/<token>`; der Reverse Proxy muss `/o/` ohne Anmeldung durchlassen. Die Kennung steht im Klartext in der Datenbank (und in Backups), weil die App den Link jederzeit wieder anzeigt; wer einen Link zurückziehen will, löscht ihn.
+- **Platzhalter:** Für Vorschläge eines Einmal-Links legt der Server Termine „Reserviert: …“ im Zielkalender an (`origin: server`). Beim Start und alle 15 Minuten räumt er Platzhalter vergangener Vorschläge weg und wiederholt Löschungen, die der Anbieter vorher nicht angenommen hat (Log: `placeholders left for the next cleanup`).
+
 ## Aufbewahrung
 
 - **Löschungen** (Tombstones für den Pull der Apps) bleiben 90 Tage. Eine App, die länger nicht synchronisiert hat, bekommt `410 cursor_expired` und lädt ihren Cache neu; ausstehende Änderungen behält sie.

@@ -23,6 +23,7 @@ pub enum ObjectType {
     CalendarSet,
     Event,
     Conflict,
+    Opening,
 }
 
 impl ObjectType {
@@ -33,6 +34,7 @@ impl ObjectType {
             ObjectType::CalendarSet => "calendar_set",
             ObjectType::Event => "event",
             ObjectType::Conflict => "conflict",
+            ObjectType::Opening => "opening",
         }
     }
 }

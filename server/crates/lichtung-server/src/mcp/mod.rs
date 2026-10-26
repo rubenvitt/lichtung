@@ -24,7 +24,6 @@
 //! by the snapshot test `tests/snapshots/mcp_tools.json`.
 
 pub mod args;
-pub mod free;
 pub mod schema;
 pub mod time;
 pub mod tools;

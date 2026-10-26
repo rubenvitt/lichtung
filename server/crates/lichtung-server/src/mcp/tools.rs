@@ -12,7 +12,6 @@ use chrono_tz::Tz;
 use serde_json::{json, Map, Value};
 
 use super::args::{invalid, ArgResult, Args};
-use super::free::{free_slots, FreeQuery, Interval};
 use super::schema::{definitions, ToolDef, AVAILABILITY, RESPONSES, ROLES, SCOPES, WEEKDAYS};
 use super::time::{
     date_input, date_time_input, fmt_at, fmt_date, midnight, occurrence_input, parse_clock,
@@ -23,6 +22,7 @@ use crate::app::App;
 use crate::error::AppError;
 use crate::events::default_zone;
 use crate::events::occurrences::OccurrenceQuery;
+use crate::free::{free_slots, FreeQuery};
 use crate::writes::{Origin, WriteOutcome};
 
 /// Default horizon of `list_invitations`.
@@ -483,40 +483,16 @@ async fn find_free_times(app: &App, args: &Args) -> ToolResult {
     };
     let cat = Catalog::load(app).await?;
     let ids = cat.select(args, |c| c.openings_busy)?;
-    let (list, truncated) = occurrences(app, &ids, from - buffer, to + buffer, tz, false).await?;
-    if truncated {
+    let busy = app
+        .busy_intervals(&ids, from - buffer, to + buffer, tz, None)
+        .await?;
+    if busy.truncated {
         return Err(ToolError::new(
             "too_many_events",
             "Im Zeitraum liegen zu viele Termine, um freie Zeiten sicher zu bestimmen. Bitte einen \
              kürzeren Zeitraum wählen.",
         ));
     }
-    let busy: Vec<Interval> = list
-        .iter()
-        .filter(|o| o["status"] != "cancelled")
-        .filter(|o| o["availability"] != "free")
-        .filter(|o| o["self_status"] != "declined")
-        .filter(|o| {
-            o["all_day"] != true
-                || o["calendar_id"]
-                    .as_str()
-                    .and_then(|id| cat.get(id))
-                    .is_some_and(|c| c.all_day_blocks)
-        })
-        .filter_map(|o| {
-            let s = when_of(&o["start"], tz)?.instant(tz);
-            let e = when_of(&o["end"], tz)?.instant(tz);
-            Some((s, e.max(s)))
-        })
-        // A zero-length event blocks its moment.
-        .map(|(s, e)| {
-            if e == s {
-                (s, s + Duration::minutes(1))
-            } else {
-                (s, e)
-            }
-        })
-        .collect();
     let query = FreeQuery {
         from,
         to,
@@ -526,7 +502,7 @@ async fn find_free_times(app: &App, args: &Args) -> ToolResult {
         window,
         weekdays,
     };
-    let mut slots = free_slots(&query, busy);
+    let mut slots = free_slots(&query, busy.intervals);
     let truncated = slots.len() > limit;
     slots.truncate(limit);
     let slots: Vec<Value> = slots

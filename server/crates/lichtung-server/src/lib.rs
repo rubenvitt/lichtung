@@ -11,6 +11,8 @@
 //! - [`sync_api`]: sync API for the apps (pull, push, cleanup)
 //! - [`ics_feed`]: read-only ICS subscriptions (fetch, split per UID)
 //! - [`crypto`]: encryption of provider credentials (AES-256-GCM)
+//! - [`free`]: free time (busy rules, windows), for MCP and openings
+//! - [`openings`]: booking links, their slots and placeholders (LIC-31/32)
 //! - [`writes`]: writing events to the provider (create, update, delete,
 //!   respond) with conflict detection
 //! - [`conflicts`]: dropped own changes (provider wins), visible until dismissed
@@ -33,11 +35,13 @@ pub mod crypto;
 pub mod db;
 pub mod error;
 pub mod events;
+pub mod free;
 pub mod healthcheck;
 pub mod http;
 pub mod ics_feed;
 pub mod mcp;
 pub mod oauth;
+pub mod openings;
 pub mod sync;
 pub mod sync_api;
 pub mod writes;
@@ -130,8 +134,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 /// on its own (and closes SQLite) before it would be killed.
 pub const DRAIN_TIMEOUT: Duration = Duration::from_secs(8);
 
-/// Serves `router` on `listener` with the nightly backup and the sync
-/// scheduler until `signal`
+/// Serves `router` on `listener` with the nightly backup, the sync
+/// scheduler and the openings cleanup until `signal`
 /// completes, then lets running requests finish for at most
 /// `drain_timeout` and closes the remaining connections.
 pub async fn serve(
@@ -143,6 +147,7 @@ pub async fn serve(
 ) -> anyhow::Result<()> {
     let backup = tokio::spawn(backup::run_nightly(app.clone()));
     let scheduler = tokio::spawn(sync::run_scheduler(app.clone()));
+    let cleanup = tokio::spawn(openings::run_cleanup(app.clone()));
     let shutdown = app.shutdown_token();
     let service = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
     let server = axum::serve(listener, service).with_graceful_shutdown({
@@ -174,6 +179,10 @@ pub async fn serve(
     match tokio::time::timeout(drain_timeout, scheduler).await {
         Ok(joined) => joined?,
         Err(_) => tracing::warn!("sync scheduler still running at shutdown"),
+    }
+    match tokio::time::timeout(drain_timeout, cleanup).await {
+        Ok(joined) => joined?,
+        Err(_) => tracing::warn!("openings cleanup still running at shutdown"),
     }
     tracing::info!("stopped");
     Ok(())

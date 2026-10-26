@@ -4,9 +4,7 @@
 import LichtungKit
 import SwiftUI
 #if os(macOS)
-import AppKit
-#elseif os(iOS)
-import UIKit
+import AppKit // NSCursor am Griff
 #endif
 
 /// Ansicht B/C: Zeitraster über einen oder mehrere Tage.
@@ -465,7 +463,6 @@ private struct TravelBlockView: View {
 
 struct EventBlockView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
     let occurrence: Occurrence
 
     var body: some View {
@@ -481,55 +478,12 @@ struct EventBlockView: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 2)
             Spacer(minLength: 0)
-            if let link = VideoLinkDetector.detect(in: occurrence.details) {
-                joinButton(link)
-            }
+            JoinButton(occurrence: occurrence, iconOnly: true) // Beitreten (LIC-42)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(color.opacity(0.18))
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .accessibilityElement(children: .combine)
-    }
-
-    // MARK: Beitreten (LIC-42)
-
-    /// Kleiner Knopf, solange `VideoLinkDetector.isJoinable` gilt (ab zehn
-    /// Minuten vorher bis zum Ende). Jede Minute neu geprüft.
-    private func joinButton(_ link: VideoLink) -> some View {
-        TimelineView(.everyMinute) { context in
-            if VideoLinkDetector.isJoinable(occurrence, now: context.date) {
-                Button {
-                    join(link)
-                } label: {
-                    Image(systemName: "video.fill")
-                        .font(.caption2)
-                        .padding(3)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .help("Beitreten (\(link.provider.displayName))")
-                .accessibilityLabel("Beitreten (\(link.provider.displayName))")
-            }
-        }
-    }
-
-    /// Erst die Anbieter-App (`appURL`), wenn sie sich nicht öffnen lässt, der Link.
-    /// Die App-Adresse geht direkt an das System, weil nur dessen Antwort
-    /// sagt, ob das Schema (`zoommtg:`, `msteams:`) einen Abnehmer hat.
-    private func join(_ link: VideoLink) {
-        let web = link.joinURL
-        guard let app = link.appURL else {
-            openURL(web)
-            return
-        }
-        #if os(macOS)
-        if !NSWorkspace.shared.open(app) { openURL(web) }
-        #else
-        Task {
-            let opened = await UIApplication.shared.open(app)
-            if !opened { openURL(web) }
-        }
-        #endif
     }
 }
 

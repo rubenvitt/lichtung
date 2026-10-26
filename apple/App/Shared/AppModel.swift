@@ -101,8 +101,9 @@ final class AppModel {
     // MARK: Raster (LIC-22, LIC-42)
 
     /// Zweite Zeitzone als schmale Spalte im Raster; `nil` blendet sie aus.
-    /// Gesetzt wird sie in den Einstellungen (LIC-43).
-    var secondaryTimeZone: TimeZone?
+    /// Gewählt wird sie in den Einstellungen (LIC-43, `@AppStorage("secondaryTimeZone")`);
+    /// `SessionRootView` reicht Änderungen weiter.
+    var secondaryTimeZone: TimeZone? = TimeZoneCatalog.zone(fromStored: UserDefaults.standard.string(forKey: "secondaryTimeZone") ?? "")
 
     /// Ob sich der Termin im Raster ziehen lässt (nicht ganztägig, Kalender beschreibbar).
     func canDrag(_ occ: Occurrence) -> Bool {

@@ -18,31 +18,48 @@ import UIKit
 struct JoinButton: View {
     let occurrence: Occurrence
     let link: VideoLink?
-    /// Normale Größe (Detail) statt klein (Liste, Raster).
+    /// Normale Größe (Detail) statt klein (Liste).
     let prominent: Bool
+    /// Nur das Symbol, ohne Rahmen (Terminblock im Raster).
+    let iconOnly: Bool
 
     @Environment(\.openURL) private var openURL
 
     /// `link` weglassen, dann sucht der Knopf selbst im Termin.
-    init(occurrence: Occurrence, link: VideoLink? = nil, prominent: Bool = false) {
+    init(occurrence: Occurrence, link: VideoLink? = nil, prominent: Bool = false, iconOnly: Bool = false) {
         self.occurrence = occurrence
         self.link = link ?? VideoLinkDetector.detect(in: occurrence.details)
         self.prominent = prominent
+        self.iconOnly = iconOnly
     }
 
     var body: some View {
         if let link {
             TimelineView(.everyMinute) { context in
                 if VideoLinkDetector.isJoinable(occurrence, now: context.date) {
-                    Button {
-                        join(link)
-                    } label: {
-                        Label("Beitreten", systemImage: "video.fill")
+                    if iconOnly {
+                        Button {
+                            join(link)
+                        } label: {
+                            Image(systemName: "video.fill")
+                                .font(.caption2)
+                                .padding(3)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .help("\(link.provider.displayName) beitreten")
+                        .accessibilityLabel("\(link.provider.displayName) beitreten")
+                    } else {
+                        Button {
+                            join(link)
+                        } label: {
+                            Label("Beitreten", systemImage: "video.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(prominent ? .regular : .small)
+                        .help("\(link.provider.displayName) beitreten")
+                        .accessibilityLabel("\(link.provider.displayName) beitreten")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(prominent ? .regular : .small)
-                    .help("\(link.provider.displayName) beitreten")
-                    .accessibilityLabel("\(link.provider.displayName) beitreten")
                 }
             }
         }

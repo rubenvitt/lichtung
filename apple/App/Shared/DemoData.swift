@@ -33,7 +33,7 @@ enum DemoData {
         var s = SyncState()
         s.calendars = [
             "demo_arbeit": CalendarInfo(id: "demo_arbeit", accountId: "demo", name: "Arbeit", color: "#3B82F6", position: 0),
-            "demo_privat": CalendarInfo(id: "demo_privat", accountId: "demo", name: "Privat", color: "#D98A0B", position: 1),
+            "demo_privat": CalendarInfo(id: "demo_privat", accountId: "demo", name: "Privat", color: "#D98A0B", canInvite: true, position: 1),
             "demo_sport": CalendarInfo(id: "demo_sport", accountId: "demo", name: "Sport", color: "#22A05A", position: 2),
             "demo_ehrenamt": CalendarInfo(id: "demo_ehrenamt", accountId: "demo", name: "Ehrenamt", color: "#E5484D", position: 3),
             "demo_fokus": CalendarInfo(id: "demo_fokus", accountId: "demo", name: "Fokus", color: "#8B5CF6", position: 4),
@@ -79,6 +79,37 @@ enum DemoData {
             invitation("d13", "demo_arbeit", "Quartalsrückblick", today.adding(days: 4), 13, minutes: 60,
                        from: anna, status: .accepted),
         ] { s.events[e.id] = e }
+
+        // Buchungslinks (LIC-35): ein Einmal-Link mit zwei Vorschlägen (samt
+        // Platzhaltern im Kalender), einer ohne, eine Vorlage, ein gebuchter.
+        let calendar = Calendar.lichtung(timeZone: tz)
+        func instant(_ day: LocalDate, _ h: Int) -> Date {
+            LocalDateTime(date: day, hour: h, minute: 0).instant(in: calendar)
+        }
+        let first = today.adding(days: 2), second = today.adding(days: 3)
+        for (id, day, h) in [("dp1", first, 10), ("dp2", second, 16)] {
+            s.events[id] = event(id, "demo_privat", "Reserviert: Abstimmung Umzug", day, h, 0, minutes: 30,
+                                 notes: "Platzhalter für einen Vorschlag des Buchungslinks „Abstimmung Umzug“.")
+        }
+        let base = "https://lichtung.invalid/o/"
+        let openings = [
+            Opening(id: "demo_o1", kind: .once, url: base + "demo-umzug", title: "Abstimmung Umzug", durationMinutes: 30,
+                    calendarId: "demo_privat", timeZone: zone, suggestionsOnly: true,
+                    suggestions: [
+                        Opening.Suggestion(id: "demo_s1", start: instant(first, 10), end: instant(first, 10).addingTimeInterval(1_800), placeholderEventId: "dp1"),
+                        Opening.Suggestion(id: "demo_s2", start: instant(second, 16), end: instant(second, 16).addingTimeInterval(1_800), placeholderEventId: "dp2"),
+                    ],
+                    createdAt: now.addingTimeInterval(-3_600)),
+            Opening(id: "demo_o2", kind: .once, url: base + "demo-telefonat", title: "Termin (45 Minuten)", durationMinutes: 45,
+                    calendarId: "demo_privat", timeZone: zone, createdAt: now.addingTimeInterval(-86_400)),
+            Opening(id: "demo_o3", kind: .template, url: base + "demo-kennenlernen", title: "30 Minuten Kennenlernen", durationMinutes: 30,
+                    calendarId: "demo_privat", timeZone: zone, bufferBeforeMinutes: 10, bufferAfterMinutes: 10,
+                    videoUrl: "https://meet.example.org/kennenlernen", createdAt: now.addingTimeInterval(-7 * 86_400)),
+            Opening(id: "demo_o4", kind: .once, url: base + "demo-fahrrad", title: "Fahrrad abholen", durationMinutes: 15,
+                    calendarId: "demo_privat", timeZone: zone, bookedAt: now.addingTimeInterval(-26 * 3_600),
+                    createdAt: now.addingTimeInterval(-3 * 86_400)),
+        ]
+        for o in openings { s.openings[o.id] = o }
         return s
     }
 }

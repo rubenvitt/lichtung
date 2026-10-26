@@ -16,6 +16,7 @@
   - Stand in `Application Support/Lichtung/cache.json`, SSE solange die App offen ist. Bei `401` bleiben Termine und Outbox, die App bittet um neue Anmeldung.
   - Einstellungen: Mac im Fenster „Einstellungen …“ (⌘,), iPhone über das Zahnrad in der Toolbar.
   - Terminanfragen: Ablage-Knopf mit Zahl in der Toolbar (iPhone: Blatt, Mac: Popover), Annehmen/Vielleicht/Ablehnen in der Liste, im Detail und im Kontextmenü. Regeln im Kern unter `Features/Invitations.swift`.
+  - Buchungslinks (Openings): in den Einstellungen unter „Buchungslinks“ (Mac: eigener Reiter). Offene Einmal-Links kopieren, teilen (iPhone) und löschen (Wischen, Kontextmenü), feste Links anlegen und ändern, neuer Einmal-Link mit Dauer, Zielkalender und optional Vorschlägen; die URL landet nach dem Anlegen in der Zwischenablage. Nur mit Server, der Demo-Modus zeigt erfundene Links. Objekt im Kern unter `API/OpeningModels.swift`, Regeln und Texte unter `Features/Openings.swift`.
 
 ```sh
 cd apple/LichtungKit

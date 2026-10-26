@@ -82,6 +82,8 @@ public struct QuickEntryPreview: Equatable, Sendable {
         }
         if let u = rule.until {
             text += " bis \(u.day). \(monthShort[u.month - 1]) \(u.year)"
+        } else if let c = rule.count {
+            text += ", \(c) Mal"
         }
         return text
     }

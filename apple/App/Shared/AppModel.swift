@@ -97,4 +97,120 @@ final class AppModel {
     func refresh() async {
         _ = try? await engine.sync()
     }
+
+    // MARK: Raster (LIC-22, LIC-42)
+
+    /// Zweite Zeitzone als schmale Spalte im Raster; `nil` blendet sie aus.
+    /// Gewählt wird sie in den Einstellungen (LIC-43, `@AppStorage("secondaryTimeZone")`);
+    /// `SessionRootView` reicht Änderungen weiter.
+    var secondaryTimeZone: TimeZone? = TimeZoneCatalog.zone(fromStored: UserDefaults.standard.string(forKey: "secondaryTimeZone") ?? "")
+
+    /// Ob sich der Termin im Raster ziehen lässt (nicht ganztägig, Kalender beschreibbar).
+    func canDrag(_ occ: Occurrence) -> Bool {
+        GridInteraction.isDraggable(occ, calendar: state.calendars[occ.calendarId])
+    }
+
+    /// Verschieben oder Länge ändern aus dem Raster. Bei Serien nur dieses
+    /// Vorkommen (`scope .this`). Über `perform`, damit Rückgängig geht.
+    func move(_ occ: Occurrence, start: Date, end: Date) async {
+        guard end >= start, start != occ.start || end != occ.end,
+              let intent = GridInteraction.moveIntent(occ, to: DateInterval(start: start, end: end), deviceTimeZone: timeZone)
+        else { return }
+        let sameLength = end.timeIntervalSince(start) == occ.end.timeIntervalSince(occ.start)
+        await engine.perform(intent, label: sameLength ? "Termin verschieben" : "Termindauer ändern")
+    }
+
+    /// Termin aus einem Zug in leerer Fläche anlegen, im ersten beschreibbaren Kalender.
+    func createTimed(start: Date, end: Date) async {
+        guard end > start, let calendarId = writableCalendars.first?.id else { return }
+        let intent = GridInteraction.createIntent(calendarId: calendarId, interval: DateInterval(start: start, end: end), timeZone: timeZone)
+        await engine.perform(intent, label: "Termin anlegen")
+    }
+
+    // MARK: Suche und Rückgängig (LIC-42)
+
+    /// Kopie des Rückgängig-Verlaufs für Knöpfe und Beschriftung
+    /// („Rückgängig: Termin löschen“). Folgt `observeUndo()`.
+    private(set) var undoHistory = UndoHistory()
+
+    /// Mac: ⌘F setzt den Fokus ins Suchfeld der Toolbar. Die Ansicht
+    /// beobachtet den Zähler, weil das Menü nicht an ihren Fokus kommt.
+    var searchFocusRequests = 0
+
+    /// Liest nach jedem neuen Stand den Verlauf nach. Er ändert sich nur
+    /// zusammen mit einem Stand (Anlegen, Ändern, Rückgängig), und der Engine
+    /// beendet `perform`/`undo` vollständig, bevor diese Abfrage drankommt.
+    func observeUndo() async {
+        for await _ in await engine.updates() {
+            undoHistory = await engine.undoHistory
+        }
+    }
+
+    /// Treffer der Terminsuche in den angezeigten Kalendern.
+    func search(_ text: String) -> [EventSearch.Hit] {
+        query.search(text, selection: calendarSelection, now: Date())
+    }
+
+    /// Springt zum Tag eines Vorkommens und öffnet sein Detail.
+    func show(_ occurrence: Occurrence) {
+        selectedDay = LocalDate(occurrence.start, calendar: calendar)
+        selectedOccurrence = occurrence
+    }
+
+    // MARK: Editor (LIC-20)
+
+    /// Offener Termin-Editor (Sheet in `RootView`).
+    var editorDraft: EventDraft?
+    /// Editor, der aufgeht, sobald die Detailansicht geschlossen ist: Zwei
+    /// Sheets gleichzeitig zeigt SwiftUI nicht.
+    private var pendingEditorDraft: EventDraft?
+
+    /// Neuer Termin am ausgewählten Tag im ersten beschreibbaren Kalender.
+    func newEvent() {
+        editorDraft = EventDraft.new(on: selectedDay, now: Date(), calendarId: writableCalendars.first?.id, deviceTimeZone: timeZone)
+    }
+
+    /// Editor für ein Vorkommen öffnen (aus der Detailansicht: nach deren Schließen).
+    func edit(_ occ: Occurrence) {
+        let event = state.visibleEvents(deviceTimeZone: timeZone)[occ.eventId]
+        let draft = EventDraft(editing: occ, event: event, deviceTimeZone: timeZone)
+        if selectedOccurrence != nil {
+            pendingEditorDraft = draft
+            selectedOccurrence = nil
+        } else {
+            editorDraft = draft
+        }
+    }
+
+    /// `onDismiss` der Detailansicht.
+    func detailDismissed() {
+        guard let draft = pendingEditorDraft else { return }
+        pendingEditorDraft = nil
+        editorDraft = draft
+    }
+
+    /// Nur Termine in beschreibbaren Kalendern lassen sich bearbeiten.
+    func canEdit(_ occ: Occurrence) -> Bool {
+        state.calendars[occ.calendarId]?.writable == true
+    }
+
+    /// Kalender zur Auswahl im Editor: die beschreibbaren, dazu der eigene
+    /// des Termins, falls er ausgeblendet ist.
+    func editorCalendars(for draft: EventDraft) -> [CalendarInfo] {
+        var list = writableCalendars
+        for id in [draft.calendarId, draft.original?.calendarId].compactMap({ $0 }) where !list.contains(where: { $0.id == id }) {
+            if let cal = state.calendars[id], cal.writable { list.append(cal) }
+        }
+        return list
+    }
+
+    func save(_ draft: EventDraft, scope: EditScope) async {
+        guard let intent = draft.saveIntent(scope: scope) else { return }
+        await engine.perform(intent, label: draft.saveLabel)
+    }
+
+    func delete(_ draft: EventDraft, scope: EditScope) async {
+        guard let intent = draft.deleteIntent(scope: scope) else { return }
+        await engine.perform(intent, label: "Termin löschen")
+    }
 }

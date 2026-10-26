@@ -6,6 +6,8 @@ import Foundation
 public struct Account: Codable, Hashable, Sendable, Identifiable {
     public enum Kind: String, Codable, Sendable {
         case fastmail, icloud, ics, microsoft
+        /// Beliebiger CalDAV-Server (LIC-7).
+        case caldav
         case unknown
 
         public init(from decoder: Decoder) throws {

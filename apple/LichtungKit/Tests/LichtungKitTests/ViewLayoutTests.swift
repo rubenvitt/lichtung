@@ -139,17 +139,118 @@ struct TimelineLayoutTests {
         #expect(abs(b[0].height - 6.0 / 24.0) < 1e-9)
     }
 
-    @Test func dstDayHas25Hours() {
-        // Am 25.10.2026 endet die Sommerzeit: 12:00 liegt 13 echte Stunden nach Mitternacht.
-        let b = TimelineLayout.blocks([L.timed("Mittag", 25, 12, to: 13)], day: L.day(25), calendar: L.cal)
-        #expect(abs(b[0].top - 13.0 / 25.0) < 1e-9)
-        #expect(abs(b[0].height - 1.0 / 25.0) < 1e-9)
-    }
-
     @Test func nowLine() {
         let now = L.day(23).date(hour: 12, minute: 0, in: L.cal)
         #expect(TimelineLayout.nowLine(now, day: L.day(23), calendar: L.cal) == 0.5)
         #expect(TimelineLayout.nowLine(now, day: L.day(24), calendar: L.cal) == nil)
+    }
+}
+
+/// LIC-41: Das Raster hat immer 24 Wanduhr-Stunden, auch an Umstellungstagen.
+@Suite("Zeitraster: Wanduhr-Achse an Umstellungstagen")
+struct WallClockAxisTests {
+    typealias L = LayoutFixtures
+
+    struct Case: Sendable, CustomTestStringConvertible {
+        var name: String
+        var day: LocalDate
+        var start: (Int, Int)
+        var end: (Int, Int)
+        /// Erwartete Lage in Minuten der Achse.
+        var top: Double
+        var height: Double
+        var testDescription: String { name }
+    }
+
+    static func occurrence(_ day: LocalDate, _ s: (Int, Int), _ e: (Int, Int)) -> Occurrence {
+        let sv = DateValue.dateTime(LocalDateTime(date: day, hour: s.0, minute: s.1), timeZone: "Europe/Berlin")
+        let ev = DateValue.dateTime(LocalDateTime(date: day, hour: e.0, minute: e.1), timeZone: "Europe/Berlin")
+        return Occurrence(eventId: "t", calendarId: "cal_1", recurrenceId: nil, details: EventDetails(title: "T", start: sv, end: ev),
+                          start: sv.instant(deviceTimeZone: L.tz), end: ev.instant(deviceTimeZone: L.tz), isModified: false)
+    }
+
+    static let autumn = LocalDate(year: 2026, month: 10, day: 25)
+    static let spring = LocalDate(year: 2027, month: 3, day: 28)
+    static let normal = LocalDate(year: 2026, month: 10, day: 23)
+
+    static let cases: [Case] = [
+        Case(name: "normaler Tag 12–13", day: normal, start: (12, 0), end: (13, 0), top: 720, height: 60),
+        // Akzeptanz LIC-41: 12:00 steht auf der Linie „12“.
+        Case(name: "25.10. 12–13", day: autumn, start: (12, 0), end: (13, 0), top: 720, height: 60),
+        Case(name: "28.3. 12–13", day: spring, start: (12, 0), end: (13, 0), top: 720, height: 60),
+        // Über die doppelte Stunde: 4 echte Stunden, 3 auf der Uhr.
+        Case(name: "25.10. 1–4", day: autumn, start: (1, 0), end: (4, 0), top: 60, height: 180),
+        // Über die Lücke: 1 echte Stunde, 2 auf der Uhr.
+        Case(name: "28.3. 1:30–3:30", day: spring, start: (1, 30), end: (3, 30), top: 90, height: 120),
+        Case(name: "25.10. 23–24", day: autumn, start: (23, 0), end: (23, 59), top: 1380, height: 59),
+    ]
+
+    @Test(arguments: cases)
+    func blockSitsOnWallClockLine(_ c: Case) {
+        let b = TimelineLayout.blocks([Self.occurrence(c.day, c.start, c.end)], day: c.day, calendar: L.cal)
+        #expect(b.count == 1)
+        #expect(abs(b[0].top * 1440 - c.top) < 1e-6)
+        #expect(abs(b[0].height * 1440 - c.height) < 1e-6)
+    }
+
+    @Test func nowLineOnChangeoverDays() {
+        for day in [Self.autumn, Self.spring] {
+            let noon = day.date(hour: 12, minute: 0, in: L.cal)
+            #expect(TimelineLayout.nowLine(noon, day: day, calendar: L.cal) == 0.5)
+        }
+    }
+
+    @Test func doubledHourIsCompressed() {
+        let axis = WallClockAxis(day: Self.autumn, calendar: L.cal)
+        // 01:00 UTC ist die Umstellung: 03:00 Sommerzeit wird 02:00 Winterzeit.
+        let utc = Calendar.gregorianUTC
+        let change = utc.date(from: DateComponents(year: 2026, month: 10, day: 25, hour: 1))!
+        #expect(axis.minutes(at: change.addingTimeInterval(-3600)) == 120) // 02:00 Sommerzeit
+        #expect(axis.minutes(at: change) == 150) // 02:00 Winterzeit
+        #expect(axis.minutes(at: change.addingTimeInterval(3600)) == 180) // 03:00 Winterzeit
+        #expect(axis.instant(atMinutes: 150) == change)
+        #expect(axis.exists(minutes: 150))
+    }
+
+    @Test func missingHourIsEmpty() {
+        let axis = WallClockAxis(day: Self.spring, calendar: L.cal)
+        let change = Calendar.gregorianUTC.date(from: DateComponents(year: 2027, month: 3, day: 28, hour: 1))!
+        #expect(axis.minutes(at: change.addingTimeInterval(-60)) == 119) // 01:59 Winterzeit
+        #expect(axis.minutes(at: change) == 180) // 03:00 Sommerzeit
+        #expect(!axis.exists(minutes: 150))
+        #expect(axis.exists(minutes: 180) && axis.exists(minutes: 60))
+        // In der Lücke: erster gültiger Zeitpunkt danach.
+        #expect(axis.instant(atMinutes: 150) == change)
+    }
+
+    @Test(arguments: [autumn, spring, normal])
+    func roundTripThroughTheDay(_ day: LocalDate) {
+        let axis = WallClockAxis(day: day, calendar: L.cal)
+        var t = axis.dayStart
+        var last = -1.0
+        while t < axis.dayEnd {
+            let m = axis.minutes(at: t)
+            #expect(m > last) // streng monoton
+            #expect(abs(axis.instant(atMinutes: m).timeIntervalSince(t)) < 1e-3)
+            last = m
+            t = t.addingTimeInterval(7 * 60)
+        }
+        #expect(axis.instant(atMinutes: 0) == axis.dayStart)
+        #expect(axis.instant(atMinutes: 1440) == axis.dayEnd)
+    }
+
+    @Test func secondZoneLabelsFollowWallClockRows() {
+        let ny = TimeZone(identifier: "America/New_York")!
+        // 25.10.: New York noch Sommerzeit (UTC−4), Berlin ab 3:00 Winterzeit.
+        let autumn = TimelineLayout.secondaryHourLabels(for: ny, home: L.tz, day: Self.autumn)
+        #expect(autumn.count == 24)
+        #expect(autumn[0] == "18" && autumn[2] == "20" && autumn[3] == "22" && autumn[12] == "07")
+        // 28.3.: Zeile „02“ gibt es in Berlin nicht.
+        let spring = TimelineLayout.secondaryHourLabels(for: ny, home: L.tz, day: Self.spring)
+        #expect(spring[1] == "20" && spring[2] == nil && spring[3] == "21" && spring[12] == "06")
+        let normal = TimelineLayout.secondaryHourLabels(for: ny, home: L.tz, day: Self.normal)
+        #expect(normal.compactMap { $0 }.count == 24)
+        #expect(normal[12] == "06")
     }
 }
 

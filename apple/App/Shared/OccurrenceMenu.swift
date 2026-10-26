@@ -10,7 +10,8 @@ import UIKit
 #endif
 
 /// Kontextmenü eines Termins (Mac: Rechtsklick, iPhone: lange drücken).
-/// Überall dasselbe: Liste, Raster, ganztägige Zeile, Monat (LIC-24).
+/// Überall dasselbe: Liste, Raster, ganztägige Zeile, Monat (LIC-24). Ziehbare
+/// Blöcke im iPhone-Raster zeigen die Einträge in `OccurrenceMenuPopover`.
 struct OccurrenceMenu: View {
     @Environment(AppModel.self) private var model
     let occurrence: Occurrence
@@ -29,6 +30,10 @@ struct OccurrenceMenuItems: View {
     /// Menüleiste: Tastenkürzel zeigen und belegen. Im Kontextmenü nicht,
     /// dort stünden sie doppelt.
     var showsShortcuts = false
+    /// Führt die gewählte Aktion aus. Das Popover (iPhone, LIC-54) schließt
+    /// sich damit erst und lässt sie danach laufen, weil SwiftUI kein
+    /// Blatt öffnet, solange das Popover noch steht.
+    var run: @MainActor (@escaping @MainActor () -> Void) -> Void = { $0() }
 
     @Environment(\.openURL) private var openURL
 
@@ -36,15 +41,15 @@ struct OccurrenceMenuItems: View {
         let occ = occurrence
         let editable: Bool = occ.map { model.canEdit($0) } ?? false
         let link: VideoLink? = occ.flatMap { VideoLinkDetector.detect(in: $0.details) }
-        Button("Öffnen") { if let occ { model.open(occ) } }
+        Button("Öffnen") { if let occ { run { model.open(occ) } } }
             .shortcut("o", enabled: showsShortcuts)
             .disabled(occ == nil)
-        Button("Bearbeiten …") { if let occ { model.edit(occ) } }
+        Button("Bearbeiten …") { if let occ { run { model.edit(occ) } } }
             .shortcut("e", enabled: showsShortcuts)
             .disabled(!editable)
         if let link {
             let joinTitle: String = "\(link.provider.displayName) beitreten"
-            Button(joinTitle) { JoinButton.join(link, with: openURL) }
+            Button(joinTitle) { run { JoinButton.join(link, with: openURL) } }
                 .shortcut("j", enabled: showsShortcuts)
         } else if showsShortcuts {
             // Menüleiste: Eintrag bleibt stehen, damit das Menü nicht springt.
@@ -64,11 +69,11 @@ struct OccurrenceMenuItems: View {
             // Mac: In der Menüleiste kopiert „Bearbeiten > Kopieren“ (⌘C,
             // `onCopyCommand`). iPhone: Einfügen über die Toolbar oder
             // langes Drücken auf einen Monatstag (LIC-50).
-            Button("Kopieren") { Pasteboard.write(model.copy(occ)) }
+            Button("Kopieren") { run { Pasteboard.write(model.copy(occ)) } }
         }
         calendarMenu(occ)
         Divider()
-        Button(deleteTitle(occ), role: .destructive) { if let occ { model.requestDelete(occ) } }
+        Button(deleteTitle(occ), role: .destructive) { if let occ { run { model.requestDelete(occ) } } }
             .shortcut(.delete, enabled: showsShortcuts)
             .disabled(!editable)
     }
@@ -80,7 +85,7 @@ struct OccurrenceMenuItems: View {
 
     private func duplicate(_ occ: Occurrence?, days: Int) {
         guard let occ else { return }
-        Task { await model.duplicate(occ, days: days) }
+        run { Task { await model.duplicate(occ, days: days) } }
     }
 
     /// Untermenü der beschreibbaren Kalender. Bei Serien wandert die ganze
@@ -93,13 +98,68 @@ struct OccurrenceMenuItems: View {
         Menu(title) {
             ForEach(targets) { cal in
                 Button(cal.name) {
-                    if let occ { Task { await model.move(occ, toCalendar: cal.id) } }
+                    if let occ { run { Task { await model.move(occ, toCalendar: cal.id) } } }
                 }
             }
         }
         .disabled(targets.isEmpty)
     }
 }
+
+#if os(iOS)
+/// iPhone: Menü eines ziehbaren Blocks im Raster (LIC-54). Dort gehört langes
+/// Drücken dem Ziehen; wer den aufgenommenen Block ohne Bewegung loslässt,
+/// bekommt dieselben Einträge wie im Kontextmenü als Popover am Block
+/// (`GridInteraction.opensMenuOnRelease`).
+struct OccurrenceMenuPopover: View {
+    let model: AppModel
+    let occurrence: Occurrence
+    /// Merkt die gewählte Aktion und schließt das Popover; die Aktion läuft
+    /// danach (siehe `OccurrenceMenuItems.run`).
+    let choose: @MainActor (@escaping @MainActor () -> Void) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(occurrence.title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            Divider()
+            OccurrenceMenuItems(model: model, occurrence: occurrence, run: choose)
+        }
+        .buttonStyle(MenuRowButtonStyle())
+        .menuStyle(.button)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: 260)
+        .presentationCompactAdaptation(.popover)
+    }
+}
+
+/// Zeile im Popover: ganze Breite, wie ein Eintrag im Kontextmenü.
+private struct MenuRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Row(configuration: configuration)
+    }
+
+    private struct Row: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            configuration.label
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .foregroundStyle(configuration.role == .destructive ? Color.red : Color.primary)
+                .opacity(isEnabled ? 1 : 0.4)
+                .background(configuration.isPressed ? Color.secondary.opacity(0.15) : Color.clear)
+                .contentShape(Rectangle())
+        }
+    }
+}
+#endif
 
 private extension View {
     /// Tastenkürzel nur, wenn `enabled` (Menüleiste).
@@ -215,7 +275,7 @@ enum Pasteboard {
     }
     #else
     /// Zuletzt hier geschriebener Text und der Stand der Zwischenablage danach.
-    private static var written: (text: String, changeCount: Int)?
+    private static var written: PasteboardMark?
 
     /// Inhalt der Zwischenablage, solange er noch von Lichtung stammt, sonst
     /// `nil` (LIC-50). Liest den Inhalt nicht, sondern vergleicht nur
@@ -223,13 +283,12 @@ enum Pasteboard {
     /// `EventClipboard.matches` wirkt wie am Mac (wer danach etwas anderes
     /// kopiert, fügt keinen alten Termin ein).
     static var string: String? {
-        guard let written = Self.written, written.changeCount == UIPasteboard.general.changeCount else { return nil }
-        return written.text
+        written?.text(atChangeCount: UIPasteboard.general.changeCount)
     }
 
     static func write(_ text: String) {
         UIPasteboard.general.string = text
-        Self.written = (text: text, changeCount: UIPasteboard.general.changeCount)
+        Self.written = PasteboardMark(text: text, changeCount: UIPasteboard.general.changeCount)
     }
     #endif
 }

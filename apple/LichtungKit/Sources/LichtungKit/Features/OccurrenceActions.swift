@@ -40,17 +40,40 @@ public enum OccurrenceActions {
         return .update(eventId: occ.eventId, scope: .all, changes: EventChanges(calendarId: calendarId))
     }
 
-    /// Kalender für eine Kopie: der eigene, wenn beschreibbar, sonst der erste
-    /// beschreibbare (`writable` in der Reihenfolge der Seitenleiste).
+    /// Kalender für eine Kopie (Duplizieren, Einfügen): der eigene, wenn
+    /// beschreibbar, sonst der Standardkalender (`DefaultCalendar.choose`
+    /// mit der Wahl `storedDefault` aus den Einstellungen, LIC-53).
     /// Ein Abo (ICS) lässt sich so trotzdem duplizieren.
-    public static func duplicateCalendar(for occ: Occurrence, calendars: [String: CalendarInfo], writable: [CalendarInfo]) -> String? {
+    public static func duplicateCalendar(
+        for occ: Occurrence, calendars: [String: CalendarInfo], writable: [CalendarInfo], storedDefault: String?
+    ) -> String? {
         if calendars[occ.calendarId]?.writable == true { return occ.calendarId }
-        return writable.first?.id
+        return DefaultCalendar.choose(stored: storedDefault, writable: writable)
     }
 
     /// Kopie um `days` Tage verschoben (0 = gleicher Tag) im Kalender `calendarId`.
     public static func duplicateIntent(_ occ: Occurrence, shiftedByDays days: Int = 0, calendarId: String) -> EditIntent {
         .create(calendarId: calendarId, event: EventDuplicate.input(from: occ, shiftedByDays: days))
+    }
+}
+
+/// Stand der Zwischenablage nach dem eigenen Schreiben (iPhone, LIC-50,
+/// LIC-54). iOS zählt jede Änderung (`UIPasteboard.changeCount`, auch aus
+/// anderen Apps); den Inhalt zu lesen, würde nach der Erlaubnis fragen.
+public struct PasteboardMark: Hashable, Sendable {
+    public var text: String
+    /// `changeCount` direkt nach dem Schreiben.
+    public var changeCount: Int
+
+    public init(text: String, changeCount: Int) {
+        self.text = text
+        self.changeCount = changeCount
+    }
+
+    /// Der geschriebene Text, solange seitdem niemand die Zwischenablage
+    /// geändert hat (`current` gleich), sonst `nil`.
+    public func text(atChangeCount current: Int) -> String? {
+        current == changeCount ? text : nil
     }
 }
 

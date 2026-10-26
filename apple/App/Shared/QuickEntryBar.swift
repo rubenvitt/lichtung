@@ -9,13 +9,17 @@ struct QuickEntryBar: View {
     @Environment(AppModel.self) private var model
     @State private var text = ""
     @FocusState private var focused: Bool
+    /// Dauer, wenn der Satz keine nennt (LIC-53, `NewEventDuration`).
+    @AppStorage(NewEventDuration.storageKey) private var storedMinutes = 0
+
+    private var newEventMinutes: Int { NewEventDuration.minutes(stored: storedMinutes) }
 
     private var choices: [CalendarChoice] {
         model.writableCalendars.map { CalendarChoice(id: $0.id, name: $0.name) }
     }
 
     private func parse(now: Date) -> QuickEntry {
-        QuickEntryParser(timeZone: model.timeZone, calendars: choices).parse(text, now: now)
+        QuickEntryParser(timeZone: model.timeZone, defaultDurationMinutes: newEventMinutes, calendars: choices).parse(text, now: now)
     }
 
     var body: some View {

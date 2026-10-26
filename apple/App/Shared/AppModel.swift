@@ -100,9 +100,9 @@ final class AppModel {
     }
 
     /// Kopie, optional um `days` Tage verschoben. Aus einem schreibgeschützten
-    /// Kalender (Abo) landet sie im ersten beschreibbaren (LIC-24).
+    /// Kalender (Abo) landet sie im Standardkalender (LIC-24, LIC-53).
     func duplicate(_ occ: Occurrence, days: Int = 0) async {
-        guard let calendarId = OccurrenceActions.duplicateCalendar(for: occ, calendars: state.calendars, writable: writableCalendars) else { return }
+        guard let calendarId = duplicateCalendarId(for: occ) else { return }
         await engine.perform(OccurrenceActions.duplicateIntent(occ, shiftedByDays: days, calendarId: calendarId), label: "Termin duplizieren")
     }
 
@@ -144,6 +144,21 @@ final class AppModel {
         DefaultCalendar.choose(stored: UserDefaults.standard.string(forKey: DefaultCalendar.storageKey), writable: writableCalendars)
     }
 
+    /// Kalender für eine Kopie: der eigene oder, wenn der schreibgeschützt
+    /// ist, der Standardkalender (LIC-53).
+    func duplicateCalendarId(for occ: Occurrence) -> String? {
+        OccurrenceActions.duplicateCalendar(
+            for: occ, calendars: state.calendars, writable: writableCalendars,
+            storedDefault: UserDefaults.standard.string(forKey: DefaultCalendar.storageKey)
+        )
+    }
+
+    /// Standarddauer neuer Termine aus den Einstellungen
+    /// (`@AppStorage(NewEventDuration.storageKey)`, LIC-53).
+    var newEventMinutes: Int {
+        NewEventDuration.minutes(stored: UserDefaults.standard.integer(forKey: NewEventDuration.storageKey))
+    }
+
     /// Entwurf nach einem Zug in leerer Fläche (LIC-47). Das Raster öffnet
     /// damit den Editor (`editorDraft`), statt sofort anzulegen.
     func newEventDraft(spanning interval: DateInterval) -> EventDraft {
@@ -151,9 +166,9 @@ final class AppModel {
     }
 
     /// Entwurf nach einem Doppelklick in leere Fläche (Mac, LIC-47): Beginn
-    /// an der Stelle, Standarddauer des Editors.
+    /// an der Stelle, Standarddauer aus den Einstellungen (LIC-53).
     func newEventDraft(startingAt start: LocalDateTime) -> EventDraft {
-        EventDraft.new(startingAt: start, calendarId: defaultCalendarId, deviceTimeZone: timeZone)
+        EventDraft.new(startingAt: start, minutes: newEventMinutes, calendarId: defaultCalendarId, deviceTimeZone: timeZone)
     }
 
     // MARK: Suche und Rückgängig (LIC-42)
@@ -195,9 +210,11 @@ final class AppModel {
     /// Sheets gleichzeitig zeigt SwiftUI nicht.
     private var pendingEditorDraft: EventDraft?
 
-    /// Neuer Termin am ausgewählten Tag im Standardkalender (LIC-47).
+    /// Neuer Termin am ausgewählten Tag im Standardkalender (LIC-47) mit der
+    /// Standarddauer (LIC-53).
     func newEvent() {
         editorDraft = EventDraft.new(on: selectedDay, now: Date(), calendarId: defaultCalendarId, deviceTimeZone: timeZone)
+            .lasting(minutes: newEventMinutes)
     }
 
     /// Editor für ein Vorkommen öffnen (aus der Detailansicht: nach deren Schließen).
@@ -418,9 +435,10 @@ extension AppModel {
     func newEvent(on day: LocalDate, at start: LocalDateTime?) {
         let calendarId = defaultCalendarId
         if let start {
-            editorDraft = EventDraft.new(startingAt: start, calendarId: calendarId, deviceTimeZone: timeZone)
+            editorDraft = EventDraft.new(startingAt: start, minutes: newEventMinutes, calendarId: calendarId, deviceTimeZone: timeZone)
         } else {
             editorDraft = EventDraft.new(on: day, now: Date(), calendarId: calendarId, deviceTimeZone: timeZone)
+                .lasting(minutes: newEventMinutes)
         }
     }
 
@@ -442,9 +460,15 @@ extension AppModel {
             clipboard = nil
             return
         }
-        guard let calendarId = OccurrenceActions.duplicateCalendar(for: clip.occurrence, calendars: state.calendars, writable: writableCalendars)
-        else { return }
+        guard let calendarId = duplicateCalendarId(for: clip.occurrence) else { return }
         let intent = clip.intent(pastingOn: day ?? selectedDay, calendarId: calendarId, calendar: calendar)
         await engine.perform(intent, label: "Termin einfügen")
+    }
+
+    /// Kopie verwerfen, wenn die Zwischenablage inzwischen etwas anderes
+    /// hält, z. B. beim Aktivwerden der App (iPhone, LIC-54). So zeigt die
+    /// Toolbar „Einfügen“ nur, solange es noch geht.
+    func expireClipboard(pasteboardText: String?) {
+        if let clip = clipboard, !clip.matches(pasteboardText) { clipboard = nil }
     }
 }

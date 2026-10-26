@@ -4,7 +4,8 @@
 import LichtungKit
 import SwiftUI
 
-/// Server, Gerät, zweite Zeitzone, Standardkalender (LIC-47), Abmelden (LIC-43).
+/// Server, Gerät, zweite Zeitzone, Standardkalender (LIC-47), Standarddauer
+/// (LIC-53), Abmelden (LIC-43).
 struct GeneralSettingsView: View {
     @Environment(AppSession.self) private var session
     /// IANA-ID der zweiten Zeitzone, leer = keine. Das Raster liest sie über
@@ -13,6 +14,9 @@ struct GeneralSettingsView: View {
     /// Kalender für neue Termine, leer = erster beschreibbarer (LIC-47).
     /// `AppModel.defaultCalendarId` liest ihn beim Anlegen.
     @AppStorage(DefaultCalendar.storageKey) private var defaultCalendarID = ""
+    /// Dauer neuer Termine in Minuten, 0 = Standard (LIC-53). `AppModel.newEventMinutes`
+    /// und die Schnelleingabe lesen sie über `NewEventDuration.minutes(stored:)`.
+    @AppStorage(NewEventDuration.storageKey) private var newEventMinutes = 0
     @State private var choosingZone = false
     @State private var confirmsSignOut = false
 
@@ -82,9 +86,13 @@ struct GeneralSettingsView: View {
         }
     }
 
-    /// Standardkalender für neue Termine (LIC-47).
+    /// Standardkalender (LIC-47) und Standarddauer (LIC-53) für neue Termine.
     private var newEventsSection: some View {
         let writable = session.model.writableCalendars
+        let minutes = Binding<Int>(
+            get: { NewEventDuration.minutes(stored: newEventMinutes) },
+            set: { newEventMinutes = $0 }
+        )
         return Section {
             Picker("Kalender", selection: $defaultCalendarID) {
                 Text("Erster beschreibbarer").tag("")
@@ -92,11 +100,16 @@ struct GeneralSettingsView: View {
                     Text(calendar.name).tag(calendar.id)
                 }
             }
+            Picker("Dauer", selection: minutes) {
+                ForEach(NewEventDuration.choices, id: \.self) { m in
+                    Text(NewEventDuration.label(m)).tag(m)
+                }
+            }
         } header: {
             Text("Neue Termine")
         } footer: {
             Text(DefaultCalendar.fallbackNote(stored: defaultCalendarID, writable: writable)
-                ?? "Gilt für die Schnelleingabe, das Zeitraster und „Neuer Termin“.")
+                ?? "Gilt für die Schnelleingabe, das Zeitraster und „Neuer Termin“. Die Dauer gilt, wenn nichts anderes angegeben ist.")
         }
     }
 

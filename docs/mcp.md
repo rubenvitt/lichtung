@@ -50,7 +50,7 @@ Der Name des Tokens erscheint als Herkunft der Änderungen (`mcp:<Tokenname>`, b
 
 | Werkzeug | Parameter (Pflicht **fett**) | Ergebnis |
 |---|---|---|
-| `list_calendars` | – | `calendars`: `id`, `name`, `account` (`id`, `kind`, `name`), `color`, `writable` (Anbieter), `mcp_writable` (= `writable` und `mcp_write`), `can_invite`, `hidden`, `openings_busy`, `all_day_blocks` |
+| `list_calendars` | – | `calendars`: `id`, `name`, `account` (`id`, `kind`, `name`), `color`, `writable` (Anbieter), `mcp_writable` (= `writable` und `mcp_write`), `can_invite`, `hidden`, `openings_busy`, `all_day_blocks`, `is_work` (Arbeitskalender) |
 | `list_calendar_sets` | – | `calendar_sets`: `id`, `name`, `calendar_ids` |
 | `query_events` | **`start`**, **`end`**, `query`, `calendar_ids`, `calendar_set_id`, `include_cancelled`, `time_zone`, `limit` (1–1000, Standard 250) | `events` (Vorkommen, nach Beginn sortiert), `count`, `truncated` |
 | `find_free_times` | **`start`**, **`end`**, **`min_duration_minutes`**, `calendar_ids`, `calendar_set_id`, `day_start`/`day_end` (`hh:mm`), `weekdays` (`mo`…`su`), `buffer_minutes`, `time_zone`, `limit` (Standard 100) | `free`: `start`, `end`, `duration_minutes`; `calendar_ids` |

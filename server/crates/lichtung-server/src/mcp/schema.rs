@@ -242,7 +242,8 @@ pub fn definitions() -> Vec<ToolDef> {
                 schreiben (writable und in der App freigegeben); nur solche Kalender kommen für \
                 create_event, update_event, delete_event und respond_to_invitation in Frage. \
                 hidden: in der App ausgeblendet. openings_busy: zählt für freie Zeiten. \
-                all_day_blocks: ganztägige Termine blockieren freie Zeiten.",
+                all_day_blocks: ganztägige Termine blockieren freie Zeiten. is_work: \
+                Arbeitskalender (in der App gekennzeichnet).",
             input_schema: object(vec![], &[]),
             read_only: true,
             destructive: false,

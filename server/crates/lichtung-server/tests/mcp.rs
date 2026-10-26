@@ -469,8 +469,11 @@ async fn list_calendars_and_sets() {
     .await;
     let work = t.calendar_named("Arbeit").await;
     let holidays = t.calendar_named("Feiertage").await;
-    t.settings(&work, json!({"mcp_write": false, "hidden": true}))
-        .await;
+    t.settings(
+        &work,
+        json!({"mcp_write": false, "hidden": true, "is_work": true}),
+    )
+    .await;
     let set =
         t.s.app
             .create_calendar_set(
@@ -493,6 +496,7 @@ async fn list_calendars_and_sets() {
     assert_eq!(privat["mcp_writable"], true);
     assert_eq!(privat["hidden"], false);
     assert_eq!(privat["openings_busy"], true);
+    assert_eq!(privat["is_work"], false);
     assert!(privat["color"].as_str().unwrap().starts_with('#'));
     let arbeit = by_name("Arbeit");
     assert_eq!(
@@ -503,6 +507,7 @@ async fn list_calendars_and_sets() {
         ),
         (&json!(true), &json!(false), &json!(true))
     );
+    assert_eq!(arbeit["is_work"], true);
     let feiertage = by_name("Feiertage");
     assert_eq!(
         (&feiertage["writable"], &feiertage["mcp_writable"]),

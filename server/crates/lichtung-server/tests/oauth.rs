@@ -1214,3 +1214,134 @@ async fn device_grants_keep_their_resource() {
     .await;
     assert_eq!(oauth_error(&r), "invalid_target");
 }
+
+#[tokio::test]
+async fn devices_are_renamed_and_log_in_again_through_their_client() {
+    let s = TestServer::new().await;
+    let client_id = register_app(&s).await;
+    let cookie = s.session().await;
+    let code = device_code(&s, &cookie, &client_id).await;
+    let device = device_token(&device_exchange(&s, &client_id, &code).await);
+
+    // The fields of the device list (contract section 7).
+    let r = s.get("/api/devices", Auth::Bearer(&device)).await;
+    let listed = r.json()[0].clone();
+    let mut keys: Vec<&str> = listed
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["created_at", "current", "id", "last_used_at", "name"]
+    );
+    let path = format!("/api/devices/{}", listed["id"].as_str().unwrap());
+
+    // The device renames itself; the name is trimmed.
+    let r = s
+        .request(
+            Method::PATCH,
+            &path,
+            Auth::Bearer(&device),
+            Some(json!({"name": "  Rubens iPhone "})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.json()["name"], "Rubens iPhone");
+    assert_eq!(r.json()["current"], true);
+    assert_eq!(r.json()["id"], listed["id"]);
+    let me = s.get("/api/me", Auth::Bearer(&device)).await.json();
+    assert_eq!(me["device"]["name"], "Rubens iPhone");
+    assert_eq!(me["auth"], "app:Rubens iPhone");
+
+    // Invalid names, unknown devices, API tokens.
+    for body in [
+        json!({"name": " "}),
+        json!({"name": "x".repeat(101)}),
+        json!({"name": "zwei\nZeilen"}),
+        json!({"name": 7}),
+        json!({"name": "ok", "current": true}),
+        json!({}),
+    ] {
+        let r = s
+            .request(
+                Method::PATCH,
+                &path,
+                Auth::Bearer(&device),
+                Some(body.clone()),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{body}: {}", r.text());
+        assert_eq!(r.error_code(), "invalid_request");
+    }
+    let unknown = format!("/api/devices/{}", uuid::Uuid::now_v7());
+    let r = s
+        .request(
+            Method::PATCH,
+            &unknown,
+            Auth::Web(&cookie),
+            Some(json!({"name": "x"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let token = api_token(&s, "werkzeug").await;
+    let r = s
+        .request(
+            Method::PATCH,
+            &path,
+            Auth::Bearer(&token),
+            Some(json!({"name": "x"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    // Revoked, the device is gone, but its client stays usable: the app logs
+    // in again with the same client_id, and the new device keeps the name.
+    let r = s
+        .request(Method::DELETE, &path, Auth::Web(&cookie), None)
+        .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let r = s
+        .request(
+            Method::PATCH,
+            &path,
+            Auth::Web(&cookie),
+            Some(json!({"name": "x"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let code = device_code(&s, &cookie, &client_id).await;
+    let again = device_token(&device_exchange(&s, &client_id, &code).await);
+    let me = s.get("/api/me", Auth::Bearer(&again)).await.json();
+    assert_eq!(me["device"]["name"], "Rubens iPhone");
+}
+
+/// The app checks a remembered client before it opens the browser: for an
+/// unknown client the token endpoint answers `invalid_client` before it
+/// looks at the code (contract section 2).
+#[tokio::test]
+async fn token_endpoint_names_unknown_clients_first() {
+    let s = TestServer::new().await;
+    let client_id = register_app(&s).await;
+    for (id, status, error) in [
+        ("unbekannt", StatusCode::UNAUTHORIZED, "invalid_client"),
+        (client_id.as_str(), StatusCode::BAD_REQUEST, "invalid_grant"),
+    ] {
+        let r = token(
+            &s,
+            &[
+                ("grant_type", "authorization_code"),
+                ("code", "loc_pruefung"),
+                ("redirect_uri", APP_CALLBACK),
+                ("client_id", id),
+                ("code_verifier", VERIFIER),
+                ("resource", API_RESOURCE),
+            ],
+        )
+        .await;
+        assert_eq!(r.status, status, "{id}: {}", r.text());
+        assert_eq!(oauth_error(&r), error, "{id}");
+    }
+}

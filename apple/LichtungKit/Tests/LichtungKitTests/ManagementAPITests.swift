@@ -48,6 +48,21 @@ struct ManagementAPITests {
         #expect(text == #"{"color":null,"mcp_write":false}"#)
     }
 
+    @Test func workFlagIsSent() throws {
+        let text = String(decoding: try APICoding.encoder.encode(CalendarSettings(isWork: true)), as: UTF8.self)
+        #expect(text == #"{"is_work":true}"#)
+    }
+
+    @Test func renameDevice() async throws {
+        let t = ScriptedTransport([ScriptedTransport.json(#"{"id": "d1", "name": "Rubens iPhone", "created_at": "2026-10-20T07:00:00Z", "last_used_at": null, "current": true}"#)])
+        let d = try await api(t).renameDevice("d1", name: "Rubens iPhone")
+        #expect(d.name == "Rubens iPhone")
+        #expect(d.current == true)
+        #expect(t.recorded[0].method == "PATCH")
+        #expect(t.recorded[0].url.path == "/api/devices/d1")
+        #expect(jsonObject(t.recorded[0].body ?? Data())["name"] as? String == "Rubens iPhone")
+    }
+
     @Test func listsBareOrWrapped() async throws {
         let t = ScriptedTransport([
             ScriptedTransport.json(#"[{"id": "tok_1", "name": "Claude.ai", "created_at": "2026-10-20T07:00:00Z"}]"#),

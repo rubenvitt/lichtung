@@ -27,7 +27,10 @@
 //!   an access/refresh pair. It does not expire (the app keeps a local
 //!   cache), is only accepted by `/api`, is listed under `/api/devices` and
 //!   revoked there, via `/oauth/revoke` or when its authorization code is
-//!   replayed. The device is named after the client (`client_name`).
+//!   replayed. The device is named after the client (`client_name`) and can
+//!   be renamed under `/api/devices/{id}` (which renames the client too).
+//!   The app registers once per server and logs in again with the same
+//!   client; a client with an active device is never purged (LIC-49).
 //!
 //! API tokens (`lt_…`) work for `/mcp` and `/api`. The `/mcp` endpoint itself
 //! (see [`crate::mcp`]) authenticates with [`authenticate_mcp`].
@@ -638,6 +641,7 @@ fn issue_device(
             family_id: family.id.to_owned(),
             created_at: now,
             last_used_at: None,
+            client_id: Some(family.client_id.to_owned()),
         },
         &auth::sha256_hex(&token),
     )?;
@@ -994,6 +998,50 @@ pub async fn revoke_device(app: &App, user_id: Uuid, id: Uuid) -> AppResult<()> 
     } else {
         Err(AppError::NotFound("Gerät nicht gefunden".into()))
     }
+}
+
+/// Checks a new device name: trimmed, not empty, at most
+/// [`MAX_CLIENT_NAME_CHARS`] characters, no control characters (the same
+/// rules as for `client_name`, which becomes the device name).
+pub fn validate_device_name(raw: &str) -> AppResult<String> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err(AppError::bad_request("Der Gerätename darf nicht leer sein"));
+    }
+    if name.chars().count() > MAX_CLIENT_NAME_CHARS {
+        return Err(AppError::bad_request(format!(
+            "Der Gerätename darf höchstens {MAX_CLIENT_NAME_CHARS} Zeichen lang sein"
+        )));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(AppError::bad_request(
+            "Der Gerätename darf keine Steuerzeichen enthalten",
+        ));
+    }
+    Ok(name.to_owned())
+}
+
+/// Renames an active device of the user (and its OAuth client, so a new
+/// login through it keeps the name); `NotFound` if there is no such device.
+pub async fn rename_device(
+    app: &App,
+    user_id: Uuid,
+    id: Uuid,
+    name: &str,
+    current: Option<Uuid>,
+) -> AppResult<DeviceInfo> {
+    let name = validate_device_name(name)?;
+    let row = app
+        .with_writer(move |conn| Ok(db::rename_device(conn, user_id, id, &name)?))
+        .await?
+        .ok_or_else(|| AppError::NotFound("Gerät nicht gefunden".into()))?;
+    Ok(DeviceInfo {
+        current: current == Some(row.id),
+        id: row.id,
+        name: row.name,
+        created_at: format_ms(row.created_at),
+        last_used_at: row.last_used_at.map(format_ms),
+    })
 }
 
 #[cfg(test)]

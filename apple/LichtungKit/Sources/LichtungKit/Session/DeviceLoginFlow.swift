@@ -133,6 +133,16 @@ public struct PreparedLogin: Sendable {
     public var serverURL: URL
     public var metadata: AuthorizationServerMetadata
     public var login: DeviceLogin
+    /// Gemerkter Client mit anderem Namen: So soll das neue Gerät heißen
+    /// (`finish` benennt es nach dem Tausch um).
+    public var pendingName: String?
+
+    public init(serverURL: URL, metadata: AuthorizationServerMetadata, login: DeviceLogin, pendingName: String? = nil) {
+        self.serverURL = serverURL
+        self.metadata = metadata
+        self.login = login
+        self.pendingName = pendingName
+    }
 
     public var authorizeURL: URL { login.authorizeURL(endpoint: metadata.authorizationEndpoint) }
 
@@ -152,13 +162,40 @@ public struct DeviceCredentials: Hashable, Sendable {
 ///
 /// Die Schritte sind einzeln aufrufbar, damit die App zwischen ihnen die
 /// Phase anzeigen kann.
+///
+/// Mit `clients` merkt sich der Ablauf den OAuth-Client je Server und nimmt
+/// ihn bei der nächsten Anmeldung wieder (LIC-49), statt jedes Mal einen
+/// neuen zu registrieren.
 public struct DeviceLoginFlow: Sendable {
     public static let deviceTokenPrefix = "ld_"
+    /// Erfundener Code für die Prüfung eines gemerkten Clients.
+    static let probeCode = "loc_lichtung-pruefung"
 
     public var transport: HTTPTransport
+    public var clients: ClientStore?
 
-    public init(transport: HTTPTransport = URLSessionTransport()) {
+    public init(transport: HTTPTransport = URLSessionTransport(), clients: ClientStore? = nil) {
         self.transport = transport
+        self.clients = clients
+    }
+
+    /// Name des Geräts beim gemerkten Client für eine Eingabe in der
+    /// Anmeldemaske, zum Vorbelegen.
+    public func rememberedDeviceName(serverInput: String) -> String? {
+        guard let url = try? ServerAddress.normalize(serverInput) else { return nil }
+        return clients?.client(for: url)?.name
+    }
+
+    /// Nach dem Umbenennen des eigenen Geräts in den Einstellungen.
+    public func rememberDeviceName(_ name: String, for server: URL) {
+        guard var client = clients?.client(for: server) else { return }
+        client.name = name
+        clients?.remember(client, for: server)
+    }
+
+    private static func cleanName(_ deviceName: String) -> String {
+        let name = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "Lichtung" : name
     }
 
     /// Schritt 1: Adresse prüfen, Metadaten holen. Liefert die Basis-URL, wie
@@ -189,14 +226,46 @@ public struct DeviceLoginFlow: Sendable {
         return issuerURL
     }
 
-    /// Schritt 2: Gerät registrieren, Verifier und `state` erzeugen.
+    /// Schritt 2 mit gemerktem Client (LIC-49): Kennt der Server den Client
+    /// noch, geht es mit ihm weiter, sonst wird neu registriert. Ohne
+    /// `clients` wie `register`.
+    public func prepare(serverURL: URL, metadata: AuthorizationServerMetadata, deviceName: String) async throws -> PreparedLogin {
+        if let clients, let remembered = clients.client(for: serverURL) {
+            if try await isKnown(clientId: remembered.clientId, serverURL: serverURL, metadata: metadata) {
+                let name = Self.cleanName(deviceName)
+                return PreparedLogin(
+                    serverURL: serverURL, metadata: metadata,
+                    login: DeviceLogin(serverURL: serverURL, clientId: remembered.clientId),
+                    pendingName: name == remembered.name ? nil : name
+                )
+            }
+            clients.forget(server: serverURL)
+        }
+        return try await register(serverURL: serverURL, metadata: metadata, deviceName: deviceName)
+    }
+
+    /// Prüft einen gemerkten Client am Token-Endpunkt (Vertrag §2): Der
+    /// Server nennt einen unbekannten Client mit `invalid_client`, bevor er
+    /// den (erfundenen) Code ansieht. Jede andere Antwort heißt: gültig.
+    func isKnown(clientId: String, serverURL: URL, metadata: AuthorizationServerMetadata) async throws -> Bool {
+        let probe = DeviceLogin(serverURL: serverURL, clientId: clientId)
+        let response = try await send(HTTPRequest(
+            method: "POST", url: metadata.tokenEndpoint,
+            headers: ["Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"],
+            body: probe.tokenRequestBody(code: Self.probeCode)
+        ))
+        return Self.oauthErrorCode(response) != "invalid_client"
+    }
+
+    /// Schritt 2: Gerät registrieren, Verifier und `state` erzeugen. Mit
+    /// `clients` wird der neue Client gemerkt.
     public func register(serverURL: URL, metadata: AuthorizationServerMetadata, deviceName: String) async throws -> PreparedLogin {
-        let name = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = Self.cleanName(deviceName)
         let endpoint = metadata.registrationEndpoint ?? serverURL.appendingPathComponent("oauth/register")
         let response = try await send(HTTPRequest(
             method: "POST", url: endpoint,
             headers: ["Content-Type": "application/json", "Accept": "application/json"],
-            body: try DeviceLogin.registrationBody(deviceName: name.isEmpty ? "Lichtung" : name)
+            body: try DeviceLogin.registrationBody(deviceName: name)
         ))
         guard (200..<300).contains(response.status) else {
             throw LoginFailure.registrationFailed(Self.oauthErrorText(response))
@@ -205,6 +274,7 @@ public struct DeviceLoginFlow: Sendable {
         guard let reg = try? APICoding.decoder.decode(Registration.self, from: response.body), !reg.clientId.isEmpty else {
             throw LoginFailure.registrationFailed(nil)
         }
+        clients?.remember(RememberedClient(clientId: reg.clientId, name: name), for: serverURL)
         return PreparedLogin(serverURL: serverURL, metadata: metadata, login: DeviceLogin(serverURL: serverURL, clientId: reg.clientId))
     }
 
@@ -217,12 +287,39 @@ public struct DeviceLoginFlow: Sendable {
             headers: ["Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"],
             body: prepared.login.tokenRequestBody(code: code)
         ))
-        guard (200..<300).contains(response.status) else { throw LoginFailure.tokenFailed(Self.oauthErrorText(response)) }
+        guard (200..<300).contains(response.status) else {
+            // Client inzwischen weg: beim nächsten Versuch neu registrieren.
+            if Self.oauthErrorCode(response) == "invalid_client" { clients?.forget(server: prepared.serverURL) }
+            throw LoginFailure.tokenFailed(Self.oauthErrorText(response))
+        }
         guard let token = try? APICoding.decoder.decode(DeviceLogin.TokenResponse.self, from: response.body) else {
             throw LoginFailure.tokenFailed(nil)
         }
         guard token.accessToken.hasPrefix(Self.deviceTokenPrefix) else { throw LoginFailure.notDeviceToken }
+        if let name = prepared.pendingName, await rename(to: name, token: token.accessToken, serverURL: prepared.serverURL) {
+            rememberDeviceName(name, for: prepared.serverURL)
+        }
         return DeviceCredentials(serverURL: prepared.serverURL, token: token.accessToken, clientId: prepared.login.clientId)
+    }
+
+    /// Das neue Gerät heißt wie sein Client; hat die Person in der Maske einen
+    /// anderen Namen eingetragen, bekommt es ihn jetzt (`/api/me`, dann
+    /// `PATCH /api/devices/{id}`). Ohne Erfolg bleibt der alte Name stehen,
+    /// die Anmeldung gilt trotzdem.
+    func rename(to name: String, token: String, serverURL: URL) async -> Bool {
+        let auth = ["Authorization": "Bearer \(token)", "Accept": "application/json"]
+        guard let me = try? await send(HTTPRequest(method: "GET", url: serverURL.appendingPathComponent("api/me"), headers: auth)),
+              (200..<300).contains(me.status),
+              let info = try? APICoding.decoder.decode(ServerInfo.self, from: me.body),
+              let device = info.device
+        else { return false }
+        if device.name == name { return true }
+        var headers = auth
+        headers["Content-Type"] = "application/json"
+        guard let body = try? APICoding.encoder.encode(["name": name]),
+              let r = try? await send(HTTPRequest(method: "PATCH", url: serverURL.appendingPathComponent("api/devices/\(device.id)"), headers: headers, body: body))
+        else { return false }
+        return (200..<300).contains(r.status)
     }
 
     /// Abmelden (Vertrag §2, Schritt 5). Ohne Verbindung bleibt das Gerät in
@@ -252,8 +349,15 @@ public struct DeviceLoginFlow: Sendable {
 
     /// `error_description` bzw. `error` einer OAuth-Fehlerantwort (RFC 6749 §5.2).
     static func oauthErrorText(_ response: HTTPResponse) -> String? {
-        struct OAuthError: Decodable { var error: String?; var errorDescription: String? }
         guard let e = try? APICoding.decoder.decode(OAuthError.self, from: response.body) else { return nil }
         return e.errorDescription ?? e.error
     }
+
+    /// Nur der Code (`error`), z. B. `invalid_client`.
+    static func oauthErrorCode(_ response: HTTPResponse) -> String? {
+        guard !(200..<300).contains(response.status) else { return nil }
+        return (try? APICoding.decoder.decode(OAuthError.self, from: response.body))?.error
+    }
+
+    private struct OAuthError: Decodable { var error: String?; var errorDescription: String? }
 }

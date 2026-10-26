@@ -99,6 +99,46 @@ struct SettingsTextTests {
         #expect(MCPWriteGuard.confirmation(enabling: true, calendar: work, account: nil)?.contains("„Arbeit“") == true)
         #expect(MCPWriteGuard.confirmation(enabling: false, calendar: work, account: nil) == nil)
         #expect(MCPWriteGuard.confirmation(enabling: true, calendar: privat, account: nil) == nil)
+        // Ohne Kennzeichen des Servers (ältere Server) bleibt es bei der Schätzung.
+        #expect(!MCPWriteGuard.canMark(work))
+        #expect(!MCPWriteGuard.suggestsMarking(work, account: nil))
+    }
+
+    @Test func workFlagOfTheServerWins() {
+        var marked = CalendarInfo(id: "c1", accountId: "a1", name: "Privat", isWork: true)
+        let unmarked = CalendarInfo(id: "c2", accountId: "a1", name: "Arbeit", isWork: false)
+        let graph = Account(id: "a2", kind: .microsoft, name: "Firma GmbH")
+        #expect(MCPWriteGuard.isWorkCalendar(marked, account: nil))
+        #expect(!MCPWriteGuard.isWorkCalendar(unmarked, account: nil))
+        #expect(!MCPWriteGuard.isWorkCalendar(unmarked, account: graph))
+        #expect(MCPWriteGuard.canMark(unmarked))
+        // Die Schätzung bleibt als Vorschlag.
+        #expect(MCPWriteGuard.suggestsMarking(unmarked, account: nil))
+        #expect(!MCPWriteGuard.suggestsMarking(marked, account: nil))
+        #expect(MCPWriteGuard.confirmation(enabling: true, calendar: marked, account: nil)?.contains("gekennzeichnet") == true)
+        #expect(MCPWriteGuard.confirmation(enabling: true, calendar: unmarked, account: nil) == nil)
+        marked.isWork = false
+        #expect(!MCPWriteGuard.suggestsMarking(marked, account: nil))
+    }
+
+    @Test func markingAppliesLocallyLikeTheServer() {
+        let c = CalendarInfo(id: "c1", accountId: "a1", name: "Projekt", mcpWrite: true, isWork: false)
+        let marked = CalendarSettings(isWork: true).applied(to: c)
+        #expect(marked.isWork == true)
+        #expect(!marked.mcpWrite)
+        let explicit = CalendarSettings(mcpWrite: true, isWork: true).applied(to: c)
+        #expect(explicit.mcpWrite)
+        let allowedAgain = CalendarSettings(mcpWrite: true).applied(to: marked)
+        #expect(CalendarSettings(isWork: true).applied(to: allowedAgain).mcpWrite, "schon gekennzeichnet")
+        #expect(CalendarSettings(isWork: false).applied(to: allowedAgain).mcpWrite)
+    }
+
+    @Test func calendarDecodesWorkFlag() throws {
+        let base = ##"{"id": "cal_2", "account_id": "acc_1", "name": "Arbeit", "color": "#123456", "provider_color": null, "writable": true, "can_invite": false, "hidden": false, "mcp_write": false, "openings_busy": true, "all_day_blocks": false, "position": 1"##
+        let new = try APICoding.decoder.decode(CalendarInfo.self, from: Data((base + #", "is_work": true}"#).utf8))
+        #expect(new.isWork == true)
+        let old = try APICoding.decoder.decode(CalendarInfo.self, from: Data((base + "}").utf8))
+        #expect(old.isWork == nil)
     }
 
     @Test func palette() {
@@ -131,16 +171,23 @@ struct SettingsTextTests {
     @Test func deviceListUsesServerFields() throws {
         let json = #"[{"id": "d1", "name": "iPhone", "created_at": "2026-10-20T07:00:00.123Z", "last_used_at": "2026-10-25T08:00:00Z", "current": true}]"#
         let devices = try APICoding.decoder.decode([Device].self, from: Data(json.utf8))
-        #expect(devices[0].lastActivity != nil)
+        #expect(devices[0].lastUsedAt != nil)
         #expect(devices[0].createdAt != nil)
         #expect(devices[0].current == true)
+        let unused = try APICoding.decoder.decode([Device].self, from: Data(#"[{"id": "d2", "name": "Mac", "created_at": "2026-10-20T07:00:00Z", "last_used_at": null, "current": false}]"#.utf8))
+        #expect(unused[0].lastUsedAt == nil)
     }
 
     @Test func meDecodes() throws {
-        let json = #"{"user_id": "u1", "name": "Ruben", "email": "ruben@example.org", "auth": "device", "device": {"id": "d1", "name": "Mac"}}"#
+        let json = #"{"user_id": "u1", "name": "Ruben", "email": "ruben@example.org", "auth": "app:Mac", "device": {"id": "d1", "name": "Mac"}, "server_name": "lichtung-server", "server_version": "0.1.0"}"#
         let me = try APICoding.decoder.decode(ServerInfo.self, from: Data(json.utf8))
         #expect(me.device?.id == "d1")
-        #expect(me.serverVersion == nil)
+        #expect(me.serverName == "lichtung-server")
+        #expect(me.serverDescription == "lichtung-server 0.1.0")
+        // Ältere Server ohne Name und Version.
+        let old = try APICoding.decoder.decode(ServerInfo.self, from: Data(#"{"user_id": "u1", "auth": "web", "device": null}"#.utf8))
+        #expect(old.serverVersion == nil)
+        #expect(old.serverDescription == nil)
     }
 }
 

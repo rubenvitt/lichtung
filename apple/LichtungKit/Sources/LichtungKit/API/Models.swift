@@ -51,11 +51,14 @@ public struct CalendarInfo: Codable, Hashable, Sendable, Identifiable {
     public var openingsBusy: Bool
     public var allDayBlocks: Bool
     public var position: Int
+    /// Der Arbeitskalender (Spec §7, LIC-46). `nil`: Der Server kennt das
+    /// Kennzeichen noch nicht, die App schätzt (`MCPWriteGuard`).
+    public var isWork: Bool?
 
     public init(
         id: String, accountId: String, name: String, color: String? = nil, providerColor: String? = nil,
         writable: Bool = true, canInvite: Bool = false, hidden: Bool = false, mcpWrite: Bool = false,
-        openingsBusy: Bool = true, allDayBlocks: Bool = false, position: Int = 0
+        openingsBusy: Bool = true, allDayBlocks: Bool = false, position: Int = 0, isWork: Bool? = nil
     ) {
         self.id = id
         self.accountId = accountId
@@ -69,6 +72,7 @@ public struct CalendarInfo: Codable, Hashable, Sendable, Identifiable {
         self.openingsBusy = openingsBusy
         self.allDayBlocks = allDayBlocks
         self.position = position
+        self.isWork = isWork
     }
 
     public var displayColor: String? { color ?? providerColor }

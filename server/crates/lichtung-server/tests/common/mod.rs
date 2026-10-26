@@ -219,6 +219,7 @@ pub fn device_token(server: &TestServer, name: &str) -> String {
         family_id: format!("familie-{name}"),
         created_at: 1,
         last_used_at: None,
+        client_id: None,
     };
     lichtung_server::db::insert_device(&conn, &device, &lichtung_server::auth::sha256_hex(&raw))
         .unwrap();

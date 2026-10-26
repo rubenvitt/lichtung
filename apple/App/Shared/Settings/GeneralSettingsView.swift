@@ -27,6 +27,9 @@ struct GeneralSettingsView: View {
                         }
                     }
                     LabeledContent("Dieses Gerät", value: settings.me?.device?.name ?? session.deviceName)
+                    if let server = settings.me?.serverDescription {
+                        LabeledContent("Server-Version", value: server)
+                    }
                     if session.needsSignIn {
                         Label("Nicht mehr angemeldet. Bitte im Hauptfenster neu anmelden.", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
@@ -60,6 +63,7 @@ struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Allgemein")
+        .task { await settings.loadMe() }
         .sheet(isPresented: $choosingZone) {
             TimeZonePicker(selection: $secondaryTimeZone)
         }

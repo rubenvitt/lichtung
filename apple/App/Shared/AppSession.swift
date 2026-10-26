@@ -11,9 +11,9 @@ import UIKit
 
 /// Anmeldung, Wechsel zwischen Demo und Server, Live-Abgleich (LIC-43).
 ///
-/// Gespeichert wird: die Server-Adresse und die Wahl „Demo“ in den
-/// UserDefaults, das Geräte-Token in der Keychain, der Stand in
-/// `Application Support/Lichtung/cache.json`.
+/// Gespeichert wird: die Server-Adresse, die Wahl „Demo“ und der OAuth-Client
+/// je Server (LIC-49) in den UserDefaults, das Geräte-Token in der Keychain,
+/// der Stand in `Application Support/Lichtung/cache.json`.
 @MainActor
 @Observable
 final class AppSession {
@@ -41,7 +41,9 @@ final class AppSession {
     let settings: SettingsModel
 
     private let tokens = StoredDeviceToken(store: KeychainSecretStore())
-    private let flow = DeviceLoginFlow()
+    /// Merkt sich den OAuth-Client je Server: Eine erneute Anmeldung
+    /// registriert kein neues Gerät beim Server (Vertrag §2, LIC-49).
+    private let flow = DeviceLoginFlow(clients: UserDefaultsClientStore())
     private let defaults = UserDefaults.standard
     @ObservationIgnored private var syncAPI: SyncAPI?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
@@ -103,10 +105,25 @@ final class AppSession {
             enterServer(url)
             needsSignIn = true
             serverInput = ServerAddress.displayName(url)
+            prefillDeviceName()
         case let .login(prefill):
             serverInput = prefill
+            prefillDeviceName()
             stage = .signedOut
         }
+    }
+
+    /// Name, unter dem dieses Gerät beim Server der Maske schon bekannt ist.
+    /// Sonst würde eine erneute Anmeldung den Namen auf den Standard
+    /// zurücksetzen.
+    private func prefillDeviceName() {
+        if let name = flow.rememberedDeviceName(serverInput: serverInput) { deviceName = name }
+    }
+
+    /// Dieses Gerät wurde in den Einstellungen umbenannt (LIC-46).
+    func currentDeviceRenamed(_ name: String) {
+        deviceName = name
+        if let serverURL { flow.rememberDeviceName(name, for: serverURL) }
     }
 
     // MARK: Anmelden
@@ -119,7 +136,8 @@ final class AppSession {
             loginPhase = .checkingServer
             let (server, metadata) = try await flow.discover(serverInput: serverInput)
             loginPhase = .registering
-            let prepared = try await flow.register(serverURL: server, metadata: metadata, deviceName: deviceName)
+            // Gemerkter Client, wenn der Server ihn noch kennt, sonst neu registriert.
+            let prepared = try await flow.prepare(serverURL: server, metadata: metadata, deviceName: deviceName)
             loginPhase = .waitingForBrowser
             let callback = try await authenticate(prepared.authorizeURL)
             loginPhase = .fetchingToken
@@ -194,6 +212,7 @@ final class AppSession {
     func leaveDemo() {
         defaults.removeObject(forKey: Key.mode)
         serverInput = defaults.string(forKey: Key.server).flatMap { URL(string: $0) }.map(ServerAddress.displayName) ?? ""
+        prefillDeviceName()
         loginPhase = .idle
         model = AppModel.demo()
         stage = .signedOut
@@ -212,6 +231,7 @@ final class AppSession {
         defaults.removeObject(forKey: Key.cacheServer)
         defaults.removeObject(forKey: Key.mode)
         serverInput = serverURL.map(ServerAddress.displayName) ?? serverInput
+        prefillDeviceName()
         syncAPI = nil
         management = nil
         serverURL = nil
@@ -229,6 +249,7 @@ final class AppSession {
         needsSignIn = true
         loginPhase = .idle
         if let serverURL { serverInput = ServerAddress.displayName(serverURL) }
+        prefillDeviceName()
         stopLive()
     }
 

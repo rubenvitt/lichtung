@@ -55,6 +55,14 @@ Die Apps melden sich wie die Zunder-App über den eingebauten OAuth-Server an (A
 
 `401` auf einen Aufruf mit Geräte-Token heißt: Token widerrufen, neu anmelden. Der lokale Cache darf bleiben, ausstehende Mutationen auch.
 
+*Ergänzungen (LIC-49), keine bestehende Form geändert:*
+
+- **Client merken:** Die App merkt sich die `client_id` je Server (Basis-URL wie im `issuer`) und meldet sich damit erneut an, auch nach `401` oder Abmelden. So gibt es einen OAuth-Client pro Installation und Server, nicht einen pro Anmeldung.
+- **Lebensdauer:** Ein Client bleibt bestehen, solange ein Gerät aktiv ist, das sich über ihn angemeldet hat. Wird das Gerät widerrufen (Geräteliste, `/oauth/revoke`, Abmelden), bleibt der Client zunächst nutzbar; der Server räumt Clients ohne aktives Gerät und ohne gültiges Token frühestens einen Tag nach ihrer Registrierung weg (nie benutzte nach 30 Minuten).
+- **Gemerkten Client prüfen:** Ein unbekannter Client lässt sich auf der Autorisierungsseite nicht erkennen (der Server zeigt eine Fehlerseite im Browserfenster, ohne zur App zurückzuleiten). Vor dem Öffnen des Fensters schickt die App deshalb `POST /oauth/token` mit `grant_type=authorization_code`, der gemerkten `client_id`, `redirect_uri`, einem gültig geformten `code_verifier` und einem erfundenen `code`. Der Server prüft den Client vor dem Code: `401` mit `error: invalid_client` heißt „Client unbekannt oder widerrufen“, dann registriert die App neu (Schritt 2). Jede andere Antwort (`invalid_grant` für den erfundenen Code) heißt: Client gültig. Dieselbe Regel gilt, wenn der Tausch in Schritt 4 mit `invalid_client` scheitert: Die App vergisst den Client und registriert beim nächsten Versuch neu.
+- **Name:** Ein neues Gerät heißt wie sein Client. Wer ein Gerät umbenennt (`PATCH /api/devices/{id}`, Abschnitt 7), benennt auch dessen Client um; eine erneute Anmeldung behält so den Namen.
+- **Discovery:** `grant_types_supported` nennt weiter `refresh_token`, weil MCP-Clients (claude.ai) Refresh-Tokens bekommen. Geräte bekommen keins (Schritt 4).
+
 ## 3. Objekte
 
 ### Account
@@ -101,6 +109,7 @@ Die Apps melden sich wie die Zunder-App über den eingebauten OAuth-Server an (A
 - *Ergänzung (LIC-7):* `color` ist immer gesetzt: die eigene Farbe, sonst `provider_color`, sonst eine feste Ersatzfarbe. `provider_color` ist `null`, wenn der Anbieter keine Farbe meldet. Farben haben die Form `#RRGGBB` (Großbuchstaben).
 - *Ergänzung (LIC-14):* Der Kalender eines ICS-Kontos hat `writable`, `can_invite` und `mcp_write` = `false`. `name` kommt aus `X-WR-CALNAME` des Feeds, sonst aus dem Kontonamen; `provider_color` aus `X-APPLE-CALENDAR-COLOR` (`#RRGGBBAA` wird zu `#RRGGBB`), sonst `null`.
 - *Ergänzung (LIC-7):* Standardwerte beim Anlegen: `mcp_write` = `writable` (bei `microsoft` später `false`), `openings_busy` `true`, `all_day_blocks` `false`, `hidden` `false`; `position` hängt neue Kalender hinten an (innerhalb eines Kontos in der Reihenfolge des Anbieters). Sammlungen, die nur Aufgaben (VTODO) halten, werden nicht als Kalender übernommen.
+- *Ergänzung (LIC-46):* Neues Feld `is_work` (bool): der **Arbeitskalender** (Spec §7). In der App per `PATCH /api/calendars/{id}` gesetzt; Standard beim Anlegen `true` nur für Kalender von `microsoft`-Konten, sonst `false` (ein ICS-Abo kann der Arbeitskalender sein, aber auch Feiertage). Wer einen Kalender als Arbeitskalender kennzeichnet (`false` → `true`), sperrt damit das Schreiben über MCP (`mcp_write: false`), außer derselbe Aufruf setzt `mcp_write` ausdrücklich. Das Kennzeichen zurückzunehmen ändert `mcp_write` nicht. Clients, die `is_work` nicht bekommen (ältere Server), dürfen den Arbeitskalender schätzen.
 - *Ergänzung (LIC-13):* Neues Feld `shared` (bool): `true` für Kalender anderer, die mit dem Konto geteilt sind (z. B. iCloud-Freigaben). Jede Freigabe ist ein eigener Kalender. Eigene Kalender, die man selbst mit anderen teilt, haben `shared: false`. Bei `writable: false` ist `mcp_write` immer `false`: `PATCH` mit `mcp_write: true` lässt den Wert auf `false`, und wird eine Freigabe beim Anbieter nur lesbar, setzt der nächste Abgleich `mcp_write` auf `false`.
 
 ### CalendarSet
@@ -384,14 +393,32 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 | `PATCH /api/accounts/{id}` | `name`, neue Zugangsdaten (`username`, `password`) oder `url` |
 | `DELETE /api/accounts/{id}` | Konto samt Kalendern und Events aus Lichtung entfernen (beim Anbieter bleibt alles) |
 | `POST /api/accounts/{id}/sync` | sofort synchronisieren (`202`) |
-| `PATCH /api/calendars/{id}` | `color` (oder `null` = Anbieterfarbe), `hidden`, `mcp_write`, `openings_busy`, `all_day_blocks`, `position` |
+| `PATCH /api/calendars/{id}` | `color` (oder `null` = Anbieterfarbe), `hidden`, `mcp_write`, `openings_busy`, `all_day_blocks`, `position`, *(LIC-46)* `is_work` |
 | `POST /api/calendar-sets`, `PATCH /api/calendar-sets/{id}`, `DELETE /api/calendar-sets/{id}` | Kalender-Sets: `name`, `calendar_ids`, `position` |
 | `POST /api/conflicts/{id}/dismiss` | Konflikt wegklicken (erscheint im Pull als `delete`) |
 | *Ergänzung (LIC-11):* `GET /api/conflicts` | Komfort: offene Konflikte wie im Pull, neueste zuerst. `dismiss` antwortet `204`, ein unbekannter Konflikt `404`. Beides erlaubt für jedes Token für `/api`. |
 | `GET /api/occurrences?from=<datum>&to=<datum>&calendar_ids=cal_01,cal_02` | Komfort: vom Server expandierte Vorkommen im Zeitraum (`from` inklusiv, `to` exklusiv, ISO-Datum oder RFC 3339). Nicht für den Cache gedacht. |
 | `GET /api/devices`, `DELETE /api/devices/{id}` | angemeldete Geräte, einzeln abmelden |
+| *Ergänzung (LIC-46):* `PATCH /api/devices/{id}` | Gerät umbenennen: `{"name": "…"}` |
 | *Ergänzung (LIC-7):* `GET /api/calendars`, `GET /api/calendar-sets` | Komfort: alle Kalender bzw. Sets wie im Pull (nach `position` sortiert) |
 | `GET /api/tokens`, `POST /api/tokens`, `DELETE /api/tokens/{id}` | API-Tokens (`lt_…`) für MCP-Clients; das Token steht nur in der Antwort auf `POST` |
+
+*Ergänzungen (LIC-46) zu `me` und Geräten:*
+
+- `GET /api/me`:
+  ```json
+  {"user_id": "0190…", "name": "Ruben", "email": "person@example.org", "auth": "app:iPhone",
+   "device": {"id": "0190…", "name": "iPhone"},
+   "server_name": "lichtung-server", "server_version": "0.1.0"}
+  ```
+  `auth` nennt den Zugang (`web`, `app:<Gerätename>`, `api:<Tokenname>`), `device` ist nur bei Geräte-Tokens gesetzt, sonst `null`. `server_name` ist der Name der Server-Software, `server_version` ihre Version. Erlaubt für jedes Token für `/api`.
+- `GET /api/devices`: aktive Geräte, älteste zuerst:
+  ```json
+  [{"id": "0190…", "name": "iPhone", "created_at": "2026-10-20T07:00:00.123Z", "last_used_at": "2026-10-25T08:00:00Z", "current": true}]
+  ```
+  `last_used_at` ist die letzte Nutzung des Tokens (auf etwa eine Minute genau, `null` vor der ersten), `current` markiert das Gerät, das fragt. Widerrufene Geräte fehlen.
+- `PATCH /api/devices/{id}` mit `{"name": "…"}` benennt ein aktives Gerät um und antwortet mit dem Gerät wie in der Liste. Der Name wird getrimmt, darf nicht leer sein, höchstens 100 Zeichen haben und keine Steuerzeichen enthalten (sonst `400 invalid_request`, ebenso für andere Felder); ein unbekanntes oder widerrufenes Gerät ergibt `404`. Der Client des Geräts heißt danach genauso (Abschnitt 2). Konflikte zeigen den neuen Namen erst für neue Konflikte (`origin: app:<Gerätename>`).
+- **Wer darf:** Geräte und Tokens verwalten (`/api/devices`, `/api/tokens`) nur Geräte der App und Browser-Sitzungen (`403 forbidden` für API-Tokens).
 
 *Ergänzungen (LIC-7) zu den Konten-Aufrufen:*
 
@@ -470,3 +497,4 @@ Zusätzliche `code`s in Mutations-Ergebnissen (`rejected`/`retry`): `calendar_re
 | 2026-10-23 | Ergänzungen aus LIC-8 (keine bestehende Form geändert): Sync-Rhythmus und Status der Konten; `DateValue` mit `time_zone: null` und `utc` (nicht übersetzbare Zone), `time_zone: "UTC"`; `rrule: null`, Objekte ohne Master; Form nicht lesbarer Termine mit `parse_error`; Form von `GET /api/occurrences` mit `time_zone` und `include_cancelled` (Abschnitt 7) |
 | 2026-10-23 | Ergänzungen aus LIC-13 (keine bestehende Form geändert): Feld `shared` am Kalender; `mcp_write` ist bei nur lesbaren Kalendern immer `false` |
 | 2026-10-23 | Ergänzungen aus LIC-14 (keine bestehende Form geändert): `kind: ics` mit `url`, optional `username`/`password` (Basic-Auth), Schemata `webcal`/`webcals`; `username` zeigt die URL ohne Query, Zugangsdaten und schlüsselartige Pfadteile, die volle URL bleibt verschlüsselt auf dem Server; ein Kalender pro Konto (nur lesbar, Name aus `X-WR-CALNAME`, Farbe aus `X-APPLE-CALENDAR-COLOR`); Abruf alle 15 Minuten mit ETag/Last-Modified; neuer Fehlercode `422 invalid_feed`; `availability` berücksichtigt `X-MICROSOFT-CDO-BUSYSTATUS`, wenn `TRANSP` fehlt (Abschnitte 3, 7, 9) |
+| 2026-10-26 | Ergänzungen aus LIC-46 und LIC-49 (keine bestehende Form geändert): Feld `is_work` am Kalender (Arbeitskalender, per `PATCH` setzbar, Kennzeichnen sperrt MCP); `GET /api/me` mit `server_name` und `server_version`; Felder von `GET /api/devices`; `PATCH /api/devices/{id}` zum Umbenennen; `client_id` je Server merken, Lebensdauer der Clients, Prüfung über `invalid_client` am Token-Endpunkt (Abschnitte 2, 3, 7) |

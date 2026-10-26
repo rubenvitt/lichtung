@@ -56,6 +56,29 @@ enum DemoData {
             allDay("d10", "demo_privat", "Urlaub", today.adding(days: 10), days: 5),
         ]
         for e in events { s.events[e.id] = e }
+
+        // Terminanfragen (LIC-30): zwei offene, eine angenommen.
+        func invitation(_ id: String, _ cal: String, _ title: String, _ day: LocalDate, _ h: Int, minutes: Int,
+                        from organizer: Person, status: ParticipationStatus, rrule: String? = nil, location: String? = nil) -> Event {
+            var e = event(id, cal, title, day, h, 0, minutes: minutes, location: location, rrule: rrule)
+            e.details.organizer = organizer
+            e.details.attendees = [
+                Attendee(email: organizer.email, name: organizer.name, role: .chair, status: .accepted),
+                Attendee(email: "ich@example.org", name: "Ich", status: status, isSelf: true),
+            ]
+            e.details.selfStatus = status
+            return e
+        }
+        let anna = Person(email: "anna@example.org", name: "Anna Beispiel")
+        let verein = Person(email: "vorstand@verein.example.org", name: "Vorstand Musterverein")
+        for e in [
+            invitation("d11", "demo_arbeit", "Projekt-Kickoff", today.adding(days: 1), 15, minutes: 60,
+                       from: anna, status: .needsAction, location: "Raum 1"),
+            invitation("d12", "demo_ehrenamt", "Vorstandssitzung", monday.adding(days: 3), 19, minutes: 90,
+                       from: verein, status: .needsAction, rrule: "FREQ=WEEKLY;INTERVAL=2"),
+            invitation("d13", "demo_arbeit", "Quartalsrückblick", today.adding(days: 4), 13, minutes: 60,
+                       from: anna, status: .accepted),
+        ] { s.events[e.id] = e }
         return s
     }
 }

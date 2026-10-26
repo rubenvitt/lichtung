@@ -58,6 +58,7 @@ struct PhoneRootView: View {
                     ToolbarItem(placement: .topBarTrailing) { undoMenu }
                 }
                 .phoneSettingsButton() // Einstellungen (LIC-43)
+                .invitationsButton() // Terminanfragen (LIC-30)
                 .safeAreaInset(edge: .bottom) {
                     QuickEntryBar().background(.bar)
                 }

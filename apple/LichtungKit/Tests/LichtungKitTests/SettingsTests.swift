@@ -167,3 +167,47 @@ struct TimeZoneCatalogTests {
         #expect(TimeZoneCatalog.zone(fromStored: "Mars/Olympus") == nil)
     }
 }
+
+@Suite("Einstellungen: Konto anlegen")
+struct NewAccountFormTests {
+    @Test func fastmailNeedsCredentials() {
+        var f = NewAccountForm(kind: .fastmail)
+        #expect(f.missing == "Benutzername fehlt.")
+        f.username = " person@example.org "
+        #expect(f.missing == "Passwort fehlt.")
+        f.password = "erfunden-123"
+        #expect(f.build() == .fastmail(username: "person@example.org", appPassword: "erfunden-123", name: "Fastmail"))
+    }
+
+    @Test func icsWithoutLogin() {
+        var f = NewAccountForm(kind: .ics)
+        #expect(f.missing == "Adresse fehlt.")
+        f.url = "webcal://feeds.example.org/feiertage.ics"
+        #expect(f.build() == .ics(url: URL(string: "webcal://feeds.example.org/feiertage.ics")!, name: ""))
+        f.password = "geheim"
+        #expect(f.missing == "Zum Passwort gehört ein Benutzername.")
+        f.username = "u"
+        #expect(f.build() == .icsWithLogin(url: URL(string: "webcal://feeds.example.org/feiertage.ics")!, name: "", username: "u", password: "geheim"))
+    }
+
+    @Test func caldavURL() {
+        var f = NewAccountForm(kind: .caldav)
+        f.url = "dav.example.org/remote.php/dav"
+        f.username = "u"
+        f.password = "p"
+        f.name = "Nextcloud"
+        #expect(f.build() == .caldav(url: URL(string: "https://dav.example.org/remote.php/dav")!, username: "u", password: "p", name: "Nextcloud"))
+        f.url = "webcal://dav.example.org"
+        #expect(f.missing == "Die Adresse ist ungültig.")
+    }
+
+    @Test func settingsApplyLocally() {
+        let c = CalendarInfo(id: "c1", accountId: "a1", name: "Privat", color: "#111111", providerColor: "#222222")
+        let changed = CalendarSettings(color: .clear, hidden: true, mcpWrite: true, position: 4).applied(to: c)
+        #expect(changed.displayColor == "#222222")
+        #expect(changed.hidden && changed.mcpWrite)
+        #expect(changed.position == 4)
+        #expect(changed.openingsBusy == c.openingsBusy)
+        #expect(CalendarSettings(color: .set("#333333")).applied(to: c).color == "#333333")
+    }
+}

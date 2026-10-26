@@ -15,11 +15,14 @@ struct MacRootView: View {
     }
 
     @State private var mode: Mode = .week
+    // Suche (LIC-42)
+    @State private var searchText = ""
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         @Bindable var model = model
         NavigationSplitView {
-            SidebarView()
+            SidebarView(searchText: searchText)
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
         } detail: {
             VStack(spacing: 0) {
@@ -50,6 +53,10 @@ struct MacRootView: View {
         .sheet(item: $model.selectedOccurrence) { occ in
             EventDetailView(occurrence: occ).frame(minWidth: 360, minHeight: 420)
         }
+        // Suche in der Toolbar, ⌘F über das Menü (LIC-42)
+        .searchable(text: $searchText, placement: .toolbar, prompt: "Termine suchen")
+        .searchFocused($searchFocused)
+        .onChange(of: model.searchFocusRequests) { searchFocused = true }
     }
 
     private var title: String {
@@ -85,6 +92,8 @@ struct MacRootView: View {
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    /// Text im Suchfeld der Toolbar; nicht leer → Treffer statt nächster Termine (LIC-42).
+    var searchText = ""
 
     var body: some View {
         @Bindable var model = model
@@ -101,8 +110,15 @@ struct SidebarView: View {
             .labelsHidden()
             .padding(.horizontal, 10)
             Divider()
-            // Ansicht A in der Seitenleiste: die nächsten Termine.
-            AgendaView(days: 14, showsTicker: false)
+            if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                // Ansicht A in der Seitenleiste: die nächsten Termine.
+                AgendaView(days: 14, showsTicker: false)
+            } else {
+                // Treffer der Suche; rechts springt das Raster zum Tag (LIC-42).
+                SearchResultsView(text: searchText) { occurrence in
+                    model.show(occurrence)
+                }
+            }
         }
     }
 }
@@ -133,6 +149,12 @@ struct LichtungCommands: Commands {
                 .keyboardShortcut("z", modifiers: .command)
             Button("Wiederholen") { Task { await model.redo() } }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
+        }
+        // ⌘F: Suchfeld der Toolbar. Ersetzt das Text-Suchen im Menü
+        // „Bearbeiten“, sonst gäbe es ⌘F zweimal (LIC-42).
+        CommandGroup(replacing: .textEditing) {
+            Button("Termine suchen …") { model.searchFocusRequests += 1 }
+                .keyboardShortcut("f", modifiers: .command)
         }
         CommandMenu("Kalender") {
             Button("Aktualisieren") { Task { await model.refresh() } }

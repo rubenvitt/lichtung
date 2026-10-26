@@ -14,6 +14,8 @@ struct LichtungApp: App {
             RootView()
                 .environment(model)
                 .task { await model.observe() }
+                // Rückgängig-Verlauf für Knöpfe und Beschriftung (LIC-42).
+                .task { await model.observeUndo() }
         }
         #if os(macOS)
         .commands { LichtungCommands(model: model) }

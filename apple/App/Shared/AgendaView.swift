@@ -63,6 +63,8 @@ struct AgendaRow: View {
                 }
             }
             Spacer(minLength: 0)
+            // Videolink: „Beitreten“ kurz vor und während des Termins (LIC-42).
+            JoinButton(occurrence: item.occurrence)
             if model.state.isPending(item.occurrence.eventId) {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.caption)

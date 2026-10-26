@@ -55,6 +55,8 @@ targets:
           - CFBundleURLName: dev.rubeen.lichtung.oauth
             CFBundleURLSchemes: [dev.rubeen.lichtung]
         UIBackgroundModes: [remote-notification]
+        # „Beitreten“ fragt, ob Zoom/Teams installiert sind (LIC-42, JoinButton)
+        LSApplicationQueriesSchemes: [zoommtg, msteams]
 
   Lichtung-macOS:
     type: application

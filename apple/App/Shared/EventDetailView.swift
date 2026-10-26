@@ -24,6 +24,31 @@ struct EventDetailView: View {
                     if occurrence.recurrenceId != nil {
                         Label("Teil einer Serie", systemImage: "repeat").foregroundStyle(.secondary)
                     }
+                    // Zeitzone und Reisezeit (LIC-42)
+                    if let zoneHint = TimeZoneDisplay.originalZoneHint(for: d, home: model.timeZone) {
+                        Label(zoneHint, systemImage: "globe")
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("In anderer Zeitzone angelegt: \(zoneHint)")
+                    }
+                    if let travel = TravelTime.detailText(for: occurrence, calendar: model.calendar) {
+                        Label(travel, systemImage: "car").foregroundStyle(.secondary)
+                    }
+                }
+                // Videolink (LIC-42)
+                if let link = VideoLinkDetector.detect(in: d) {
+                    Section("Videokonferenz") {
+                        HStack {
+                            Label(link.provider.displayName, systemImage: "video")
+                            Spacer(minLength: 8)
+                            JoinButton(occurrence: occurrence, link: link, prominent: true)
+                        }
+                        if let meetingID = link.meetingID {
+                            LabeledContent("Meeting-ID", value: meetingID).textSelection(.enabled)
+                        }
+                        if let passcode = link.passcode {
+                            LabeledContent("Kenncode", value: passcode).textSelection(.enabled)
+                        }
+                    }
                 }
                 if let location = d.location, !location.isEmpty {
                     Section("Ort") { Text(location) }

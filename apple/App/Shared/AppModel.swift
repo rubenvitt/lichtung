@@ -125,4 +125,34 @@ final class AppModel {
         let intent = GridInteraction.createIntent(calendarId: calendarId, interval: DateInterval(start: start, end: end), timeZone: timeZone)
         await engine.perform(intent, label: "Termin anlegen")
     }
+
+    // MARK: Suche und Rückgängig (LIC-42)
+
+    /// Kopie des Rückgängig-Verlaufs für Knöpfe und Beschriftung
+    /// („Rückgängig: Termin löschen“). Folgt `observeUndo()`.
+    private(set) var undoHistory = UndoHistory()
+
+    /// Mac: ⌘F setzt den Fokus ins Suchfeld der Toolbar. Die Ansicht
+    /// beobachtet den Zähler, weil das Menü nicht an ihren Fokus kommt.
+    var searchFocusRequests = 0
+
+    /// Liest nach jedem neuen Stand den Verlauf nach. Er ändert sich nur
+    /// zusammen mit einem Stand (Anlegen, Ändern, Rückgängig), und der Engine
+    /// beendet `perform`/`undo` vollständig, bevor diese Abfrage drankommt.
+    func observeUndo() async {
+        for await _ in await engine.updates() {
+            undoHistory = await engine.undoHistory
+        }
+    }
+
+    /// Treffer der Terminsuche in den angezeigten Kalendern.
+    func search(_ text: String) -> [EventSearch.Hit] {
+        query.search(text, selection: calendarSelection, now: Date())
+    }
+
+    /// Springt zum Tag eines Vorkommens und öffnet sein Detail.
+    func show(_ occurrence: Occurrence) {
+        selectedDay = LocalDate(occurrence.start, calendar: calendar)
+        selectedOccurrence = occurrence
+    }
 }

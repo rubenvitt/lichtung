@@ -15,11 +15,14 @@ struct PhoneRootView: View {
 
     @State private var mode: Mode = .list
     @State private var gridDays = 1
+    // Suche und Rückgängig (LIC-42)
+    @State private var searchText = ""
+    @State private var showsUndoAlert = false
 
     var body: some View {
         @Bindable var model = model
         NavigationStack {
-            content
+            searchableContent
                 .navigationTitle(MonthGrid.title(year: model.selectedDay.year, month: model.selectedDay.month))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -44,6 +47,9 @@ struct PhoneRootView: View {
                         .accessibilityLabel("Ansicht wählen")
                     }
                 }
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) { undoMenu }
+                }
                 .safeAreaInset(edge: .bottom) {
                     QuickEntryBar().background(.bar)
                 }
@@ -51,6 +57,8 @@ struct PhoneRootView: View {
         .sheet(item: $model.selectedOccurrence) { occ in
             EventDetailView(occurrence: occ)
         }
+        .onShake { if model.undoHistory.canUndo || model.undoHistory.canRedo { showsUndoAlert = true } }
+        .alert(undoAlertTitle, isPresented: $showsUndoAlert) { undoAlertActions }
     }
 
     @ViewBuilder
@@ -75,5 +83,59 @@ struct PhoneRootView: View {
                     model.selectedDay = LocalDate(year: model.selectedDay.year, month: model.selectedDay.month, day: 1).adding(months: step)
                 })
         }
+    }
+}
+
+// MARK: Suche und Rückgängig (LIC-42)
+
+extension PhoneRootView {
+    /// Solange im Suchfeld etwas steht, zeigt die Seite Treffer statt der
+    /// Ansicht. Ein Treffer springt zum Tag und öffnet das Detail; die Suche
+    /// bleibt offen, „Abbrechen“ führt zur Ansicht an diesem Tag.
+    @ViewBuilder
+    var searchableContent: some View {
+        Group {
+            if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                content
+            } else {
+                SearchResultsView(text: searchText) { occurrence in
+                    model.show(occurrence)
+                }
+            }
+        }
+        .searchable(text: $searchText, prompt: "Termine suchen")
+    }
+
+    /// Antippen: Rückgängig. Lange drücken: Rückgängig oder Wiederholen mit
+    /// Beschriftung der Aktion.
+    var undoMenu: some View {
+        Menu {
+            Button(model.undoHistory.undoTitle) { Task { await model.undo() } }
+                .disabled(!model.undoHistory.canUndo)
+            Button(model.undoHistory.redoTitle) { Task { await model.redo() } }
+                .disabled(!model.undoHistory.canRedo)
+        } label: {
+            Image(systemName: "arrow.uturn.backward")
+        } primaryAction: {
+            Task { await model.undo() }
+        }
+        .disabled(!model.undoHistory.canUndo && !model.undoHistory.canRedo)
+        .accessibilityLabel(model.undoHistory.undoTitle)
+    }
+
+    /// Nach dem Schütteln: „Rückgängig: Termin löschen“, sonst Wiederholen.
+    var undoAlertTitle: String {
+        model.undoHistory.canUndo ? model.undoHistory.undoTitle : model.undoHistory.redoTitle
+    }
+
+    @ViewBuilder
+    var undoAlertActions: some View {
+        if model.undoHistory.canUndo {
+            Button("Rückgängig") { Task { await model.undo() } }
+        }
+        if model.undoHistory.canRedo {
+            Button("Wiederholen") { Task { await model.redo() } }
+        }
+        Button("Abbrechen", role: .cancel) {}
     }
 }

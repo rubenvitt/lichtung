@@ -8,6 +8,7 @@
   - `Store/`: lokaler Stand mit Outbox (ausstehende Offline-Änderungen), Cache-Datei, Abfragen.
   - `Sync/`: HTTP-Client (Pull, Push), SSE, Geräte-Anmeldung (PKCE).
 - `project.yml`: xcodegen-Projekt mit `Lichtung-iOS` und `Lichtung-macOS` (Bundle-Präfix `dev.rubeen`). Das `.xcodeproj` wird nicht eingecheckt.
+- `scripts/testflight.sh`: archiviert, signiert und lädt die iOS-App zu TestFlight hoch. Die CI ruft es bei jedem Push auf `main` auf, der `apple/` ändert (`.github/workflows/testflight.yml`); lokal mit `XCODE_ACCOUNT=1`.
 - `App/`: SwiftUI-Code der Apps (Ansichten A–D, Jahr, Schnelleingabe, Demo-Daten). Ohne Mac/Xcode entstanden: Gebaut wird er nur in der CI (Job `apps-macos`), auf einem Gerät gelaufen ist er noch nie.
 
 ```sh

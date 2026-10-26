@@ -1,0 +1,51 @@
+name: TestFlight
+
+# Archiviert, signiert automatisch und lädt die iOS-App zu TestFlight hoch, bei jedem
+# Push auf main, der apple/ ändert, dazu manuell. Xcode signiert über den App Store
+# Connect API-Key (Rolle Admin: er legt Verteilungszertifikat und Profil selbst an).
+# Der App-Eintrag für dev.rubeen.lichtung muss in App Store Connect existieren.
+# Die macOS-App geht noch nicht zu TestFlight.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apple/**"
+      - ".github/workflows/testflight.yml"
+
+# Ein Upload nach dem anderen; ein neuer Push wartet, statt einen laufenden abzubrechen.
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    # macos-latest wie in vault-cockpit: App Store Connect verlangt ein aktuelles SDK.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - name: API-Key ablegen
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          for name in APPLE_API_KEY APPLE_API_KEY_P8 APPLE_API_ISSUER; do
+            [ -n "${!name}" ] || { echo "::error::Secret $name fehlt"; exit 1; }
+          done
+          # Das Secret enthält die .p8 im Klartext (wie bei Zunder), nicht base64.
+          key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+          (umask 077; printf '%s\n' "$APPLE_API_KEY_P8" > "$key")
+          echo "ASC_KEY_PATH=$key" >> "$GITHUB_ENV"
+      - name: Archivieren und hochladen
+        env:
+          ASC_KEY_ID: ${{ secrets.APPLE_API_KEY }}
+          ASC_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER }}
+        run: apple/scripts/testflight.sh
+      - name: API-Key löschen
+        if: always()
+        run: rm -f "$ASC_KEY_PATH"

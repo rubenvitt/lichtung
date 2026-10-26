@@ -34,6 +34,7 @@ use crate::conflicts::{self, Conflict};
 use crate::error::{AppError, AppResult};
 use crate::events::store::{self as events_store};
 use crate::events::{event_json, EventContext};
+use crate::openings::{self, store as openings_store};
 use crate::writes::Origin;
 
 /// Default page size of a pull.
@@ -81,6 +82,7 @@ fn changed_since(
              UNION ALL SELECT seq, 'calendar_set', id, 0 FROM calendar_sets WHERE seq > ?1
              UNION ALL SELECT seq, 'event', id, 0 FROM events WHERE seq > ?1
              UNION ALL SELECT seq, 'conflict', id, 0 FROM conflicts WHERE seq > ?1
+             UNION ALL SELECT seq, 'opening', id, 0 FROM openings WHERE seq > ?1
              UNION ALL SELECT seq, type, id, 1 FROM tombstones WHERE seq > ?1
          ) ORDER BY seq LIMIT ?2",
     )?;
@@ -96,8 +98,21 @@ fn object(
     kind: &str,
     id: &str,
     contexts: &mut HashMap<String, EventContext>,
+    public_url: &url::Url,
 ) -> AppResult<Option<Value>> {
     let value = match kind {
+        "opening" => match openings_store::opening(conn, id)? {
+            Some(row) => {
+                let suggestions = openings_store::suggestions(conn, id)?;
+                Some(serde_json::to_value(openings::view(
+                    &row,
+                    &suggestions,
+                    public_url,
+                    now_ms(),
+                )))
+            }
+            None => None,
+        },
         "account" => {
             accounts_store::account(conn, id)?.map(|r| serde_json::to_value(Account::from(&r)))
         }
@@ -160,6 +175,7 @@ impl App {
             return Err(AppError::bad_request("limit muss mindestens 1 sein"));
         }
         let limit = limit.min(MAX_PULL_LIMIT);
+        let public_url = self.config().public_url.clone();
         self.with_reader(move |conn| {
             // One snapshot for the whole page.
             let tx = conn.unchecked_transaction()?;
@@ -194,7 +210,7 @@ impl App {
                     changes.push(json!({"type": kind, "op": "delete", "id": id}));
                     continue;
                 }
-                if let Some(data) = object(&tx, kind, id, &mut contexts)? {
+                if let Some(data) = object(&tx, kind, id, &mut contexts, &public_url)? {
                     changes.push(json!({"type": kind, "op": "upsert", "data": data}));
                 }
             }

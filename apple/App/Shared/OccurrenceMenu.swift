@@ -57,6 +57,10 @@ struct OccurrenceMenuItems: View {
                 .shortcut("j", enabled: true)
                 .disabled(true)
         }
+        // Terminanfrage beantworten (LIC-30)
+        if let occ, model.canRespond(occ) {
+            InvitationMenu(model: model, occurrence: occ)
+        }
         Divider()
         Button("Duplizieren") { duplicate(occ, days: 0) }
             .shortcut("d", enabled: showsShortcuts)

@@ -1,6 +1,6 @@
 # MCP-Endpunkt
 
-Lichtung hat unter `/mcp` einen MCP-Server, über den Claude den Kalender liest und schreibt: Termine abfragen, freie Zeiten finden, Termine anlegen, ändern und löschen, Einladungen beantworten. Grundlage ist Spec Abschnitt 7.
+Lichtung hat unter `/mcp` einen MCP-Server, über den Claude den Kalender liest und schreibt: Termine abfragen, freie Zeiten finden, Termine anlegen, ändern und löschen, Einladungen beantworten, Einmal-Buchungslinks anlegen. Grundlage ist Spec Abschnitt 7.
 
 ## Einrichtung
 
@@ -33,7 +33,7 @@ Der Name des Tokens erscheint als Herkunft der Änderungen (`mcp:<Tokenname>`, b
 
 ## Schreibschutz pro Kalender
 
-- Jeder Kalender hat die Einstellung `mcp_write` (in der App: „Claude darf hier schreiben“). Ist sie aus, lehnt der Server **jedes** Schreiben über MCP in diesem Kalender ab: `create_event`, `update_event`, `delete_event` und auch `respond_to_invitation`. Der Fehler heißt `mcp_write_forbidden` und nennt den Kalender; freigeben kann das nur der Nutzer in der App. Die Apps selbst betrifft die Einstellung nicht.
+- Jeder Kalender hat die Einstellung `mcp_write` (in der App: „Claude darf hier schreiben“). Ist sie aus, lehnt der Server **jedes** Schreiben über MCP in diesem Kalender ab: `create_event`, `update_event`, `delete_event`, auch `respond_to_invitation` und `create_opening_link` (ein Buchungslink schreibt Platzhalter und den gebuchten Termin in seinen Zielkalender). Der Fehler heißt `mcp_write_forbidden` und nennt den Kalender; freigeben kann das nur der Nutzer in der App. Die Apps selbst betrifft die Einstellung nicht.
 - **Standard:** Neue Kalender bekommen `mcp_write` = beschreibbar beim Anbieter. Kalender von ICS-Konten und (später) Microsoft-Konten starten immer mit `mcp_write` aus: Darüber kommt der Arbeitskalender, und Claude darf dort nur schreiben, wenn es ausdrücklich erlaubt ist.
 - Ändern dürfen die Einstellung nur die App und Browser-Sitzungen, nicht API- oder OAuth-Tokens. So kann Claude den Schutz nicht selbst aufheben.
 - **Kein Standardkalender:** `create_event` verlangt immer `calendar_id`. Fehlt sie, kommt `calendar_id_missing` mit dem Hinweis auf `list_calendars`.
@@ -59,6 +59,7 @@ Der Name des Tokens erscheint als Herkunft der Änderungen (`mcp:<Tokenname>`, b
 | `update_event` | **`event_id`**, `occurrence`, `scope`, dieselben Felder wie `create_event` (außer `calendar_id`; `null` entfernt `location`, `notes`, `url`, `recurrence`, `alarms`, `attendees`), `move_to_calendar_id` | `events`: neuer Stand |
 | `delete_event` | **`event_id`**, `occurrence`, `scope` | `deleted_event_ids` bzw. `events` (gekürzte Serie) |
 | `respond_to_invitation` | **`event_id`**, **`response`** (`accepted`/`tentative`/`declined`), `occurrence`, `comment` | `events`: neuer Stand mit `self_status` |
+| `create_opening_link` | **`duration_minutes`** (5–720), **`calendar_id`**, `title`, `suggestions` (höchstens 20, je `start` und optional `end` mit Offset), `time_zone` | `id`, `url`, `title`, `duration_minutes`, `calendar`, `time_zone`, `suggestions_only`, `suggestions` (`start`, `end`, `placeholder_status`, `placeholder_event_id`), `windows`, `min_notice_minutes`, `horizon_days` |
 
 Die genauen Schemas samt Beschreibungen liefert `tools/list`; sie sind in [`server/crates/lichtung-server/tests/snapshots/mcp_tools.json`](../server/crates/lichtung-server/tests/snapshots/mcp_tools.json) eingefroren.
 
@@ -68,9 +69,14 @@ Die genauen Schemas samt Beschreibungen liefert `tools/list`; sie sind in [`serv
 
 **Serien:** `update_event` und `delete_event` verlangen bei Serien `scope`: `this` (nur dieses Vorkommen), `this_and_following` (dieses und alle folgenden) oder `all` (die ganze Serie); `this` und `this_and_following` brauchen `occurrence` = `recurrence_id` aus `query_events`. Fehlt `scope`, kommt `scope_required`, fehlt `occurrence`, kommt `occurrence_required`. Bei Einzelterminen gilt immer `all`. Wird bei `update_event` nur `start` geändert, bleibt die Dauer erhalten. `respond_to_invitation` ohne `occurrence` beantwortet die ganze Serie.
 
-**Freie Zeiten** nach den Regeln der Openings (Spec Abschnitt 6): Es zählen die gewählten Kalender, ohne Auswahl alle mit `openings_busy`. Abgesagte Termine, Termine mit `availability: free` und eigene abgelehnte Einladungen blockieren nicht; ganztägige Termine nur in Kalendern mit `all_day_blocks`. `buffer_minutes` hält vor und nach jedem Termin frei. Liegen zu viele Termine im Zeitraum, kommt `too_many_events` statt eines unsicheren Ergebnisses.
+**Freie Zeiten** nach den Regeln der Openings (Spec Abschnitt 6): Es zählen die gewählten Kalender, ohne Auswahl alle mit `openings_busy`. Abgesagte Termine, Termine mit `availability: free` und eigene abgelehnte Einladungen blockieren nicht; ganztägige Termine nur in Kalendern mit `all_day_blocks`. Platzhalter von Einmal-Links („Reserviert: …“, siehe [`api/openings.md`](api/openings.md)) zählen immer als belegt, auch außerhalb der gewählten Kalender. `buffer_minutes` hält vor und nach jedem Termin frei. Liegen zu viele Termine im Zeitraum, kommt `too_many_events` statt eines unsicheren Ergebnisses.
 
-**`create_opening_link`** aus Spec Abschnitt 7 fehlt noch: Openings kommen mit Etappe E3, und ein Werkzeug, das nur einen Fehler liefert, wäre irreführend.
+**Einmal-Links** (`create_opening_link`, Spec Abschnitte 6 und 7, Vertrag in [`api/openings.md`](api/openings.md)): legt einen Einmal-Link (`kind: once`) über dieselbe Funktion an wie die App und liefert die `url` der Buchungsseite zum Weitergeben. Der Gast bucht genau einen Termin; danach ist der Link verbraucht. Links laufen nicht ab; Vorlagen (feste Links) und das Löschen gibt es nur in der App.
+- **Zielkalender:** muss es geben (`calendar_not_found`), beim Anbieter beschreibbar sein (`calendar_read_only`), Einladungen verschicken können (`calendar_cannot_invite`) und für Claude freigegeben sein (`mcp_write_forbidden`). Geprüft wird vor jedem Schreiben; ein abgelehnter Aufruf legt nichts an.
+- **Mit `suggestions`** bietet der Link genau diese Zeiten an. Jeder Vorschlag dauert genau `duration_minutes` (`end` weglassen oder passend angeben), liegt in der Zukunft und höchstens 365 Tage voraus, keiner doppelt; sonst `invalid_arguments` mit Hinweis. Für jeden Vorschlag legt der Server sofort einen Platzhalter „Reserviert: <Titel>“ im Zielkalender an (`placeholder_status: reserved`); er blockiert die Zeit für andere Links und `find_free_times`, bis der Link gebucht oder gelöscht ist oder die Zeit vorbei ist. Lässt sich ein Platzhalter nicht anlegen, wird der Link nicht angelegt (`provider_unavailable` bzw. der Code des Anbieters).
+- **Ohne `suggestions`** bietet der Link freie Zeiten nach den Standardregeln: Montag bis Freitag 09:00–17:00 in `time_zone` (Standard: Zeitzone des Servers), frühestens 4 Stunden ab jetzt, höchstens 21 Tage voraus. Das Ergebnis nennt `windows`, `min_notice_minutes` und `horizon_days`.
+- `title` ist der Titel des gebuchten Termins (Standard „Termin (<Dauer> Minuten)“). Zeiten der Vorschläge kommen in `time_zone` des Links zurück.
+- Die App sieht den Link sofort (Pull, Objekttyp `opening`) und kann ihn dort löschen.
 
 ## Fehler
 
@@ -79,10 +85,11 @@ Werkzeugfehler kommen als Ergebnis mit `isError: true`, deutscher Meldung (was f
 | `code` | Bedeutung |
 |---|---|
 | `invalid_arguments` | Parameter fehlt, unbekannt oder falsch geformt (z. B. Uhrzeit ohne Offset) |
-| `calendar_id_missing` | `create_event` ohne `calendar_id` |
+| `calendar_id_missing` | `create_event` oder `create_opening_link` ohne `calendar_id` |
 | `calendar_not_found`, `calendar_set_not_found` | unbekannte ID |
 | `mcp_write_forbidden` | Kalender für Claude gesperrt (`mcp_write` aus) |
 | `calendar_read_only` | Kalender beim Anbieter nur lesbar |
+| `calendar_cannot_invite` | `create_opening_link`: Zielkalender kann keine Einladungen verschicken (`can_invite` false) |
 | `scope_required`, `occurrence_required` | Serie ohne `scope` bzw. ohne `occurrence` |
 | `event_not_found`, `occurrence_not_found` | unbekannter Termin bzw. unbekanntes Vorkommen |
 | `invalid_event`, `invalid_request`, `scope_not_supported` | vom Schreibdienst abgelehnt (z. B. ungültige RRULE) |

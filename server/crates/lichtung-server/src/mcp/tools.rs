@@ -12,7 +12,6 @@ use chrono_tz::Tz;
 use serde_json::{json, Map, Value};
 
 use super::args::{invalid, ArgResult, Args};
-use super::free::{free_slots, FreeQuery, Interval};
 use super::schema::{definitions, ToolDef, AVAILABILITY, RESPONSES, ROLES, SCOPES, WEEKDAYS};
 use super::time::{
     date_input, date_time_input, fmt_at, fmt_date, midnight, occurrence_input, parse_clock,
@@ -23,6 +22,11 @@ use crate::app::App;
 use crate::error::AppError;
 use crate::events::default_zone;
 use crate::events::occurrences::OccurrenceQuery;
+use crate::free::{free_slots, FreeQuery};
+use crate::openings::{
+    NewOpening, OpeningKind, SuggestionInput, MAX_DURATION_MINUTES, MAX_SUGGESTIONS,
+    MIN_DURATION_MINUTES,
+};
 use crate::writes::{Origin, WriteOutcome};
 
 /// Default horizon of `list_invitations`.
@@ -127,6 +131,7 @@ async fn dispatch(app: &App, origin: &Origin, name: &str, args: &Args) -> ToolRe
         "update_event" => update_event(app, origin, args).await,
         "delete_event" => delete_event(app, origin, args).await,
         "respond_to_invitation" => respond(app, origin, args).await,
+        "create_opening_link" => create_opening_link(app, args).await,
         other => Err(AppError::Internal(anyhow::anyhow!("tool {other} has no handler")).into()),
     }
 }
@@ -484,40 +489,16 @@ async fn find_free_times(app: &App, args: &Args) -> ToolResult {
     };
     let cat = Catalog::load(app).await?;
     let ids = cat.select(args, |c| c.openings_busy)?;
-    let (list, truncated) = occurrences(app, &ids, from - buffer, to + buffer, tz, false).await?;
-    if truncated {
+    let busy = app
+        .busy_intervals(&ids, from - buffer, to + buffer, tz, None)
+        .await?;
+    if busy.truncated {
         return Err(ToolError::new(
             "too_many_events",
             "Im Zeitraum liegen zu viele Termine, um freie Zeiten sicher zu bestimmen. Bitte einen \
              kürzeren Zeitraum wählen.",
         ));
     }
-    let busy: Vec<Interval> = list
-        .iter()
-        .filter(|o| o["status"] != "cancelled")
-        .filter(|o| o["availability"] != "free")
-        .filter(|o| o["self_status"] != "declined")
-        .filter(|o| {
-            o["all_day"] != true
-                || o["calendar_id"]
-                    .as_str()
-                    .and_then(|id| cat.get(id))
-                    .is_some_and(|c| c.all_day_blocks)
-        })
-        .filter_map(|o| {
-            let s = when_of(&o["start"], tz)?.instant(tz);
-            let e = when_of(&o["end"], tz)?.instant(tz);
-            Some((s, e.max(s)))
-        })
-        // A zero-length event blocks its moment.
-        .map(|(s, e)| {
-            if e == s {
-                (s, s + Duration::minutes(1))
-            } else {
-                (s, e)
-            }
-        })
-        .collect();
     let query = FreeQuery {
         from,
         to,
@@ -527,7 +508,7 @@ async fn find_free_times(app: &App, args: &Args) -> ToolResult {
         window,
         weekdays,
     };
-    let mut slots = free_slots(&query, busy);
+    let mut slots = free_slots(&query, busy.intervals);
     let truncated = slots.len() > limit;
     slots.truncate(limit);
     let slots: Vec<Value> = slots
@@ -1040,6 +1021,165 @@ async fn delete_event(app: &App, origin: &Origin, args: &Args) -> ToolResult {
     }
     let o = app.apply_mutation(origin, &mutation).await?;
     outcome(o, default_zone(), &cat)
+}
+
+// ----- openings ----------------------------------------------------------------------
+
+/// The suggestions of `create_opening_link` (`start`, optional `end`).
+fn suggestion_args(args: &Args) -> ArgResult<Vec<SuggestionInput>> {
+    let Some(value) = args.value("suggestions") else {
+        return Ok(Vec::new());
+    };
+    let items = value.as_array().ok_or_else(|| {
+        invalid(
+            "„suggestions“ muss eine Liste sein, z. B. [{\"start\": \
+             \"2026-11-03T10:00:00+01:00\"}].",
+        )
+    })?;
+    if items.len() > MAX_SUGGESTIONS {
+        return Err(invalid(format!(
+            "Ein Einmal-Link hat höchstens {MAX_SUGGESTIONS} Vorschläge, nicht {}.",
+            items.len()
+        )));
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let object = item.as_object().ok_or_else(|| {
+            invalid(
+                "Jeder Eintrag in „suggestions“ ist ein Objekt mit start (und optional end), \
+                 z. B. {\"start\": \"2026-11-03T10:00:00+01:00\"}.",
+            )
+        })?;
+        let s = Args::new(object.clone());
+        s.check(["start", "end"], ["start"])?;
+        out.push(SuggestionInput {
+            start: s.required_str("start")?.to_owned(),
+            end: s.non_empty_str("end")?.map(str::to_owned),
+        });
+    }
+    Ok(out)
+}
+
+/// A refusal of [`App::create_opening`] as a tool error: invalid values
+/// become `invalid_arguments`, with a hint for suggestions.
+fn opening_error(e: AppError) -> ToolError {
+    match e {
+        AppError::BadRequest {
+            code: "invalid_request",
+            message,
+        } => {
+            let hint = if message.contains("Vorschlag") || message.contains("suggestions") {
+                " Vorschläge: start als Zeitpunkt mit Offset in der Zukunft (höchstens 365 Tage \
+                 voraus), end weglassen oder genau start + duration_minutes, keiner doppelt. \
+                 Freie Zeiten liefert find_free_times."
+            } else {
+                ""
+            };
+            invalid(format!("{message}{hint}"))
+        }
+        other => other.into(),
+    }
+}
+
+/// Creates a one-off booking link (spec sections 6 and 7) through
+/// [`App::create_opening`]. The target calendar must take bookings
+/// (writable, `can_invite`) and be open for Claude (`mcp_write`):
+/// placeholders and the booked event are written there by the server,
+/// outside the write path's MCP guard, so the guard is checked here.
+async fn create_opening_link(app: &App, args: &Args) -> ToolResult {
+    let duration = args
+        .opt_int(
+            "duration_minutes",
+            MIN_DURATION_MINUTES,
+            MAX_DURATION_MINUTES,
+        )?
+        .ok_or_else(|| invalid("Parameter „duration_minutes“ fehlt."))?;
+    let calendar_id = args.required_str("calendar_id")?;
+    let title = args.non_empty_str("title")?.map(str::to_owned);
+    let zone = zone_arg(args)?;
+    let suggestions = suggestion_args(args)?;
+    let cat = Catalog::load(app).await?;
+    let calendar = cat.require("calendar_id", calendar_id)?;
+    let name = &calendar.name;
+    if !cat.writable(calendar) {
+        return Err(ToolError::new(
+            "calendar_read_only",
+            format!(
+                "Der Kalender „{name}“ ist nur lesbar. Ein Buchungslink braucht einen \
+                 Zielkalender, in den Lichtung schreiben kann.{}",
+                hint("calendar_read_only")
+            ),
+        ));
+    }
+    if !calendar.can_invite {
+        return Err(ToolError::new(
+            "calendar_cannot_invite",
+            format!(
+                "Der Kalender „{name}“ kann keine Einladungen verschicken. Wähle mit \
+                 list_calendars einen Kalender mit can_invite = true und mcp_writable = true."
+            ),
+        ));
+    }
+    if !calendar.mcp_write {
+        return Err(ToolError::new(
+            "mcp_write_forbidden",
+            format!(
+                "Claude darf in den Kalender „{name}“ nicht schreiben (Schreibschutz für MCP, \
+                 Einstellung mcp_write); ein Buchungslink legt dort Platzhalter und den gebuchten \
+                 Termin an. Freigeben lässt sich das in der App in den Einstellungen des \
+                 Kalenders.{}",
+                hint("mcp_write_forbidden")
+            ),
+        ));
+    }
+    let opening = app
+        .create_opening(NewOpening {
+            kind: OpeningKind::Once,
+            title,
+            duration_minutes: duration,
+            calendar_id: calendar.id.clone(),
+            time_zone: zone.map(|z| z.name().to_owned()),
+            windows: None,
+            buffer_before_minutes: None,
+            buffer_after_minutes: None,
+            min_notice_minutes: None,
+            horizon_days: None,
+            video_url: None,
+            suggestions: Some(suggestions),
+        })
+        .await
+        .map_err(opening_error)?;
+    let tz = parse_zone("time_zone", &opening.time_zone).unwrap_or_else(|_| default_zone());
+    let local = |raw: &str| {
+        DateTime::parse_from_rfc3339(raw)
+            .map(|t| json!(fmt_at(t.with_timezone(&Utc), tz)))
+            .unwrap_or_else(|_| json!(raw))
+    };
+    let suggestions: Vec<Value> = opening
+        .suggestions
+        .iter()
+        .map(|s| {
+            json!({
+                "start": local(&s.start),
+                "end": local(&s.end),
+                "placeholder_status": s.placeholder_status,
+                "placeholder_event_id": s.placeholder_event_id,
+            })
+        })
+        .collect();
+    Ok(json!({
+        "id": opening.id,
+        "url": opening.url,
+        "title": opening.title,
+        "duration_minutes": opening.duration_minutes,
+        "calendar": cat.reference(&opening.calendar_id),
+        "time_zone": opening.time_zone,
+        "suggestions_only": opening.suggestions_only,
+        "suggestions": suggestions,
+        "windows": opening.windows,
+        "min_notice_minutes": opening.min_notice_minutes,
+        "horizon_days": opening.horizon_days,
+    }))
 }
 
 async fn respond(app: &App, origin: &Origin, args: &Args) -> ToolResult {

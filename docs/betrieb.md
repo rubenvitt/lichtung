@@ -9,9 +9,9 @@ Wie `lichtung-server` läuft: Container, Konfiguration, Login, Tokens, Backups. 
 - **Port** 8080 im Container, nach außen nur über Traefik.
 - **Login** über Pocket-ID (OIDC). Die Apps melden sich als Gerät an und bekommen einen Geräte-Token; Werkzeuge nutzen API-Tokens; claude.ai verbindet sich per OAuth.
 - **Stack-Dateien** in [`server/deploy/`](../server/deploy): `compose.yaml`, `.env.example` (Vorlage) und `generate-secrets.sh`. Auf dem Server unter `~/server/lichtung/`, betrieben mit `docker compose`.
-- **Domain** `lichtung.rubeen.dev` (öffentlich): claude.ai muss `/mcp` erreichen, Gäste später die Buchungsseite.
+- **Domain** `lichtung.rubeen.dev` (öffentlich): claude.ai muss `/mcp` erreichen, Gäste die Buchungsseite `/o/…`.
 
-Ohne Anmeldung erreichbar sind nur `/`, `/healthz`, die Login-Strecke `/auth/*` und der OAuth-Autorisierungsserver (`/.well-known/oauth-*`, `/oauth/*`). Alles unter `/api/*` verlangt eine Sitzung, einen API-Token oder einen Geräte-Token.
+Ohne Anmeldung erreichbar sind nur `/`, `/healthz`, die Login-Strecke `/auth/*`, der OAuth-Autorisierungsserver (`/.well-known/oauth-*`, `/oauth/*`) und die Buchungsseite `/o/*`. Alles unter `/api/*` verlangt eine Sitzung, einen API-Token oder einen Geräte-Token.
 
 ## Umgebungsvariablen
 
@@ -144,6 +144,13 @@ Fehler kommen als `{"error":{"code":"…","message":"…"}}` mit deutscher Meldu
 - **Konflikt (der Anbieter gewinnt):** Hat sich der Termin seit dem Stand der App geändert (andere `version`, oder der Anbieter antwortet 412 bzw. 404), holt der Server den Termin sofort neu, verwirft die Änderung und legt einen Konflikt an. Die App zeigt ihn mit der verworfenen Änderung, bis jemand ihn wegklickt (`POST /api/conflicts/{id}/dismiss`). Nichts verschwindet still; im Log steht `write conflict, provider wins`.
 - **Rechte:** Nur lesbare Kalender (geteilt ohne Schreibrecht, ICS-Abos) lehnen Änderungen ab (`calendar_read_only`). `mcp_write` gilt nur für Claude (`/mcp`): Ist es aus, lehnt der Server jedes Schreiben über MCP in diesem Kalender ab, auch Antworten auf Einladungen (`mcp_write_forbidden`). Neue Kalender von ICS- und Microsoft-Konten (Arbeitskalender) starten mit `mcp_write` aus.
 - **Anbieter nicht erreichbar:** Die App behält die Änderung und schickt sie später erneut. Lehnt der Anbieter das App-Passwort ab, steht das Konto auf `auth_failed`.
+
+## Openings (Buchungslinks)
+
+- **Links und Vorlagen** pflegt die App (`/api/openings`, [`api/openings.md`](api/openings.md)). Die öffentliche Adresse ist `<LICHTUNG_PUBLIC_URL>/o/<token>`; der Reverse Proxy muss `/o/` ohne Anmeldung durchlassen. Die Kennung steht im Klartext in der Datenbank (und in Backups), weil die App den Link jederzeit wieder anzeigt; wer einen Link zurückziehen will, löscht ihn.
+- **Buchungsseite** (`/o/<token>`, LIC-33): Der Traefik-Router des Stacks leitet den ganzen Host weiter, `/o/` braucht also keine eigene Regel; wer davor eine Anmeldung schaltet (Forward-Auth o. Ä.), muss `/o/` ausnehmen. Gäste buchen dort ohne Anmeldung; der Server legt den Termin mit dem Gast als Teilnehmer im Zielkalender an, die Einladung verschickt der Anbieter von der eigenen Adresse. Log: `booking created` (nur Link- und Event-ID, keine Gastdaten).
+- **Schutz der Buchungsseite** (LIC-34): Grenzen pro Client-Adresse, pro Link, pro Gast-E-Mail und insgesamt, im Speicher (ein Neustart setzt sie zurück), Formular-Token mit Mindest-Ausfüllzeit, Honeypot, Eingabeprüfung. Die Client-Adresse ist der letzte `X-Forwarded-For`-Eintrag, wenn die Verbindung von einer privaten oder Loopback-Adresse kommt (Traefik im Docker-Netz), sonst die Gegenstelle; Traefik muss also `X-Forwarded-For` anhängen (Standard). Die Grenzen sind fest eingebaut, nicht konfigurierbar; Tabelle in [`api/openings.md`](api/openings.md), Abschnitt 7. Log: `booking page rate limited`, `booking limit reached`, `booking refused: …`.
+- **Platzhalter:** Für Vorschläge eines Einmal-Links legt der Server Termine „Reserviert: …“ im Zielkalender an (`origin: server`). Beim Start und alle 15 Minuten räumt er Platzhalter vergangener Vorschläge weg und wiederholt Löschungen, die der Anbieter vorher nicht angenommen hat (Log: `placeholders left for the next cleanup`).
 
 ## Aufbewahrung
 

@@ -551,5 +551,67 @@
     },
     "name": "respond_to_invitation",
     "title": "Auf Einladung antworten"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Einmal-Link anlegen"
+    },
+    "description": "Legt einen Einmal-Buchungslink an und liefert seine url zum Weitergeben. Der Gast bucht darüber genau einen Termin von duration_minutes im Zielkalender; der Anbieter verschickt die Einladung. calendar_id ist Pflicht: vorher mit list_calendars einen Kalender mit mcp_writable = true und can_invite = true wählen. Mit suggestions bietet der Link genau diese Zeiten an (vorher z. B. mit find_free_times suchen); für jeden Vorschlag legt Lichtung sofort einen Platzhalter „Reserviert: <Titel>“ im Zielkalender an, der die Zeit blockiert, bis gebucht oder der Link gelöscht ist. Ohne suggestions bietet der Link freie Zeiten Montag bis Freitag 09:00–17:00 in time_zone an, frühestens 4 Stunden ab jetzt, höchstens 21 Tage voraus. Links laufen nicht ab; löschen lassen sie sich in der App.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calendar_id": {
+          "description": "Zielkalender (id aus list_calendars; mcp_writable und can_invite müssen true sein).",
+          "type": "string"
+        },
+        "duration_minutes": {
+          "description": "Dauer des Termins in Minuten.",
+          "maximum": 720,
+          "minimum": 5,
+          "type": "integer"
+        },
+        "suggestions": {
+          "description": "Konkrete Vorschläge (höchstens 20), jeder genau duration_minutes lang, in der Zukunft und höchstens 365 Tage voraus. Blockieren die Zeit mit einem Platzhalter im Zielkalender.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "end": {
+                "description": "Ende mit Offset (optional; Standard start + duration_minutes).",
+                "type": "string"
+              },
+              "start": {
+                "description": "Beginn nach RFC 3339 mit Offset, z. B. 2026-11-03T10:00:00+01:00.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "start"
+            ],
+            "type": "object"
+          },
+          "maxItems": 20,
+          "type": "array"
+        },
+        "time_zone": {
+          "description": "IANA-Zeitzone des Links (für die Zeitfenster ohne suggestions und die Ausgabe), z. B. Europe/Berlin. Standard: Zeitzone des Servers.",
+          "type": "string"
+        },
+        "title": {
+          "description": "Titel des Termins, den der Gast bucht. Standard: „Termin (<Dauer> Minuten)“.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "duration_minutes",
+        "calendar_id"
+      ],
+      "type": "object"
+    },
+    "name": "create_opening_link",
+    "title": "Einmal-Link anlegen"
   }
 ]

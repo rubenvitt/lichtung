@@ -6,8 +6,9 @@
 //! | `GET /healthz` | none |
 //! | `/auth/login`, `/auth/callback`, `/auth/logout` | OIDC login ([`auth_routes`]) |
 //! | `/.well-known/oauth-*`, `/oauth/*` | built-in authorization server ([`crate::oauth::routes`]) |
-//! | `/api/*` | session cookie, API/bootstrap token or device token ([`api`], [`accounts`], [`events`], [`sync`]) |
+//! | `/api/*` | session cookie, API/bootstrap token or device token ([`api`], [`accounts`], [`events`], [`openings`], [`sync`]) |
 //! | `POST /mcp` | API/bootstrap token or OAuth access token ([`crate::mcp`]) |
+//! | `/o/{token}` | none: public booking page, rate limited ([`crate::booking`]) |
 //!
 //! Protected routes under `/api` use
 //! [`crate::auth::middleware::require_auth`] and the
@@ -18,6 +19,7 @@ pub mod api;
 pub mod auth_routes;
 pub mod events;
 pub mod extract;
+pub mod openings;
 pub mod sync;
 
 use std::sync::Arc;
@@ -60,6 +62,9 @@ pub fn router(app: App, oidc: Option<Arc<OidcClient>>) -> Router {
         .merge(crate::oauth::routes::routes(
             crate::oauth::routes::OAuthState::new(app.clone()),
         ))
+        .merge(crate::booking::routes(crate::booking::BookingState::new(
+            app.clone(),
+        )))
         .merge(auth_routes::routes(auth_routes::AuthState {
             app: app.clone(),
             oidc,

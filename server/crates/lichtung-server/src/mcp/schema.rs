@@ -5,9 +5,6 @@
 //!
 //! Schemas avoid top-level `oneOf`/`anyOf`, which several clients reject;
 //! "date or instant" is described in words and checked at runtime.
-//!
-//! `create_opening_link` (spec section 7) is missing on purpose: openings
-//! come with E3, and a tool that can only fail would mislead.
 
 use serde_json::{json, Map, Value};
 
@@ -463,6 +460,75 @@ pub fn definitions() -> Vec<ToolDef> {
             read_only: false,
             destructive: false,
             idempotent: true,
+        },
+        ToolDef {
+            name: "create_opening_link",
+            title: "Einmal-Link anlegen",
+            description: "Legt einen Einmal-Buchungslink an und liefert seine url zum \
+                Weitergeben. Der Gast bucht darüber genau einen Termin von duration_minutes im \
+                Zielkalender; der Anbieter verschickt die Einladung. calendar_id ist Pflicht: \
+                vorher mit list_calendars einen Kalender mit mcp_writable = true und can_invite = \
+                true wählen. Mit suggestions bietet der Link genau diese Zeiten an (vorher z. B. \
+                mit find_free_times suchen); für jeden Vorschlag legt Lichtung sofort einen \
+                Platzhalter „Reserviert: <Titel>“ im Zielkalender an, der die Zeit blockiert, \
+                bis gebucht oder der Link gelöscht ist. Ohne suggestions bietet der Link freie \
+                Zeiten Montag bis Freitag 09:00–17:00 in time_zone an, frühestens 4 Stunden ab \
+                jetzt, höchstens 21 Tage voraus. Links laufen nicht ab; löschen lassen sie sich \
+                in der App.",
+            input_schema: object(
+                vec![
+                    (
+                        "duration_minutes",
+                        integer("Dauer des Termins in Minuten.", 5, 720, None),
+                    ),
+                    (
+                        "calendar_id",
+                        string(
+                            "Zielkalender (id aus list_calendars; mcp_writable und can_invite \
+                             müssen true sein).",
+                        ),
+                    ),
+                    (
+                        "title",
+                        string(
+                            "Titel des Termins, den der Gast bucht. Standard: „Termin (<Dauer> \
+                             Minuten)“.",
+                        ),
+                    ),
+                    (
+                        "suggestions",
+                        json!({
+                            "type": "array",
+                            "maxItems": 20,
+                            "description": "Konkrete Vorschläge (höchstens 20), jeder genau \
+                                duration_minutes lang, in der Zukunft und höchstens 365 Tage \
+                                voraus. Blockieren die Zeit mit einem Platzhalter im Zielkalender.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "start": {"type": "string", "description": "Beginn nach \
+                                        RFC 3339 mit Offset, z. B. 2026-11-03T10:00:00+01:00."},
+                                    "end": {"type": "string", "description": "Ende mit Offset \
+                                        (optional; Standard start + duration_minutes)."},
+                                },
+                                "required": ["start"],
+                                "additionalProperties": false,
+                            },
+                        }),
+                    ),
+                    (
+                        "time_zone",
+                        string(
+                            "IANA-Zeitzone des Links (für die Zeitfenster ohne suggestions und \
+                             die Ausgabe), z. B. Europe/Berlin. Standard: Zeitzone des Servers.",
+                        ),
+                    ),
+                ],
+                &["duration_minutes", "calendar_id"],
+            ),
+            read_only: false,
+            destructive: false,
+            idempotent: false,
         },
     ]
 }

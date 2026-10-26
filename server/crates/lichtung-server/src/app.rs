@@ -101,6 +101,11 @@ struct Inner {
     write_lock: Arc<tokio::sync::Mutex<()>>,
     /// `Retry-After` of the last throttled sync run per account (LIC-13).
     sync_retry_after: Mutex<HashMap<String, Duration>>,
+    /// Held by a booking from the last check of the slot until the link is
+    /// marked booked (see [`App::opening_booking_guard`]).
+    booking_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Serializes the removal of placeholders (LIC-32).
+    placeholder_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -171,6 +176,8 @@ impl App {
                 calendar_locks: Mutex::new(HashMap::new()),
                 write_lock: Arc::new(tokio::sync::Mutex::new(())),
                 sync_retry_after: Mutex::new(HashMap::new()),
+                booking_lock: Arc::new(tokio::sync::Mutex::new(())),
+                placeholder_lock: Arc::new(tokio::sync::Mutex::new(())),
                 config,
             }),
         })
@@ -320,6 +327,16 @@ impl App {
     /// Held while one mutation runs (see `Inner::write_lock`).
     pub(crate) async fn write_guard(&self) -> tokio::sync::OwnedMutexGuard<()> {
         self.inner.write_lock.clone().lock_owned().await
+    }
+
+    /// Held while a booking of an opening runs (see `Inner::booking_lock`).
+    pub async fn opening_booking_guard(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.inner.booking_lock.clone().lock_owned().await
+    }
+
+    /// Held while placeholders are removed (see `Inner::placeholder_lock`).
+    pub(crate) async fn placeholder_guard(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.inner.placeholder_lock.clone().lock_owned().await
     }
 
     /// Runs `f` with the reader connection on the blocking pool.

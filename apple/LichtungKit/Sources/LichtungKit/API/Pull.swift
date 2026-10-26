@@ -8,6 +8,8 @@ public enum SyncChange: Hashable, Sendable {
     case upsertCalendarSet(CalendarSet)
     case upsertEvent(Event)
     case upsertConflict(Conflict)
+    /// Buchungslink (LIC-35, docs/api/openings.md §6).
+    case upsertOpening(Opening)
     case delete(type: String, id: String)
     /// Objektart, die dieser Client noch nicht kennt; wird übersprungen.
     case unknown(type: String)
@@ -31,6 +33,9 @@ extension SyncChange: Decodable {
         case "calendar_set": self = .upsertCalendarSet(try c.decode(CalendarSet.self, forKey: .data))
         case "event": self = .upsertEvent(try c.decode(Event.self, forKey: .data))
         case "conflict": self = .upsertConflict(try c.decode(Conflict.self, forKey: .data))
+        // Ein Link, der sich nicht lesen lässt, hält den Abgleich der Termine
+        // nicht auf: Er wird übersprungen wie eine unbekannte Objektart.
+        case "opening": self = (try? c.decode(Opening.self, forKey: .data)).map { .upsertOpening($0) } ?? .unknown(type: type)
         default: self = .unknown(type: type)
         }
     }

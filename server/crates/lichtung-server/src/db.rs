@@ -19,6 +19,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0004_conflicts.sql"),
     include_str!("../migrations/0005_sync_api.sql"),
     include_str!("../migrations/0006_settings_api.sql"),
+    include_str!("../migrations/0007_openings.sql"),
 ];
 
 /// The schema version this binary expects.

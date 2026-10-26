@@ -37,6 +37,7 @@ final class SettingsModel {
         createdToken = nil
         errorMessage = nil
         calendarOverrides = [:]
+        deletedOpeningIds = []
     }
 
     var isAvailable: Bool { session?.management != nil }
@@ -261,5 +262,47 @@ final class SettingsModel {
         if await run({ try await $0.revokeToken(id) }) {
             tokens.removeAll { $0.id == id }
         }
+    }
+
+    // MARK: Buchungslinks (LIC-35)
+
+    /// Gelöschte Links, bis der Pull sie auch entfernt hat.
+    private var deletedOpeningIds: Set<String> = []
+
+    var openingList: OpeningList {
+        OpeningList(state.openings.values.filter { !deletedOpeningIds.contains($0.id) }, now: Date())
+    }
+
+    func opening(_ id: String) -> Opening? { state.openings[id] }
+
+    /// Kalender des Stands (mit vorläufigen Einstellungen) für Texte und Zielauswahl.
+    var calendarsById: [String: CalendarInfo] { mergedCalendars }
+
+    var openingTargets: [CalendarInfo] { OpeningTargets.allowed(mergedCalendars) }
+
+    /// Legt einen Link an; das Ergebnis trägt die URL zum Kopieren.
+    func createOpening(_ body: NewOpening) async -> Opening? {
+        var created: Opening?
+        let ok = await run { created = try await $0.createOpening(body) }
+        if ok { await refresh() }
+        return created
+    }
+
+    func updateOpening(_ id: String, _ patch: OpeningPatch) async -> Bool {
+        guard !patch.isEmpty else { return true }
+        let ok = await run { _ = try await $0.updateOpening(id, patch) }
+        if ok { await refresh() }
+        return ok
+    }
+
+    /// Löscht den Link; der Server entfernt seine Platzhalter.
+    @discardableResult
+    func deleteOpening(_ id: String) async -> Bool {
+        let ok = await run { try await $0.deleteOpening(id) }
+        if ok {
+            deletedOpeningIds.insert(id)
+            await refresh()
+        }
+        return ok
     }
 }

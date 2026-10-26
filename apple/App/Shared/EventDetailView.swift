@@ -36,6 +36,10 @@ struct EventDetailView: View {
                         Label(travel, systemImage: "car").foregroundStyle(.secondary)
                     }
                 }
+                // Terminanfrage: Status und Antworten (LIC-30)
+                if InvitationActions.isInvitation(occurrence) {
+                    InvitationDetailSection(occurrence: occurrence)
+                }
                 // Videolink (LIC-42)
                 if let link = VideoLinkDetector.detect(in: d) {
                     Section("Videokonferenz") {

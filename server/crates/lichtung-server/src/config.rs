@@ -81,6 +81,51 @@ pub struct Config {
     pub fastmail_url: Url,
     /// CalDAV base URL for `kind: icloud` accounts (like `fastmail_url`).
     pub icloud_url: Url,
+    /// Limits of the public booking page (LIC-34). Not configurable
+    /// through the environment; tests lower them.
+    pub booking_limits: BookingLimits,
+}
+
+/// Limits of the public booking page `/o/<token>` (LIC-34), counted in
+/// memory per client address (an IPv6 address counts as its /64).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BookingLimits {
+    /// Page views per address in 10 minutes.
+    pub views_per_source: u32,
+    /// Booking attempts (`POST`) per address in 10 minutes.
+    pub posts_per_source: u32,
+    /// Requests with an unknown link per address in an hour; beyond that
+    /// the address gets `429` for every booking page for the rest of the
+    /// hour.
+    pub misses_per_source: u32,
+    /// Bookings per address in 24 hours.
+    pub bookings_per_source: u32,
+    /// Bookings per link in 24 hours.
+    pub bookings_per_link: u32,
+    /// Bookings per guest e-mail address in 24 hours (all links).
+    pub bookings_per_email: u32,
+    /// Bookings in 24 hours on all links together.
+    pub bookings_total: u32,
+    /// A form sent back faster than this counts as automated.
+    pub min_fill: std::time::Duration,
+    /// A form older than this has to be loaded again.
+    pub max_form_age: std::time::Duration,
+}
+
+impl Default for BookingLimits {
+    fn default() -> Self {
+        Self {
+            views_per_source: 120,
+            posts_per_source: 20,
+            misses_per_source: 20,
+            bookings_per_source: 5,
+            bookings_per_link: 20,
+            bookings_per_email: 3,
+            bookings_total: 50,
+            min_fill: std::time::Duration::from_secs(3),
+            max_form_age: std::time::Duration::from_secs(2 * 60 * 60),
+        }
+    }
 }
 
 impl fmt::Debug for Config {
@@ -100,6 +145,7 @@ impl fmt::Debug for Config {
             .field("backup_hour", &self.backup_hour)
             .field("fastmail_url", &self.fastmail_url.as_str())
             .field("icloud_url", &self.icloud_url.as_str())
+            .field("booking_limits", &self.booking_limits)
             .finish()
     }
 }
@@ -298,6 +344,7 @@ impl Config {
             backup_hour,
             fastmail_url: default_fastmail_url(),
             icloud_url: default_icloud_url(),
+            booking_limits: BookingLimits::default(),
         })
     }
 
@@ -316,6 +363,7 @@ impl Config {
             backup_hour: 3,
             fastmail_url: default_fastmail_url(),
             icloud_url: default_icloud_url(),
+            booking_limits: BookingLimits::default(),
         }
     }
 

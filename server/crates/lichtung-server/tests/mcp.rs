@@ -267,7 +267,7 @@ async fn json_rpc_errors() {
             -32602,
         ),
         (
-            rpc(1, "tools/call", json!({"name": "create_opening_link"})),
+            rpc(1, "tools/call", json!({"name": "delete_opening_link"})),
             -32602,
         ),
         (rpc(1, "tools/call", json!({"arguments": {}})), -32602),
@@ -422,6 +422,7 @@ async fn tool_schemas_match_snapshot() {
             "update_event",
             "delete_event",
             "respond_to_invitation",
+            "create_opening_link",
         ]
     );
     for tool in tools.as_array().unwrap() {
@@ -1362,4 +1363,229 @@ async fn conflicts_show_the_current_state() {
     assert_eq!(c["origin"], "mcp:oauth:Claude");
     assert_eq!(c["event_id"], id);
     assert_eq!(c["mutation"]["changes"]["title"], "Zahnarzt mit Claude");
+}
+
+// ----- openings -------------------------------------------------------------------------
+
+/// A whole hour a week ahead (suggestions must lie in the future).
+fn ahead(hour: u32) -> chrono::DateTime<chrono::Utc> {
+    let day = (chrono::Utc::now() + chrono::Duration::days(7)).date_naive();
+    day.and_hms_opt(hour, 0, 0).unwrap().and_utc()
+}
+
+fn rfc(t: chrono::DateTime<chrono::Utc>) -> String {
+    t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+impl Setup {
+    /// Placeholders ("Reserviert: …") at the provider.
+    fn placeholders(&self) -> usize {
+        self.dav.with(|s| {
+            s.calendars[CALENDAR]
+                .resources
+                .values()
+                .filter(|(_, d)| d.contains("SUMMARY:Reserviert: "))
+                .count()
+        })
+    }
+
+    async fn openings(&self) -> Vec<Value> {
+        self.s
+            .get("/api/openings", Auth::Bearer(BOOTSTRAP))
+            .await
+            .json()
+            .as_array()
+            .unwrap()
+            .clone()
+    }
+}
+
+#[tokio::test]
+async fn create_opening_link_returns_the_url() {
+    let (t, token) = synced(|_| {}).await;
+
+    // With suggestions: placeholders block the time.
+    let half_past_ten = ahead(10) + chrono::Duration::minutes(30);
+    let r = ok(
+        &t.s,
+        &token,
+        "create_opening_link",
+        json!({"duration_minutes": 30, "calendar_id": t.calendar_id, "title": "Abstimmung",
+               "time_zone": "UTC",
+               "suggestions": [{"start": rfc(ahead(14))},
+                               {"start": rfc(ahead(10)), "end": rfc(half_past_ten)}]}),
+    )
+    .await;
+    let url = r["url"].as_str().unwrap();
+    assert!(url.contains("/o/"), "{url}");
+    assert!(r["id"].as_str().unwrap().starts_with("opn_"));
+    assert_eq!(r["title"], "Abstimmung");
+    assert_eq!(r["calendar"]["id"], t.calendar_id);
+    assert_eq!(r["calendar"]["mcp_writable"], true);
+    assert_eq!(r["suggestions_only"], true);
+    let suggestions = r["suggestions"].as_array().unwrap();
+    assert_eq!(suggestions.len(), 2);
+    assert_eq!(suggestions[0]["start"], rfc(ahead(10)), "earliest first");
+    assert_eq!(
+        suggestions[1]["end"],
+        rfc(ahead(14) + chrono::Duration::minutes(30))
+    );
+    for s in suggestions {
+        assert_eq!(s["placeholder_status"], "reserved", "{s}");
+        assert!(s["placeholder_event_id"].is_string());
+    }
+    assert_eq!(t.placeholders(), 2);
+
+    // The app sees it.
+    let listed = t.openings().await;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["url"], url);
+    assert_eq!(listed[0]["kind"], "once");
+
+    // Without suggestions: the default rules, the server's zone.
+    let r = ok(
+        &t.s,
+        &token,
+        "create_opening_link",
+        json!({"duration_minutes": 45, "calendar_id": t.calendar_id}),
+    )
+    .await;
+    assert_eq!(r["title"], "Termin (45 Minuten)");
+    assert_eq!(r["suggestions_only"], false);
+    assert_eq!(r["suggestions"], json!([]));
+    assert_eq!(r["min_notice_minutes"], 240);
+    assert_eq!(r["horizon_days"], 21);
+    assert_eq!(r["windows"].as_array().unwrap().len(), 5);
+    assert_eq!(t.placeholders(), 2, "no new placeholders");
+    assert_eq!(t.openings().await.len(), 2);
+}
+
+#[tokio::test]
+async fn create_opening_link_respects_the_mcp_guard() {
+    let (t, token) = synced(|dav| dav.add_calendar(HOLIDAYS, "Feiertage", false)).await;
+    t.settings(&t.calendar_id, json!({"mcp_write": false}))
+        .await;
+    let writes = t.writes();
+    let e = err(
+        &t.s,
+        &token,
+        "create_opening_link",
+        json!({"duration_minutes": 30, "calendar_id": t.calendar_id,
+               "suggestions": [{"start": rfc(ahead(10))}]}),
+    )
+    .await;
+    assert_eq!(e["error"]["code"], "mcp_write_forbidden", "{e}");
+    let message = e["error"]["message"].as_str().unwrap();
+    assert!(message.contains("„Privat“"), "{message}");
+    assert!(message.contains("in der App"), "{message}");
+    assert_eq!(t.writes(), writes, "nothing reached the provider");
+    assert!(t.openings().await.is_empty());
+
+    // Read-only at the provider, unknown calendar, missing calendar_id.
+    let holidays = t.calendar_named("Feiertage").await;
+    let e = err(
+        &t.s,
+        &token,
+        "create_opening_link",
+        json!({"duration_minutes": 30, "calendar_id": holidays}),
+    )
+    .await;
+    assert_eq!(e["error"]["code"], "calendar_read_only", "{e}");
+    let e = err(
+        &t.s,
+        &token,
+        "create_opening_link",
+        json!({"duration_minutes": 30, "calendar_id": "cal_gibtsnicht"}),
+    )
+    .await;
+    assert_eq!(e["error"]["code"], "calendar_not_found", "{e}");
+    let e = err(
+        &t.s,
+        &token,
+        "create_opening_link",
+        json!({"duration_minutes": 30}),
+    )
+    .await;
+    assert_eq!(e["error"]["code"], "calendar_id_missing", "{e}");
+    assert!(t.openings().await.is_empty());
+}
+
+#[tokio::test]
+async fn create_opening_link_needs_a_calendar_with_invitations() {
+    let (t, token) = synced(|_| {}).await;
+    t.db()
+        .execute(
+            "UPDATE calendars SET can_invite = 0 WHERE id = ?1",
+            [&t.calendar_id],
+        )
+        .unwrap();
+    let e = err(
+        &t.s,
+        &token,
+        "create_opening_link",
+        json!({"duration_minutes": 30, "calendar_id": t.calendar_id}),
+    )
+    .await;
+    assert_eq!(e["error"]["code"], "calendar_cannot_invite", "{e}");
+    let message = e["error"]["message"].as_str().unwrap();
+    assert!(message.contains("can_invite"), "{message}");
+    assert!(t.openings().await.is_empty());
+}
+
+#[tokio::test]
+async fn create_opening_link_explains_invalid_suggestions() {
+    let (t, token) = synced(|_| {}).await;
+    let writes = t.writes();
+    let past = rfc(chrono::Utc::now() - chrono::Duration::days(1));
+    let cases = [
+        // In the past.
+        json!([{"start": past}]),
+        // Without offset.
+        json!([{"start": "2026-11-03T10:00:00"}]),
+        // Not the link's length.
+        json!([{"start": rfc(ahead(10)), "end": rfc(ahead(11))}]),
+        // Twice.
+        json!([{"start": rfc(ahead(10))}, {"start": rfc(ahead(10))}]),
+        // Malformed.
+        json!([{"begin": rfc(ahead(10))}]),
+        json!(["morgen um 10"]),
+        json!({"start": rfc(ahead(10))}),
+    ];
+    for suggestions in cases {
+        let e = err(
+            &t.s,
+            &token,
+            "create_opening_link",
+            json!({"duration_minutes": 30, "calendar_id": t.calendar_id,
+                   "suggestions": suggestions}),
+        )
+        .await;
+        assert_eq!(
+            e["error"]["code"], "invalid_arguments",
+            "{suggestions}: {e}"
+        );
+    }
+    // The hint says how to do it right.
+    let e = err(
+        &t.s,
+        &token,
+        "create_opening_link",
+        json!({"duration_minutes": 30, "calendar_id": t.calendar_id,
+               "suggestions": [{"start": past}]}),
+    )
+    .await;
+    let message = e["error"]["message"].as_str().unwrap();
+    assert!(message.contains("Vergangenheit"), "{message}");
+    assert!(message.contains("find_free_times"), "{message}");
+    // Length out of range.
+    let e = err(
+        &t.s,
+        &token,
+        "create_opening_link",
+        json!({"duration_minutes": 2, "calendar_id": t.calendar_id}),
+    )
+    .await;
+    assert_eq!(e["error"]["code"], "invalid_arguments", "{e}");
+    assert_eq!(t.writes(), writes, "nothing reached the provider");
+    assert!(t.openings().await.is_empty());
 }

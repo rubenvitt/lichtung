@@ -26,6 +26,8 @@ struct SettingsView: View {
                 .tabItem { Label("Kalender", systemImage: "calendar") }
             CalendarSetsSettingsView()
                 .tabItem { Label("Sets", systemImage: "square.stack") }
+            OpeningsSettingsView()
+                .tabItem { Label("Buchungslinks", systemImage: "link") }
             AccessSettingsView()
                 .tabItem { Label("Geräte und Tokens", systemImage: "key") }
             GeneralSettingsView()
@@ -51,6 +53,11 @@ struct SettingsView: View {
                         CalendarSetsSettingsView()
                     } label: {
                         Label("Kalender-Sets", systemImage: "square.stack")
+                    }
+                    NavigationLink {
+                        OpeningsSettingsView()
+                    } label: {
+                        Label("Buchungslinks", systemImage: "link")
                     }
                     NavigationLink {
                         AccessSettingsView()

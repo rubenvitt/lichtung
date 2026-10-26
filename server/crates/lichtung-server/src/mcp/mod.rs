@@ -24,7 +24,6 @@
 //! by the snapshot test `tests/snapshots/mcp_tools.json`.
 
 pub mod args;
-pub mod free;
 pub mod schema;
 pub mod time;
 pub mod tools;
@@ -70,7 +69,10 @@ Terminanfragen. \
 Schreiben: create_event braucht immer calendar_id, es gibt keinen Standardkalender. Vorher mit \
 list_calendars einen Kalender mit mcp_writable = true wählen; im Zweifel den Nutzer fragen. \
 Kalender mit mcp_writable = false (z. B. der Arbeitskalender) sind für Claude gesperrt, auch für \
-respond_to_invitation; freigeben kann das nur der Nutzer in der App. \
+respond_to_invitation und create_opening_link; freigeben kann das nur der Nutzer in der App. \
+Buchungslinks: create_opening_link legt einen Einmal-Link an (Dauer, Zielkalender mit \
+mcp_writable und can_invite, optional konkrete Vorschläge, die als Platzhalter im Kalender \
+reserviert werden) und liefert die url zum Weitergeben. \
 Zeitangaben: immer RFC 3339 mit Offset (2026-11-03T14:00:00+01:00 oder …Z), ganztägige Termine \
 als Datum JJJJ-MM-TT; bei ganztägigen Terminen ist end der letzte Tag (einschließlich). \
 time_zone (IANA, z. B. Europe/Berlin) legt bei Abfragen die Zeitzone der Ausgabe fest und beim \

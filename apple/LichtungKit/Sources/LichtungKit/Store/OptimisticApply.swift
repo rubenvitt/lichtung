@@ -73,12 +73,14 @@ enum OptimisticApply {
             let s = ParticipationStatus(response: status)
             if let occ = occurrence, e.isRecurring {
                 var details = overrideDetails(of: e, at: occ, tz: tz)
-                details.selfStatus = s
+                details.answer(s)
                 setOverride(&e, at: occ, details: details)
             } else {
-                e.details.selfStatus = s
-                for i in e.details.attendees.indices where e.details.attendees[i].isSelf == true {
-                    e.details.attendees[i].status = s
+                e.details.answer(s)
+                // Wie der Server: `occurrence: null` beantwortet alle Vorkommen,
+                // in denen ich eingeladen bin, auch geänderte (LIC-30).
+                for i in e.overrides.indices where e.overrides[i].details.selfStatus != nil {
+                    e.overrides[i].details.answer(s)
                 }
             }
             events[eventId] = e
@@ -186,6 +188,14 @@ extension ParticipationStatus {
 }
 
 extension EventDetails {
+    /// Eigene Antwort setzen: `self_status` und der eigene Eintrag unter den Teilnehmenden.
+    mutating func answer(_ s: ParticipationStatus) {
+        selfStatus = s
+        for i in attendees.indices where attendees[i].isSelf == true {
+            attendees[i].status = s
+        }
+    }
+
     init(input: EventInput) {
         self.init(
             title: input.title, location: input.location, notes: input.notes, url: input.url,

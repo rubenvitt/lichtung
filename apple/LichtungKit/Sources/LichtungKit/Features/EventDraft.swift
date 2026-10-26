@@ -19,8 +19,9 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
         case rule(RecurrenceRule)
         /// Regel vom Anbieter, die der Editor nicht abbildet (z. B. „jeden
         /// zweiten Dienstag im Monat“). Bleibt unverändert, solange sie nicht
-        /// durch eine andere ersetzt wird.
-        case custom(String)
+        /// durch eine andere ersetzt wird. `nil`: Serie nur aus einzelnen
+        /// Daten (RDATEs), ohne Regel.
+        case custom(String?)
     }
 
     /// Auswahl „Wiederholen“ in der Oberfläche.
@@ -183,7 +184,7 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
         let repetition: Repetition
         if let r = event?.recurrence {
             let seriesZone = event?.details.start.timeZoneID.flatMap(TimeZone.init(identifier:)) ?? tz
-            if r.incomplete != true, let rule = RecurrenceRule(rrule: r.rrule, timeZone: seriesZone) {
+            if r.incomplete != true, let text = r.rrule, let rule = RecurrenceRule(rrule: text, timeZone: seriesZone) {
                 repetition = .rule(rule)
             } else {
                 repetition = .custom(r.rrule)
@@ -622,11 +623,12 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
             }
         }
         if alarms != before.alarms { c.alarms = alarmValues }
+        let base = original.recurrence.map { seriesDates($0, scope: scope, newStart: c.start) }
         if repetition != before.repetition {
-            c.recurrence = recurrenceValue(base: original.recurrence).map { .set($0) } ?? .clear
+            c.recurrence = recurrenceValue(base: base).map { .set($0) } ?? .clear
         } else if isAllDay != before.isAllDay, scope != .this, case .rule = repetition {
             // `UNTIL` muss dieselbe Form haben wie der Beginn (Tag oder Zeitpunkt).
-            c.recurrence = recurrenceValue(base: original.recurrence).map { .set($0) }
+            c.recurrence = recurrenceValue(base: base).map { .set($0) }
         }
         if calendarId != before.calendarId { c.calendarId = calendarId }
         guard !c.isEmpty else { return nil }
@@ -647,8 +649,37 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
         fixedAlarms.map { .at($0) } + alarms.map { .minutesBefore($0) }
     }
 
-    /// Wiederholung für die Mutation. RDATEs und EXDATEs der Serie bleiben,
-    /// weil der Server sie mit der neuen Regel überschreibt.
+    /// RDATEs und EXDATEs der Serie, wie sie mit einer Regel mitgeschickt
+    /// werden (LIC-48). Der Server ersetzt seine eigenen durch diese Liste,
+    /// auch wenn er sie wegen einer Zeitänderung gerade verschoben hat. Darum
+    /// wandern sie hier genauso mit (`newStart` = geschickter Beginn):
+    /// - „Alle“: um den Abstand vom alten zum neuen Serienbeginn.
+    /// - „Dieser und folgende“: Die neue Serie beginnt beim Vorkommen und
+    ///   bekommt nur die Daten ab dort, verschoben wie das Vorkommen.
+    private func seriesDates(_ r: Recurrence, scope: EditScope, newStart: DateValue?) -> Recurrence {
+        guard let original else { return r }
+        switch scope {
+        case .this:
+            return r
+        case .all:
+            guard let newStart, let old = original.seriesStart else { return r }
+            return r.movingDates(from: old, to: newStart, deviceTimeZone: deviceTimeZone)
+        case .thisAndFollowing:
+            guard let split = original.recurrenceId else { return r }
+            let kept = r.keepingDates(from: split, deviceTimeZone: deviceTimeZone)
+            guard let newStart else { return kept }
+            // Neuer Beginn der neuen Serie: das Vorkommen (in der Form der
+            // Serie), um so viel verschoben, wie es selbst gerade wandert.
+            let movedSplit = SeriesShift.shift(
+                split, from: Self.startValue(original.fields), to: newStart, deviceTimeZone: deviceTimeZone
+            )
+            return kept.movingDates(from: split, to: movedSplit, deviceTimeZone: deviceTimeZone)
+        }
+    }
+
+    /// Wiederholung für die Mutation. RDATEs und EXDATEs der Serie kommen aus
+    /// `base` (siehe `seriesDates`), weil der Server sie mit der neuen Regel
+    /// überschreibt.
     private func recurrenceValue(base: Recurrence?) -> Recurrence? {
         switch repetition {
         case .none:

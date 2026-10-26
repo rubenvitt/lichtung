@@ -36,8 +36,14 @@ enum OptimisticApply {
                 events[eventId] = e
                 events[tail.id] = tail
             default:
+                let oldStart = e.details.start
                 e.details.apply(changes)
-                if let r = changes.recurrence { e.recurrence = r.value }
+                if let r = changes.recurrence {
+                    e.recurrence = r.value
+                } else if changes.start != nil {
+                    // Wie der Server: RDATEs und EXDATEs wandern mit der Serie (LIC-48).
+                    e.recurrence = e.recurrence?.movingDates(from: oldStart, to: e.details.start, deviceTimeZone: tz)
+                }
                 if let cal = changes.calendarId { e.calendarId = cal }
                 events[eventId] = e
             }
@@ -109,7 +115,7 @@ enum OptimisticApply {
     static func truncate(_ e: inout Event, before occ: DateValue, tz: TimeZone) {
         guard var r = e.recurrence else { return }
         let cut = occ.instant(deviceTimeZone: tz)
-        r.rrule = RRuleText.until(r.rrule, before: occ, deviceTimeZone: tz)
+        r.rrule = r.rrule.map { RRuleText.until($0, before: occ, deviceTimeZone: tz) }
         r.rdates.removeAll { $0.instant(deviceTimeZone: tz) >= cut }
         e.recurrence = r
         e.overrides.removeAll { $0.recurrenceId.instant(deviceTimeZone: tz) >= cut }

@@ -156,14 +156,15 @@ public enum Availability: String, Codable, Sendable {
 }
 
 public struct Recurrence: Codable, Hashable, Sendable {
-    /// RRULE-Wert ohne `RRULE:`-Präfix.
-    public var rrule: String
+    /// RRULE-Wert ohne `RRULE:`-Präfix. `nil` bei Serien nur aus RDATEs und
+    /// bei Objekten ohne Master (Vertrag §2).
+    public var rrule: String?
     public var rdates: [DateValue]
     public var exdates: [DateValue]
     /// Das Original hat mehrere RRULEs; nur die erste ist hier.
     public var incomplete: Bool?
 
-    public init(rrule: String, rdates: [DateValue] = [], exdates: [DateValue] = [], incomplete: Bool? = nil) {
+    public init(rrule: String?, rdates: [DateValue] = [], exdates: [DateValue] = [], incomplete: Bool? = nil) {
         self.rrule = rrule
         self.rdates = rdates
         self.exdates = exdates
@@ -172,7 +173,7 @@ public struct Recurrence: Codable, Hashable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        rrule = try c.decode(String.self, forKey: .rrule)
+        rrule = try c.decodeIfPresent(String.self, forKey: .rrule)
         rdates = try c.decodeIfPresent([DateValue].self, forKey: .rdates) ?? []
         exdates = try c.decodeIfPresent([DateValue].self, forKey: .exdates) ?? []
         incomplete = try c.decodeIfPresent(Bool.self, forKey: .incomplete)

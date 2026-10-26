@@ -261,6 +261,7 @@ async fn list_calendars(app: &App) -> ToolResult {
                 "hidden": c.hidden,
                 "openings_busy": c.openings_busy,
                 "all_day_blocks": c.all_day_blocks,
+                "is_work": c.is_work,
             })
         })
         .collect();

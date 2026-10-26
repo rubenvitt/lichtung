@@ -193,6 +193,28 @@ public struct DeviceLoginFlow: Sendable {
         clients?.remember(client, for: server)
     }
 
+    /// Abgleich nach `GET /api/me` (LIC-55): Hat ein anderes Gerät dieses
+    /// umbenannt, nennt der Server den neuen Namen, und der gemerkte folgt
+    /// ihm. Liefert den neuen Namen, `nil`, wenn sich nichts ändert.
+    @discardableResult
+    public func adoptDeviceName(from me: ServerInfo, for server: URL) -> String? {
+        guard let remembered = clients?.client(for: server),
+              let name = Self.deviceNameUpdate(remembered: remembered.name, me: me)
+        else { return nil }
+        rememberDeviceName(name, for: server)
+        return name
+    }
+
+    /// Entscheidung des Abgleichs: der Name des Geräts laut Server, wenn er
+    /// gesetzt ist und vom gemerkten abweicht. Ohne Geräte-Token (`device`
+    /// fehlt) oder bei leerem Namen bleibt der gemerkte.
+    public static func deviceNameUpdate(remembered: String, me: ServerInfo) -> String? {
+        guard let name = me.device?.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty, name != remembered
+        else { return nil }
+        return name
+    }
+
     private static func cleanName(_ deviceName: String) -> String {
         let name = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? "Lichtung" : name

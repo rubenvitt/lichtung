@@ -583,6 +583,7 @@ impl App {
                         &conn,
                         now,
                         now - crate::oauth::STALE_CLIENT_MS,
+                        now - crate::oauth::STALE_APP_CLIENT_MS,
                         now - crate::oauth::UNUSED_CLIENT_MS,
                     )?,
                     crate::sync_api::purge(&mut conn, now)?,

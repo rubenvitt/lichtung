@@ -47,6 +47,7 @@ final class AppSession {
     private let defaults = UserDefaults.standard
     @ObservationIgnored private var syncAPI: SyncAPI?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
+    @ObservationIgnored private var deviceNameTask: Task<Void, Never>?
     @ObservationIgnored private var isActive = false
 
     private enum Key {
@@ -118,6 +119,20 @@ final class AppSession {
     /// zurücksetzen.
     private func prefillDeviceName() {
         if let name = flow.rememberedDeviceName(serverInput: serverInput) { deviceName = name }
+    }
+
+    /// Ein anderes Gerät kann dieses umbenannt haben (LIC-55): `GET /api/me`
+    /// nennt den Namen beim Server, der gemerkte folgt ihm, damit die
+    /// Anmeldemaske nach dem nächsten Abmelden den aktuellen zeigt.
+    private func refreshDeviceName() {
+        guard stage == .server, !needsSignIn, let management, let serverURL else { return }
+        let flow = flow
+        deviceNameTask?.cancel()
+        deviceNameTask = Task { [weak self] in
+            // Ohne Verbindung bleibt der gemerkte Name; `401` meldet der Token-Provider.
+            guard let me = try? await management.me(), !Task.isCancelled else { return }
+            if let name = flow.adoptDeviceName(from: me, for: serverURL) { self?.deviceName = name }
+        }
     }
 
     /// Dieses Gerät wurde in den Einstellungen umbenannt (LIC-46).
@@ -263,6 +278,7 @@ final class AppSession {
 
     private func startLive() {
         guard stage == .server, !needsSignIn, liveTask == nil, let api = syncAPI else { return }
+        refreshDeviceName()
         let engine = model.engine
         liveTask = Task { [weak self] in
             let stop = await LiveSync.run(engine: engine, connect: { SyncEventStream(api: api).cursors() })
@@ -279,5 +295,7 @@ final class AppSession {
     private func stopLive() {
         liveTask?.cancel()
         liveTask = nil
+        deviceNameTask?.cancel()
+        deviceNameTask = nil
     }
 }

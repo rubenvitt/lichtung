@@ -70,6 +70,12 @@ struct EventDetailView: View {
                         Task { await model.duplicate(occurrence) }
                         dismiss()
                     }
+                    // Einfügen danach am Tag: ⌘V bzw. Kontextmenü (Mac),
+                    // Toolbar oder Monatstag (iPhone, LIC-50).
+                    Button("Kopieren") {
+                        Pasteboard.write(model.copy(occurrence))
+                        dismiss()
+                    }
                     // Wie ⌫ und Kontextmenü (LIC-50): Einzeltermine sofort
                     // (Rückgängig geht), bei Serien erst nach der Frage.
                     Button(deleteTitle, role: .destructive) {

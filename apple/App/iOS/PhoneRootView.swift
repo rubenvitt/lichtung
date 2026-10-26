@@ -29,6 +29,8 @@ struct PhoneRootView: View {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Heute") { model.selectedDay = model.today }
                     }
+                    // Erst nach „Kopieren“ zu sehen (LIC-50).
+                    ToolbarItem(placement: .topBarLeading) { pasteMenu }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Picker("Ansicht", selection: $mode) {
@@ -127,6 +129,30 @@ extension PhoneRootView {
         }
         .disabled(!model.undoHistory.canUndo && !model.undoHistory.canRedo)
         .accessibilityLabel(model.undoHistory.undoTitle)
+    }
+
+    /// Nach „Kopieren“ (Kontextmenü, Detail): Antippen fügt die Kopie am
+    /// ausgewählten Tag ein, lange drücken bietet auch „Kopie verwerfen“.
+    /// Die Logik kommt aus dem Kern (`EventClipboard`, LIC-50).
+    @ViewBuilder
+    var pasteMenu: some View {
+        if let clip = model.clipboard {
+            let title: String = clip.pasteTitle(on: model.selectedDay)
+            Menu {
+                Button(title, systemImage: "doc.on.clipboard") { paste() }
+                Button("Kopie verwerfen", systemImage: "xmark", role: .destructive) { model.clipboard = nil }
+            } label: {
+                Image(systemName: "doc.on.clipboard")
+            } primaryAction: {
+                paste()
+            }
+            .accessibilityLabel(title)
+        }
+    }
+
+    func paste() {
+        let text = Pasteboard.string
+        Task { await model.paste(pasteboardText: text) }
     }
 
     /// Nach dem Schütteln: „Rückgängig: Termin löschen“, sonst Wiederholen.

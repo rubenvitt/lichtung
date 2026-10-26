@@ -32,7 +32,7 @@ final class AppModel {
     var calendarFocusRequests = 0
     /// Serientermin, für den die Frage nach dem Geltungsbereich beim Löschen offen ist.
     var pendingDelete: Occurrence?
-    /// Zuletzt kopierter Termin (⌘C).
+    /// Zuletzt kopierter Termin (⌘C, Kontextmenü „Kopieren“).
     var clipboard: EventClipboard?
 
     init(engine: SyncEngine, timeZone: TimeZone = .current) {
@@ -420,10 +420,15 @@ extension AppModel {
     }
 
     /// Einfügen am Tag `day` (Standard: ausgewählter Tag), wenn die
-    /// Zwischenablage noch die Kopie hält (`pasteboardText`).
+    /// Zwischenablage noch die Kopie hält (`pasteboardText`). Hält sie etwas
+    /// anderes, gilt die Kopie nicht mehr; „Einfügen“ verschwindet (LIC-50).
     func paste(on day: LocalDate? = nil, pasteboardText: String?) async {
-        guard let clip = clipboard, clip.matches(pasteboardText),
-              let calendarId = OccurrenceActions.duplicateCalendar(for: clip.occurrence, calendars: state.calendars, writable: writableCalendars)
+        guard let clip = clipboard else { return }
+        guard clip.matches(pasteboardText) else {
+            clipboard = nil
+            return
+        }
+        guard let calendarId = OccurrenceActions.duplicateCalendar(for: clip.occurrence, calendars: state.calendars, writable: writableCalendars)
         else { return }
         let intent = clip.intent(pastingOn: day ?? selectedDay, calendarId: calendarId, calendar: calendar)
         await engine.perform(intent, label: "Termin einfügen")

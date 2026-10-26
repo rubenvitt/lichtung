@@ -7,6 +7,7 @@ import SwiftUI
 /// iPhone: Liste (A) als Start, dazu Raster (B) und Monat (D) (Spec §5).
 struct PhoneRootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
 
     enum Mode: String, CaseIterable, Identifiable {
         case list = "Liste", grid = "Raster", month = "Monat"
@@ -66,6 +67,10 @@ struct PhoneRootView: View {
             EventDetailView(occurrence: occ)
         }
         .onShake { if model.undoHistory.canUndo || model.undoHistory.canRedo { showsUndoAlert = true } }
+        // Wer in einer anderen App etwas kopiert hat, sieht „Einfügen“ nicht mehr (LIC-54).
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { model.expireClipboard(pasteboardText: Pasteboard.string) }
+        }
         .alert(undoAlertTitle, isPresented: $showsUndoAlert) { undoAlertActions }
     }
 
@@ -133,7 +138,9 @@ extension PhoneRootView {
 
     /// Nach „Kopieren“ (Kontextmenü, Detail): Antippen fügt die Kopie am
     /// ausgewählten Tag ein, lange drücken bietet auch „Kopie verwerfen“.
-    /// Die Logik kommt aus dem Kern (`EventClipboard`, LIC-50).
+    /// Die Logik kommt aus dem Kern (`EventClipboard`, LIC-50). Hat sich die
+    /// Zwischenablage inzwischen geändert, verfällt die Kopie beim
+    /// Aktivwerden der App (`PasteboardMark`, LIC-54).
     @ViewBuilder
     var pasteMenu: some View {
         if let clip = model.clipboard {

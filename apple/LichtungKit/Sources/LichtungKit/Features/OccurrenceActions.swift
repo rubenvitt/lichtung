@@ -57,6 +57,26 @@ public enum OccurrenceActions {
     }
 }
 
+/// Stand der Zwischenablage nach dem eigenen Schreiben (iPhone, LIC-50,
+/// LIC-54). iOS zählt jede Änderung (`UIPasteboard.changeCount`, auch aus
+/// anderen Apps); den Inhalt zu lesen, würde nach der Erlaubnis fragen.
+public struct PasteboardMark: Hashable, Sendable {
+    public var text: String
+    /// `changeCount` direkt nach dem Schreiben.
+    public var changeCount: Int
+
+    public init(text: String, changeCount: Int) {
+        self.text = text
+        self.changeCount = changeCount
+    }
+
+    /// Der geschriebene Text, solange seitdem niemand die Zwischenablage
+    /// geändert hat (`current` gleich), sonst `nil`.
+    public func text(atChangeCount current: Int) -> String? {
+        current == changeCount ? text : nil
+    }
+}
+
 /// Kopieren und Einfügen eines Termins (⌘C/⌘V am Mac, LIC-24; iPhone über
 /// Kontextmenü und Toolbar, LIC-50).
 ///

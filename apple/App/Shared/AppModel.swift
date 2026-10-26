@@ -464,4 +464,11 @@ extension AppModel {
         let intent = clip.intent(pastingOn: day ?? selectedDay, calendarId: calendarId, calendar: calendar)
         await engine.perform(intent, label: "Termin einfügen")
     }
+
+    /// Kopie verwerfen, wenn die Zwischenablage inzwischen etwas anderes
+    /// hält, z. B. beim Aktivwerden der App (iPhone, LIC-54). So zeigt die
+    /// Toolbar „Einfügen“ nur, solange es noch geht.
+    func expireClipboard(pasteboardText: String?) {
+        if let clip = clipboard, !clip.matches(pasteboardText) { clipboard = nil }
+    }
 }

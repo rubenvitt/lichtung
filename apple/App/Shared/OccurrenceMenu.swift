@@ -5,6 +5,8 @@ import LichtungKit
 import SwiftUI
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
 
 /// Kontextmenü eines Termins (Mac: Rechtsklick, iPhone: lange drücken).
@@ -58,12 +60,12 @@ struct OccurrenceMenuItems: View {
             .disabled(occ == nil)
         Button("Auf nächste Woche duplizieren") { duplicate(occ, days: 7) }
             .disabled(occ == nil)
-        #if os(macOS)
         if !showsShortcuts, let occ {
-            // In der Menüleiste kopiert „Bearbeiten > Kopieren“ (⌘C, `onCopyCommand`).
+            // Mac: In der Menüleiste kopiert „Bearbeiten > Kopieren“ (⌘C,
+            // `onCopyCommand`). iPhone: Einfügen über die Toolbar oder
+            // langes Drücken auf einen Monatstag (LIC-50).
             Button("Kopieren") { Pasteboard.write(model.copy(occ)) }
         }
-        #endif
         calendarMenu(occ)
         Divider()
         Button(deleteTitle(occ), role: .destructive) { if let occ { model.requestDelete(occ) } }
@@ -136,15 +138,34 @@ struct OccurrenceDeleteDialog: ViewModifier {
 
     func body(content: Content) -> some View {
         @Bindable var bindable = model
+        content.modifier(SeriesDeleteDialog(
+            model: model,
+            isPresented: $bindable.isConfirmingDelete,
+            occurrence: model.pendingDelete,
+            onDelete: {}
+        ))
+    }
+}
+
+/// Die Frage selbst: ein Knopf je Geltungsbereich (`OccurrenceActions.deleteScopes`).
+/// `onDelete` läuft nach der Wahl, z. B. schließt das Detail-Blatt (LIC-50).
+struct SeriesDeleteDialog: ViewModifier {
+    let model: AppModel
+    @Binding var isPresented: Bool
+    let occurrence: Occurrence?
+    let onDelete: @MainActor () -> Void
+
+    func body(content: Content) -> some View {
         content.confirmationDialog(
             "Serientermin löschen",
-            isPresented: $bindable.isConfirmingDelete,
+            isPresented: $isPresented,
             titleVisibility: .visible,
-            presenting: model.pendingDelete
+            presenting: occurrence
         ) { occ in
             ForEach(OccurrenceActions.deleteScopes(occ), id: \.self) { scope in
                 Button(scope.editorLabel, role: .destructive) {
                     Task { await model.delete(occ, scope: scope) }
+                    onDelete()
                 }
             }
             Button("Abbrechen", role: .cancel) {}
@@ -160,9 +181,9 @@ extension View {
     }
 }
 
-#if os(macOS)
-/// Kontextmenü auf leerer Fläche im Raster oder an einem Monatstag (Mac).
-/// Am iPhone ist langes Drücken im Raster das Anlegen per Ziehen.
+/// Kontextmenü auf leerer Fläche im Raster (Mac) oder an einem Monatstag.
+/// Am iPhone ist langes Drücken im Raster das Anlegen per Ziehen, dort gibt
+/// es das Menü nur am Monatstag (LIC-50).
 struct DaySlotMenu: View {
     @Environment(AppModel.self) private var model
     let day: LocalDate
@@ -183,6 +204,7 @@ struct DaySlotMenu: View {
 /// Zwischenablage des Systems (nur Text).
 @MainActor
 enum Pasteboard {
+    #if os(macOS)
     static var string: String? {
         NSPasteboard.general.string(forType: .string)
     }
@@ -191,19 +213,34 @@ enum Pasteboard {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
-}
-#endif
+    #else
+    /// Zuletzt hier geschriebener Text und der Stand der Zwischenablage danach.
+    private static var written: (text: String, changeCount: Int)?
 
-/// Kontextmenü „Neuer Termin hier“ an einem Monatstag, nur am Mac.
+    /// Inhalt der Zwischenablage, solange er noch von Lichtung stammt, sonst
+    /// `nil` (LIC-50). Liest den Inhalt nicht, sondern vergleicht nur
+    /// `changeCount`: So fragt iOS nicht nach der Erlaubnis zum Einfügen, und
+    /// `EventClipboard.matches` wirkt wie am Mac (wer danach etwas anderes
+    /// kopiert, fügt keinen alten Termin ein).
+    static var string: String? {
+        guard let written = Self.written, written.changeCount == UIPasteboard.general.changeCount else { return nil }
+        return written.text
+    }
+
+    static func write(_ text: String) {
+        UIPasteboard.general.string = text
+        Self.written = (text: text, changeCount: UIPasteboard.general.changeCount)
+    }
+    #endif
+}
+
+/// Kontextmenü „Neuer Termin hier“ und „Einfügen“ an einem Monatstag; am
+/// iPhone mit langem Drücken (LIC-50).
 struct DaySlotContextMenu: ViewModifier {
     let day: LocalDate
 
     func body(content: Content) -> some View {
-        #if os(macOS)
         content.contextMenu { DaySlotMenu(day: day) }
-        #else
-        content
-        #endif
     }
 }
 

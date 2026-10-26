@@ -11,9 +11,9 @@ import UniformTypeIdentifiers
 ///
 /// Tastatur (LIC-24): Das Kalenderfeld rechts nimmt den Fokus, sobald ein
 /// Termin markiert oder leere Fläche angeklickt wird. Dann gelten ↑/↓ und
-/// Tab/⇧Tab (Markierung wandern), ←/→ (blättern), Return/Leertaste (öffnen),
-/// ⌫ (löschen), Esc (Markierung weg), ⌘C/⌘V. In Textfeldern bleiben die
-/// Tasten beim Text. Belegung in `CalendarKeyCommand` (LichtungKit).
+/// Tab/⇧Tab (Markierung wandern), ←/→ (Tag für Tag, LIC-50), Return/Leertaste
+/// (öffnen), ⌫ (löschen), Esc (Markierung weg), ⌘C/⌘V. In Textfeldern bleiben
+/// die Tasten beim Text. Belegung in `CalendarKeyCommand` (LichtungKit).
 struct MacRootView: View {
     @Environment(AppModel.self) private var model
 
@@ -36,15 +36,16 @@ struct MacRootView: View {
             }
             .navigationTitle(title)
             .toolbar {
+                // ⌘← und ⌘→ liegen im Menü „Darstellung“ (LIC-50): Als Kürzel
+                // der Toolbar fingen sie in Textfeldern den Sprung an
+                // Zeilenanfang und -ende ab.
                 ToolbarItemGroup(placement: .navigation) {
                     Button { model.step(-1) } label: { Image(systemName: "chevron.left") }
-                        .keyboardShortcut(.leftArrow, modifiers: .command)
-                        .help("Zurück (⌘←)")
+                        .help("\(model.viewMode.stepTitle(forward: false)) (⌘←)")
                     Button("Heute") { model.selectedDay = model.today }
                         .keyboardShortcut("t", modifiers: .command)
                     Button { model.step(1) } label: { Image(systemName: "chevron.right") }
-                        .keyboardShortcut(.rightArrow, modifiers: .command)
-                        .help("Weiter (⌘→)")
+                        .help("\(model.viewMode.stepTitle(forward: true)) (⌘→)")
                 }
                 ToolbarItem(placement: .principal) {
                     Picker("Ansicht", selection: $model.viewMode) {
@@ -102,6 +103,8 @@ struct MacRootView: View {
             .focusable(interactions: .edit)
             .focusEffectDisabled()
             .focused($calendarFocused)
+            // Für die Menüleiste: Fokus im Kalenderfeld des vordersten Fensters (LIC-50).
+            .focusedValue(\.calendarKeyboardFocus, true)
             .onKeyPress(phases: [.down, .repeat]) { press in
                 handleKey(press)
             }
@@ -220,9 +223,26 @@ struct YearView: View {
     }
 }
 
+/// Kalenderfeld mit Tastaturfokus im vordersten Fenster (LIC-50). Fehlt im
+/// Einstellungsfenster, in Blättern und mit Fokus in einem Textfeld.
+struct CalendarKeyboardFocusKey: FocusedValueKey {
+    typealias Value = Bool
+}
+
+extension FocusedValues {
+    var calendarKeyboardFocus: Bool? {
+        get { self[CalendarKeyboardFocusKey.self] }
+        set { self[CalendarKeyboardFocusKey.self] = newValue }
+    }
+}
+
 /// Menüs und Tastenkürzel (LIC-24).
 struct LichtungCommands: Commands {
     let model: AppModel
+    /// Kürzel, die auch Textfelder kennen (⌘←, ⌘→, ⌘⌫ …), gelten nur mit
+    /// Fokus im Kalenderfeld; sonst sind die Menüpunkte aus und die Taste
+    /// bleibt beim Text (LIC-50).
+    @FocusedValue(\.calendarKeyboardFocus) private var calendarKeyboardFocus: Bool?
 
     var body: some Commands {
         // MARK: Editor (LIC-20)
@@ -247,19 +267,23 @@ struct LichtungCommands: Commands {
                 .keyboardShortcut("r", modifiers: .command)
         }
         // Ansicht wechseln: ⌘1 Tag, ⌘2 Woche, ⌘3 Monat, ⌘4 Jahr (Menü „Darstellung“).
+        // Dazu ⌘← und ⌘→ (LIC-50).
         CommandGroup(before: .toolbar) {
-            ViewModeMenuItems(model: model)
+            ViewModeMenuItems(model: model, calendarFocused: calendarKeyboardFocus == true)
         }
         // Aktionen am markierten Termin; ohne Markierung ausgegraut.
         CommandMenu("Termin") {
-            EventMenuBarItems(model: model)
+            EventMenuBarItems(model: model, calendarFocused: calendarKeyboardFocus == true)
         }
     }
 }
 
-/// Einträge für ⌘1–⌘4. Als eigene Ansicht, damit sie dem Modell folgen.
+/// Einträge für ⌘1–⌘4 sowie ⌘← und ⌘→ (LIC-50). Als eigene Ansicht, damit
+/// sie dem Modell folgen.
 struct ViewModeMenuItems: View {
     let model: AppModel
+    /// Fokus im Kalenderfeld des vordersten Fensters (`calendarKeyboardFocus`).
+    let calendarFocused: Bool
 
     var body: some View {
         ForEach(CalendarViewMode.allCases) { mode in
@@ -267,16 +291,28 @@ struct ViewModeMenuItems: View {
                 .keyboardShortcut(KeyEquivalent(mode.shortcutDigit), modifiers: .command)
         }
         Divider()
+        // Ausgegraut, solange ein Textfeld (Schnelleingabe, Suche) oder ein
+        // Blatt den Fokus hat: Dann springt ⌘←/⌘→ im Text an Zeilenanfang und -ende.
+        let active = calendarFocused && model.calendarCommandsEnabled
+        Button(model.viewMode.stepTitle(forward: false)) { model.step(-1) }
+            .keyboardShortcut(.leftArrow, modifiers: .command)
+            .disabled(!active)
+        Button(model.viewMode.stepTitle(forward: true)) { model.step(1) }
+            .keyboardShortcut(.rightArrow, modifiers: .command)
+            .disabled(!active)
+        Divider()
     }
 }
 
 /// Menü „Termin“: dieselben Einträge wie das Kontextmenü, mit Tastenkürzeln.
-/// Ziel ist die Markierung, solange das Kalenderfeld den Fokus hat.
+/// Ziel ist die Markierung, solange das Kalenderfeld im vordersten Fenster
+/// den Fokus hat (im Einstellungsfenster löscht ⌘⌫ also weiter Text).
 struct EventMenuBarItems: View {
     let model: AppModel
+    let calendarFocused: Bool
 
     var body: some View {
-        OccurrenceMenuItems(model: model, occurrence: model.commandTarget, showsShortcuts: true)
+        OccurrenceMenuItems(model: model, occurrence: calendarFocused ? model.commandTarget : nil, showsShortcuts: true)
         Divider()
         Button("Nächster Termin") { model.perform(.highlightNext) }
         Button("Vorheriger Termin") { model.perform(.highlightPrevious) }

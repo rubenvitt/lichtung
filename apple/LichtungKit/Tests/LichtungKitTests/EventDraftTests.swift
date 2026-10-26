@@ -618,6 +618,61 @@ struct EventDraftSeriesTests {
         #expect(d.canSave)
     }
 
+    /// Vorkommen eines Termins im ganzen Jahr 2026/27.
+    func yearOccurrences(_ e: Event) -> [Occurrence] {
+        let cal = Calendar.lichtung(timeZone: D.tz)
+        let window = DateInterval(start: D.day(1).startDate(in: cal), end: D.day(1, month: 11).adding(months: 12).startDate(in: cal))
+        return SeriesExpander(deviceTimeZone: D.tz).occurrences(of: e, in: window)
+    }
+
+    @Test func thisAndFollowingSendsRemainingCount() async {
+        // LIC-52: Der Server nimmt das mitgeschickte COUNT wörtlich. Am 4. von
+        // 10 Vorkommen geteilt, bekommt die neue Serie die übrigen 7.
+        let e = D.series("FREQ=WEEKLY;BYDAY=MO;COUNT=10")
+        let occ = D.occurrence(of: e)[3]
+        #expect(occ.recurrenceId == F.at(23, 9))
+        var d = D.draft(occ, e)
+        #expect(d.repeatCount == 10, "Der Editor zeigt die ganze Serie")
+        d.repeatInterval = 2
+        let c = D.changes(d.saveIntent(scope: .thisAndFollowing))
+        #expect(c?.recurrence == .set(Recurrence(rrule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;COUNT=7")))
+        // „Alle“ meint weiter die ganze Serie.
+        #expect(D.changes(d.saveIntent(scope: .all))?.recurrence == .set(Recurrence(rrule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;COUNT=10")))
+
+        var s = SyncState()
+        s.events["ev_s"] = e
+        let engine = EngineFixtures.engine(ScriptedTransport([]), store: InMemoryCacheStore(s))
+        await engine.perform(d.saveIntent(scope: .thisAndFollowing)!, label: d.saveLabel)
+        let v = await engine.visibleEvents()
+        #expect(yearOccurrences(v["ev_s"]!).count == 3)
+        let tail = v.values.first { $0.id.hasPrefix(SyncState.placeholderPrefix) }
+        #expect(tail.map(yearOccurrences)?.count == 7)
+    }
+
+    @Test func thisAndFollowingKeepsCountChosenForNewEnd() {
+        // Hatte die Serie kein COUNT, gilt die gewählte Anzahl ab hier.
+        var (_, d) = secondMonday()
+        d.repeatEnd = .count
+        d.repeatCount = 4
+        #expect(D.changes(d.saveIntent(scope: .thisAndFollowing))?.recurrence == .set(Recurrence(rrule: "FREQ=WEEKLY;BYDAY=MO;COUNT=4")))
+    }
+
+    @Test func timeChangeMovesUntilInPreview() async {
+        // LIC-52: Letztes Vorkommen Mo 23.11. 9:00 (= UNTIL). Wandert die
+        // Serie auf 11 Uhr, muss UNTIL mit, sonst fehlt der 23.11.
+        let e = D.series("FREQ=WEEKLY;BYDAY=MO;UNTIL=20261123T080000Z")
+        var (_, d) = secondMonday(e)
+        d.moveStart(to: D.time(9, 11))
+        var s = SyncState()
+        s.events["ev_s"] = e
+        let engine = EngineFixtures.engine(ScriptedTransport([]), store: InMemoryCacheStore(s))
+        await engine.perform(d.saveIntent(scope: .all)!, label: d.saveLabel)
+        let moved = await engine.visibleEvents()["ev_s"]!
+        #expect(moved.recurrence?.rrule == "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261123T100000Z")
+        let starts = yearOccurrences(moved).map(\.details.start)
+        #expect(starts == [F.at(2, 11), F.at(9, 11), F.at(16, 11), F.at(23, 11)])
+    }
+
     @Test func deleteScopes() {
         let (_, d) = secondMonday()
         #expect(d.deleteIntent(scope: .this) == .delete(eventId: "ev_s", scope: .this, occurrence: F.at(9, 9)))

@@ -637,10 +637,10 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
         if alarms != before.alarms { c.alarms = alarmValues }
         let base = original.recurrence.map { seriesDates($0, scope: scope, newStart: c.start) }
         if repetition != before.repetition {
-            c.recurrence = recurrenceValue(base: base).map { .set($0) } ?? .clear
+            c.recurrence = recurrenceValue(base: base, scope: scope).map { .set($0) } ?? .clear
         } else if isAllDay != before.isAllDay, scope != .this, case .rule = repetition {
             // `UNTIL` muss dieselbe Form haben wie der Beginn (Tag oder Zeitpunkt).
-            c.recurrence = recurrenceValue(base: base).map { .set($0) }
+            c.recurrence = recurrenceValue(base: base, scope: scope).map { .set($0) }
         }
         if calendarId != before.calendarId { c.calendarId = calendarId }
         guard !c.isEmpty else { return nil }
@@ -692,19 +692,35 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
     /// Wiederholung für die Mutation. RDATEs und EXDATEs der Serie kommen aus
     /// `base` (siehe `seriesDates`), weil der Server sie mit der neuen Regel
     /// überschreibt.
-    private func recurrenceValue(base: Recurrence?) -> Recurrence? {
+    ///
+    /// Dasselbe gilt für `COUNT` (LIC-52): Der Server rechnet beim Teilen die
+    /// Restzahl, nimmt dann aber die mitgeschickte Regel. Bei „dieser und
+    /// folgende“ geht darum die Restzahl mit, wenn die Serie schon ein `COUNT`
+    /// hatte; der Editor zeigt die Anzahl der ganzen Serie. Weglassen ginge
+    /// nicht, dann liefe die neue Serie endlos.
+    private func recurrenceValue(base: Recurrence?, scope: EditScope = .all) -> Recurrence? {
         switch repetition {
         case .none:
             return nil
         case let .custom(text):
             return base ?? Recurrence(rrule: text)
-        case let .rule(r):
+        case var .rule(r):
+            if scope == .thisAndFollowing, let count = r.count, let before = ruleInstancesBeforeSplit {
+                r.count = max(1, count - before)
+            }
             let zone = isAllDay ? deviceTimeZone : (timeZoneID.flatMap(TimeZone.init(identifier:)) ?? deviceTimeZone)
             return Recurrence(
                 rrule: r.rruleString(allDay: isAllDay, timeZone: zone),
                 rdates: base?.rdates ?? [], exdates: base?.exdates ?? []
             )
         }
+    }
+
+    /// Vorkommen der bisherigen Regel vor diesem, wenn sie ein `COUNT` hat.
+    private var ruleInstancesBeforeSplit: Int? {
+        guard let original, let split = original.recurrenceId, let start = original.seriesStart,
+              let text = original.recurrence?.rrule, RRule(text)?.count != nil else { return nil }
+        return SeriesExpander(deviceTimeZone: deviceTimeZone).ruleInstances(of: text, seriesStart: start, before: split)
     }
 
     /// Beginn und Ende der Serie, wenn ein Vorkommen vom Tag `occurrenceDay`

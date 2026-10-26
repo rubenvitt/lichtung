@@ -53,8 +53,9 @@ public enum TimeZoneDisplay {
     ///
     /// Eintrag `i` gehört zur `i`-ten echten Stunde ab Mitternacht (Heimatzone).
     /// An Umstellungstagen hat der Heimat-Tag 23 oder 25 Stunden, die Liste hat
-    /// dann ebenso viele Einträge. Das Raster muss seine Stundenzeilen genauso
-    /// zählen, sonst stehen die Beschriftungen ab der Umstellung versetzt.
+    /// dann ebenso viele Einträge. Das Raster hat immer 24 Wanduhr-Zeilen
+    /// (LIC-41); `TimelineLayout.secondaryHourLabels` ordnet die Einträge
+    /// diesen Zeilen zu.
     public static func hourLabels(for zone: TimeZone, home: TimeZone, day: LocalDate) -> [String] {
         let homeCal = Calendar.lichtung(timeZone: home)
         let zoneCal = Calendar.lichtung(timeZone: zone)

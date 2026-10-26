@@ -1,11 +1,163 @@
 import Foundation
 
+/// Senkrechte Achse des Zeitrasters (LIC-41): Wanduhr, für jeden Tag gleich.
+///
+/// Das Raster zeichnet immer 24 Stundenzeilen 00–23. Ein Zeitpunkt liegt
+/// dort, wo seine Wanduhrzeit steht: Minuten seit Mitternacht laut Uhr,
+/// 0…1440. Ein Termin um 12:00 steht damit auch an Umstellungstagen auf der
+/// Linie „12“, obwohl seit Mitternacht 11 oder 13 echte Stunden vergangen sind.
+///
+/// Umstellungstage:
+/// - **Vorstellen (Frühjahr, 28.3.2027 in Berlin):** 02:00–03:00 gibt es
+///   nicht. Das Band bleibt leer, kein Zeitpunkt liegt darin. Ein Termin
+///   01:30–03:30 (eine echte Stunde) reicht optisch über zwei Stunden, so wie
+///   die Uhr es anzeigt. Eine Lage im Band ergibt beim Zurückrechnen den
+///   ersten gültigen Zeitpunkt danach (03:00 Sommerzeit).
+/// - **Zurückstellen (Herbst, 25.10.2026 in Berlin):** 02:00–03:00 läuft
+///   zweimal ab. Beide Durchgänge teilen sich das eine Band 02–03: Die Achse
+///   läuft in diesen zwei echten Stunden halb so schnell (02:00 Sommerzeit
+///   liegt auf „02“, 02:00 Winterzeit auf „02:30“, 03:00 Winterzeit auf „03“).
+///   So bleibt die Achse streng monoton, Blöcke bekommen keine negative Höhe,
+///   und jede Lage im Band gehört zu genau einem Zeitpunkt (wichtig fürs
+///   Ziehen, `GridInteraction`). Außerhalb dieser zwei Stunden stimmt die
+///   Lage exakt mit der Wanduhr überein.
+///
+/// Andere Zonen und Umstellungszeiten (etwa um Mitternacht) folgen denselben
+/// Regeln; die Übergänge werden aus `secondsFromGMT` bestimmt.
+public struct WallClockAxis: Sendable {
+    public static let minutesPerDay = 1440.0
+
+    public let day: LocalDate
+    public let calendar: Calendar
+    public let dayStart: Date
+    public let dayEnd: Date
+
+    /// Mitternacht des Tages in Sekunden seit 1970, so gerechnet, als liefe
+    /// die Wanduhr in UTC. Wanduhr eines Zeitpunkts = `t + Abstand(t) − wallMidnight`.
+    private let wallMidnight: TimeInterval
+    private let transitions: [Transition]
+
+    /// Wechsel des Abstands zu UTC bei `at` von `before` auf `after` Sekunden.
+    private struct Transition: Sendable {
+        var at: Date
+        var before: Int
+        var after: Int
+        /// Länge der doppelten (> 0) bzw. fehlenden (< 0) Zeit in Sekunden.
+        var repeated: TimeInterval { TimeInterval(before - after) }
+    }
+
+    public init(day: LocalDate, calendar: Calendar) {
+        self.day = day
+        self.calendar = calendar
+        dayStart = day.startDate(in: calendar)
+        dayEnd = day.adding(days: 1).startDate(in: calendar)
+        wallMidnight = day.startDate(in: .gregorianUTC).timeIntervalSince1970
+        transitions = Self.transitions(
+            in: calendar.timeZone,
+            from: dayStart.addingTimeInterval(-6 * 3600), to: dayEnd.addingTimeInterval(6 * 3600)
+        )
+    }
+
+    /// Lage von `instant` in Minuten auf der Achse, begrenzt auf 0…1440.
+    public func minutes(at instant: Date) -> Double {
+        if instant <= dayStart { return 0 }
+        if instant >= dayEnd { return Self.minutesPerDay }
+        return min(Self.minutesPerDay, max(0, wallSeconds(at: instant) / 60))
+    }
+
+    /// Lage als Anteil der Spaltenhöhe, 0…1.
+    public func fraction(at instant: Date) -> Double {
+        minutes(at: instant) / Self.minutesPerDay
+    }
+
+    /// Ob es die Wanduhrzeit `m` (Minuten seit Mitternacht) an diesem Tag
+    /// gibt: nicht in der Lücke beim Vorstellen.
+    public func exists(minutes m: Double) -> Bool {
+        guard m >= 0, m <= Self.minutesPerDay else { return false }
+        let w = m * 60
+        for t in transitions where t.repeated < 0 {
+            let gapStart = wall(t.at, offset: t.before)
+            if w >= gapStart && w < gapStart - t.repeated { return false }
+        }
+        return w >= wallSeconds(at: dayStart)
+    }
+
+    /// Zeitpunkt zur Lage `m` in Minuten (Umkehrung von `minutes(at:)`). In
+    /// der Lücke beim Vorstellen der erste gültige Zeitpunkt danach.
+    public func instant(atMinutes m: Double) -> Date {
+        if m >= Self.minutesPerDay { return dayEnd }
+        let w = max(0, m) * 60
+        if w <= wallSeconds(at: dayStart) { return dayStart }
+        for t in transitions {
+            let atWall = wall(t.at, offset: t.before)
+            if t.repeated > 0 {
+                // Doppelte Zeit: halbe Geschwindigkeit über [at − g, at + g].
+                let bandStart = atWall - t.repeated
+                if w >= bandStart && w <= atWall {
+                    return t.at.addingTimeInterval(-t.repeated + 2 * (w - bandStart))
+                }
+            } else if t.repeated < 0, w >= atWall, w < atWall - t.repeated {
+                return t.at
+            }
+        }
+        let tz = calendar.timeZone
+        var offsets = [tz.secondsFromGMT(for: dayStart), tz.secondsFromGMT(for: dayEnd.addingTimeInterval(-1))]
+        offsets += transitions.flatMap { [$0.before, $0.after] }
+        for offset in offsets {
+            let t = Date(timeIntervalSince1970: wallMidnight + w - TimeInterval(offset))
+            if tz.secondsFromGMT(for: t) == offset { return t }
+        }
+        return dayStart.addingTimeInterval(w)
+    }
+
+    private func wall(_ t: Date, offset: Int) -> TimeInterval {
+        t.timeIntervalSince1970 + TimeInterval(offset) - wallMidnight
+    }
+
+    /// Lage in Sekunden ab Mitternacht, mit gestauchter doppelter Stunde.
+    private func wallSeconds(at t: Date) -> TimeInterval {
+        for tr in transitions where tr.repeated > 0 {
+            let g = tr.repeated
+            let bandStart = tr.at.addingTimeInterval(-g)
+            if t >= bandStart && t <= tr.at.addingTimeInterval(g) {
+                return wall(tr.at, offset: tr.before) - g + t.timeIntervalSince(bandStart) / 2
+            }
+        }
+        return wall(t, offset: calendar.timeZone.secondsFromGMT(for: t))
+    }
+
+    /// Übergänge zwischen `from` und `to`: stündlich abtasten, dann auf die
+    /// Sekunde eingrenzen. So unabhängig von `nextDaylightSavingTimeTransition`.
+    private static func transitions(in tz: TimeZone, from: Date, to: Date) -> [Transition] {
+        var result: [Transition] = []
+        var a = from
+        var offsetA = tz.secondsFromGMT(for: a)
+        while a < to {
+            let b = min(to, a.addingTimeInterval(3600))
+            let offsetB = tz.secondsFromGMT(for: b)
+            if offsetB != offsetA {
+                var lo = a, hi = b
+                while hi.timeIntervalSince(lo) > 0.25 {
+                    let mid = lo.addingTimeInterval(hi.timeIntervalSince(lo) / 2)
+                    if tz.secondsFromGMT(for: mid) == offsetA { lo = mid } else { hi = mid }
+                }
+                let at = Date(timeIntervalSince1970: hi.timeIntervalSince1970.rounded())
+                result.append(Transition(at: at, before: offsetA, after: offsetB))
+            }
+            a = b
+            offsetA = offsetB
+        }
+        return result
+    }
+}
+
 /// Ein Termin im Zeitraster (Ansicht B/C): Lage im Tag und Spalte bei
 /// Überschneidungen.
 public struct TimelineBlock: Hashable, Sendable, Identifiable {
     public var occurrence: Occurrence
-    /// Oberkante als Anteil des Tages, 0…1. Der Tag hat an Umstellungstagen
-    /// 23 oder 25 Stunden; die Anteile beziehen sich auf die echte Länge.
+    /// Oberkante als Anteil der Spalte, 0…1, auf der Wanduhr-Achse
+    /// (`WallClockAxis`): Minuten seit Mitternacht laut Uhr / 1440, auch an
+    /// Umstellungstagen.
     public var top: Double
     public var height: Double
     /// Spalte in der Gruppe sich überschneidender Termine (0-basiert).
@@ -27,21 +179,23 @@ public struct TimelineBlock: Hashable, Sendable, Identifiable {
 
 public enum TimelineLayout {
     /// Zeitgebundene Vorkommen an `day`, nebeneinander gelegt, wo sie sich
-    /// überschneiden. `minimumMinutes` ist die kleinste dargestellte Höhe;
-    /// kurze Termine überlappen damit auch optisch nicht.
+    /// überschneiden. `minimumMinutes` ist die kleinste dargestellte Höhe in
+    /// Minuten der Achse; kurze Termine überlappen damit auch optisch nicht.
+    /// Lage und Überschneidung gelten auf der Wanduhr-Achse (`WallClockAxis`).
     public static func blocks(_ occurrences: [Occurrence], day: LocalDate, calendar cal: Calendar, minimumMinutes: Double = 15) -> [TimelineBlock] {
-        let dayStart = day.startDate(in: cal)
-        let dayEnd = day.adding(days: 1).startDate(in: cal)
-        let length = dayEnd.timeIntervalSince(dayStart)
-        let minimum = minimumMinutes * 60
+        let axis = WallClockAxis(day: day, calendar: cal)
+        let dayStart = axis.dayStart
+        let dayEnd = axis.dayEnd
+        let full = WallClockAxis.minutesPerDay
 
-        struct Item { var o: Occurrence; var s: Date; var e: Date; var shownEnd: Date }
+        // `s` und `shownEnd` in Minuten der Achse.
+        struct Item { var o: Occurrence; var s: Double; var shownEnd: Double }
         let items = occurrences
             .filter { !$0.isAllDay && $0.start < dayEnd && ($0.end > dayStart || ($0.end <= $0.start && $0.start >= dayStart)) }
             .map { o -> Item in
-                let s = max(o.start, dayStart)
-                let e = min(max(o.end, o.start), dayEnd)
-                return Item(o: o, s: s, e: e, shownEnd: min(dayEnd, max(e, s.addingTimeInterval(minimum))))
+                let s = axis.minutes(at: max(o.start, dayStart))
+                let e = axis.minutes(at: min(max(o.end, o.start), dayEnd))
+                return Item(o: o, s: s, shownEnd: min(full, max(e, s + minimumMinutes)))
             }
             .sorted { a, b in
                 if a.s != b.s { return a.s < b.s }
@@ -51,7 +205,7 @@ public enum TimelineLayout {
 
         var result: [TimelineBlock] = []
         var cluster: [(Item, Int)] = []
-        var clusterEnd = Date.distantPast
+        var clusterEnd = -Double.infinity
 
         func flush() {
             guard !cluster.isEmpty else { return }
@@ -64,8 +218,8 @@ public enum TimelineLayout {
                 }) { span += 1 }
                 result.append(TimelineBlock(
                     occurrence: item.o,
-                    top: item.s.timeIntervalSince(dayStart) / length,
-                    height: item.shownEnd.timeIntervalSince(item.s) / length,
+                    top: item.s / full,
+                    height: (item.shownEnd - item.s) / full,
                     column: col, columns: columns, span: span,
                     continuesBefore: item.o.start < dayStart, continuesAfter: item.o.end > dayEnd
                 ))
@@ -85,11 +239,30 @@ public enum TimelineLayout {
         return result
     }
 
-    /// Höhe der aktuellen Uhrzeit-Linie als Anteil des Tages, `nil` an anderen Tagen.
+    /// Höhe der aktuellen Uhrzeit-Linie als Anteil der Spalte (Wanduhr-Achse),
+    /// `nil` an anderen Tagen.
     public static func nowLine(_ now: Date, day: LocalDate, calendar cal: Calendar) -> Double? {
-        let s = day.startDate(in: cal), e = day.adding(days: 1).startDate(in: cal)
-        guard now >= s, now < e else { return nil }
-        return now.timeIntervalSince(s) / e.timeIntervalSince(s)
+        let axis = WallClockAxis(day: day, calendar: cal)
+        guard now >= axis.dayStart, now < axis.dayEnd else { return nil }
+        return axis.fraction(at: now)
+    }
+
+    /// Beschriftung einer zweiten Zeitzone für die 24 Stundenzeilen des
+    /// Rasters (LIC-42). `TimeZoneDisplay.hourLabels` zählt echte Stunden
+    /// (23 oder 25 an Umstellungstagen der Heimatzone); hier wird jede Zeile
+    /// der Wanduhr-Achse ihrer echten Stunde zugeordnet. Zeilen, die es am Tag
+    /// nicht gibt (Lücke beim Vorstellen), bleiben `nil`; beim Zurückstellen
+    /// zeigt die Zeile „02“ den ersten Durchgang.
+    public static func secondaryHourLabels(for zone: TimeZone, home: TimeZone, day: LocalDate) -> [String?] {
+        let labels = TimeZoneDisplay.hourLabels(for: zone, home: home, day: day)
+        let axis = WallClockAxis(day: day, calendar: .lichtung(timeZone: home))
+        return (0..<24).map { hour -> String? in
+            let m = Double(hour * 60)
+            guard axis.exists(minutes: m) else { return nil }
+            let realHours = axis.instant(atMinutes: m).timeIntervalSince(axis.dayStart) / 3600
+            let index = Int(realHours.rounded(.down))
+            return labels.indices.contains(index) ? labels[index] : nil
+        }
     }
 }
 

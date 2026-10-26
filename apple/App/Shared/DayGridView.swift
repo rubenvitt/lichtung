@@ -66,6 +66,8 @@ struct DayGridView: View {
         .padding(.vertical, 4)
     }
 
+    /// Immer 24 Zeilen: Das Raster hat eine Wanduhr-Achse (`WallClockAxis`),
+    /// auch an Umstellungstagen (LIC-41).
     private var hourLabels: some View {
         VStack(spacing: 0) {
             ForEach(0..<24, id: \.self) { hour in

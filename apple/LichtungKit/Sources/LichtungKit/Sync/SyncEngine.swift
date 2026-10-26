@@ -14,6 +14,8 @@ public actor SyncEngine {
     private let now: @Sendable () -> Date
     private var observers: [UUID: @Sendable (SyncState) -> Void] = [:]
     private var running = false
+    /// Während eines Abgleichs kam ein weiterer Aufruf: danach noch einmal.
+    private var rerunRequested = false
     /// Rückgängig/Wiederholen für Änderungen über `perform` (LIC-23).
     public internal(set) var undoHistory = UndoHistory()
 
@@ -94,17 +96,25 @@ public actor SyncEngine {
         case deferred(APIError)
     }
 
-    /// Senden, dann Ziehen. Gleichzeitige Aufrufe laufen nicht doppelt.
+    /// Senden, dann Ziehen. Gleichzeitige Aufrufe laufen nicht doppelt:
+    /// Kommt einer während eines Abgleichs, läuft danach genau eine weitere
+    /// Runde (eine neue Änderung soll nicht bis zum nächsten Anlass warten).
     /// `unauthorized` wird geworfen (neu anmelden), alles Vorübergehende kommt
     /// als `.deferred` zurück.
     @discardableResult
     public func sync() async throws -> Outcome {
-        guard !running else { return .synced }
+        guard !running else {
+            rerunRequested = true
+            return .synced
+        }
         running = true
         defer { running = false }
         do {
-            try await pushPending()
-            try await pullAll()
+            repeat {
+                rerunRequested = false
+                try await pushPending()
+                try await pullAll()
+            } while rerunRequested
             return .synced
         } catch let e as APIError {
             if e == .unauthorized { throw e }

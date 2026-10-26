@@ -79,6 +79,13 @@ public enum APIError: Error, Hashable, Sendable {
 /// Zugangsdaten für die API.
 public protocol TokenProvider: Sendable {
     func deviceToken() async -> String?
+    /// Der Server hat `token` mit `401` abgelehnt (widerrufen). Signal für
+    /// „neu anmelden“ statt eines Absturzes; Cache und Outbox bleiben.
+    func tokenRejected(_ token: String) async
+}
+
+extension TokenProvider {
+    public func tokenRejected(_ token: String) async {}
 }
 
 public struct StaticToken: TokenProvider {
@@ -139,8 +146,19 @@ public struct SyncAPI: Sendable {
         } catch {
             throw APIError.transport(error.localizedDescription)
         }
-        guard (200..<300).contains(response.status) else { throw Self.error(from: response) }
+        guard (200..<300).contains(response.status) else {
+            let error = Self.error(from: response)
+            if error == .unauthorized { await tokens.tokenRejected(token) }
+            throw error
+        }
         return response
+    }
+
+    /// Für Aufrufe außerhalb von `send` (SSE): meldet eine `401` zum Token
+    /// aus `request` an den `TokenProvider`.
+    public func reportUnauthorized(_ request: HTTPRequest) async {
+        guard let header = request.headers["Authorization"], header.hasPrefix("Bearer ") else { return }
+        await tokens.tokenRejected(String(header.dropFirst("Bearer ".count)))
     }
 
     static func error(from response: HTTPResponse) -> APIError {

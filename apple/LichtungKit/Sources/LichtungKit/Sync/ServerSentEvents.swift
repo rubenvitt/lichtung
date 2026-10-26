@@ -84,7 +84,13 @@ public struct SyncEventStream: Sendable {
                     r.timeoutInterval = .infinity
                     for (k, v) in req.headers { r.setValue(v, forHTTPHeaderField: k) }
                     let (bytes, response) = try await session.bytes(for: r)
-                    if let http = response as? HTTPURLResponse, http.statusCode == 401 { throw APIError.unauthorized }
+                    if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+                        await api.reportUnauthorized(req)
+                        throw APIError.unauthorized
+                    }
+                    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                        throw APIError.server(status: http.statusCode, code: nil, message: nil)
+                    }
                     var parser = ServerSentEventParser()
                     // Nicht `bytes.lines`: Das verschluckt Leerzeilen, und die
                     // schließen bei SSE ein Ereignis ab.

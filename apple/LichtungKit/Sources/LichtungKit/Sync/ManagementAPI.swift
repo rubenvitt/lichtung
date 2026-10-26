@@ -8,8 +8,19 @@ import Foundation
 // nicht zum Fehler führen.
 
 public struct ServerInfo: Decodable, Hashable, Sendable {
+    /// Gerät hinter dem Token (nur bei Geräte-Tokens).
+    public struct DeviceRef: Decodable, Hashable, Sendable {
+        public var id: String
+        public var name: String?
+    }
+
+    public var userId: String?
     public var name: String?
     public var email: String?
+    /// Art des Zugangs, z. B. „device“.
+    public var auth: String?
+    public var device: DeviceRef?
+    /// Nennt der Vertrag (§7), liefert der Server bisher nicht.
     public var serverName: String?
     public var serverVersion: String?
 }
@@ -18,8 +29,13 @@ public struct Device: Decodable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
     public var createdAt: Date?
+    /// So heißt das Feld beim Server.
+    public var lastUsedAt: Date?
     public var lastSeenAt: Date?
     public var current: Bool?
+
+    /// Letzte Nutzung, gleich unter welchem Namen der Server sie liefert.
+    public var lastActivity: Date? { lastUsedAt ?? lastSeenAt }
 }
 
 /// API-Token für MCP-Clients (`lt_…`).
@@ -37,13 +53,23 @@ public enum NewAccount: Sendable, Hashable {
     case fastmail(username: String, appPassword: String, name: String = "Fastmail")
     case icloud(username: String, appPassword: String, name: String = "iCloud")
     case ics(url: URL, name: String)
+    /// Feed mit Basic-Auth (LIC-14).
+    case icsWithLogin(url: URL, name: String, username: String, password: String)
+    /// Beliebiger CalDAV-Server (LIC-7).
+    case caldav(url: URL, username: String, password: String, name: String)
 
     var body: [String: String] {
+        var b: [String: String]
         switch self {
-        case let .fastmail(u, p, n): ["kind": "fastmail", "username": u, "password": p, "name": n]
-        case let .icloud(u, p, n): ["kind": "icloud", "username": u, "password": p, "name": n]
-        case let .ics(url, n): ["kind": "ics", "url": url.absoluteString, "name": n]
+        case let .fastmail(u, p, n): b = ["kind": "fastmail", "username": u, "password": p, "name": n]
+        case let .icloud(u, p, n): b = ["kind": "icloud", "username": u, "password": p, "name": n]
+        case let .ics(url, n): b = ["kind": "ics", "url": url.absoluteString, "name": n]
+        case let .icsWithLogin(url, n, u, p): b = ["kind": "ics", "url": url.absoluteString, "name": n, "username": u, "password": p]
+        case let .caldav(url, u, p, n): b = ["kind": "caldav", "url": url.absoluteString, "username": u, "password": p, "name": n]
         }
+        // `name` ist optional (Vertrag §7): leer heißt „Standard des Servers“.
+        if b["name"]?.trimmingCharacters(in: .whitespaces).isEmpty == true { b["name"] = nil }
+        return b
     }
 }
 

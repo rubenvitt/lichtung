@@ -290,6 +290,7 @@ async fn fastmail_account_is_created_with_its_event_calendars() {
             "mcp_write": true,
             "openings_busy": true,
             "all_day_blocks": false,
+            "is_work": false,
             "position": 0
         })
     );
@@ -788,6 +789,56 @@ async fn calendar_settings_are_validated() {
     )
     .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn work_calendar_is_marked_and_locked_for_mcp() {
+    let (s, _provider, session) = setup().await;
+    create_account(&s, &session).await;
+    let cals = calendars(&s).await;
+    let privat = by_name(&cals, "Privat");
+    assert_eq!(privat["is_work"], false);
+    assert_eq!(privat["mcp_write"], true);
+    let path = format!("/api/calendars/{}", privat["id"].as_str().unwrap());
+
+    // Marking it as the work calendar applies the default: Claude may not
+    // write there (spec section 7).
+    let cursor = s.app.change_cursor();
+    let r = patch(&s, &path, Auth::Web(&session), json!({"is_work": true})).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.json()["is_work"], true);
+    assert_eq!(r.json()["mcp_write"], false);
+    assert_eq!(s.app.change_cursor(), cursor + 1);
+    assert_eq!(by_name(&calendars(&s).await, "Privat")["is_work"], true);
+
+    // Allowing it afterwards is a conscious choice and sticks; unmarking
+    // leaves `mcp_write` alone.
+    let r = patch(&s, &path, Auth::Web(&session), json!({"mcp_write": true})).await;
+    assert_eq!(r.json()["mcp_write"], true);
+    let r = patch(&s, &path, Auth::Web(&session), json!({"is_work": true})).await;
+    assert_eq!(
+        r.json()["mcp_write"],
+        true,
+        "already marked: nothing changes"
+    );
+    let r = patch(&s, &path, Auth::Web(&session), json!({"is_work": false})).await;
+    assert_eq!(r.json()["is_work"], false);
+    assert_eq!(r.json()["mcp_write"], true);
+
+    // An explicit `mcp_write` in the same call wins.
+    let r = patch(
+        &s,
+        &path,
+        Auth::Web(&session),
+        json!({"is_work": true, "mcp_write": true}),
+    )
+    .await;
+    assert_eq!(r.json()["is_work"], true);
+    assert_eq!(r.json()["mcp_write"], true);
+
+    let r = patch(&s, &path, Auth::Web(&session), json!({"is_work": "ja"})).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.error_code(), "invalid_request");
 }
 
 #[tokio::test]

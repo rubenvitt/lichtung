@@ -4,7 +4,7 @@
 //! |---|---|
 //! | `GET /api/me` | every principal of `/api` |
 //! | `GET, POST /api/tokens`, `DELETE /api/tokens/{id}` | browser session or device |
-//! | `GET /api/devices`, `DELETE /api/devices/{id}` | browser session or device |
+//! | `GET /api/devices`, `PATCH`/`DELETE /api/devices/{id}` | browser session or device |
 //! | `GET /api/oauth/clients`, `DELETE /api/oauth/clients/{id}` | browser session or device |
 //! | accounts, calendars, calendar sets | see [`super::accounts`] |
 //! | `GET /api/occurrences` | see [`super::events`] |
@@ -30,6 +30,11 @@ use crate::oauth;
 /// Body limit of `/api` requests.
 pub const API_BODY_LIMIT: usize = 64 * 1024;
 
+/// Name of the server software in `GET /api/me`.
+pub const SERVER_NAME: &str = env!("CARGO_PKG_NAME");
+/// Version of the server in `GET /api/me` (the workspace version).
+pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// The `/api` routes (without auth layer).
 pub fn routes() -> Router<App> {
     Router::new()
@@ -37,7 +42,7 @@ pub fn routes() -> Router<App> {
         .route("/tokens", get(list_tokens).post(create_token))
         .route("/tokens/{id}", delete(revoke_token))
         .route("/devices", get(list_devices))
-        .route("/devices/{id}", delete(revoke_device))
+        .route("/devices/{id}", delete(revoke_device).patch(rename_device))
         .route("/oauth/clients", get(list_oauth_clients))
         .route("/oauth/clients/{id}", delete(revoke_oauth_client))
         .merge(super::accounts::routes())
@@ -61,6 +66,8 @@ async fn me(State(app): State<App>, principal: Principal) -> AppResult<Json<serd
         "email": user.email,
         "auth": principal.label(),
         "device": device,
+        "server_name": SERVER_NAME,
+        "server_version": SERVER_VERSION,
     })))
 }
 
@@ -121,6 +128,29 @@ async fn list_devices(
     };
     Ok(Json(
         oauth::devices(&app, principal.user_id, current).await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RenameDeviceBody {
+    name: String,
+}
+
+async fn rename_device(
+    State(app): State<App>,
+    principal: Principal,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<RenameDeviceBody>,
+) -> AppResult<Json<oauth::DeviceInfo>> {
+    require_credential_manager(&principal)?;
+    let id = parse_uuid(&id)?;
+    let current = match &principal.kind {
+        PrincipalKind::Device { id, .. } => Some(*id),
+        _ => None,
+    };
+    Ok(Json(
+        oauth::rename_device(&app, principal.user_id, id, &body.name, current).await?,
     ))
 }
 

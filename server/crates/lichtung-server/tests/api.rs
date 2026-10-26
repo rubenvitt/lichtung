@@ -77,6 +77,23 @@ async fn me_names_the_owner_and_the_credential() {
     assert_eq!(me["user_id"], s.app.owner_id().to_string());
     assert_eq!(me["auth"], "api:bootstrap");
     assert!(me["device"].is_null());
+    // Server name and version (contract section 7).
+    assert_eq!(me["server_name"], "lichtung-server");
+    assert_eq!(me["server_version"], env!("CARGO_PKG_VERSION"));
+    let mut keys: Vec<&str> = me.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "auth",
+            "device",
+            "email",
+            "name",
+            "server_name",
+            "server_version",
+            "user_id"
+        ]
+    );
 
     let token = api_token(&s, "werkzeug").await;
     let r = s.get("/api/me", Auth::Bearer(&token)).await;

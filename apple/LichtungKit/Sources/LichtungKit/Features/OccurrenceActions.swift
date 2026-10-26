@@ -40,12 +40,15 @@ public enum OccurrenceActions {
         return .update(eventId: occ.eventId, scope: .all, changes: EventChanges(calendarId: calendarId))
     }
 
-    /// Kalender für eine Kopie: der eigene, wenn beschreibbar, sonst der erste
-    /// beschreibbare (`writable` in der Reihenfolge der Seitenleiste).
+    /// Kalender für eine Kopie (Duplizieren, Einfügen): der eigene, wenn
+    /// beschreibbar, sonst der Standardkalender (`DefaultCalendar.choose`
+    /// mit der Wahl `storedDefault` aus den Einstellungen, LIC-53).
     /// Ein Abo (ICS) lässt sich so trotzdem duplizieren.
-    public static func duplicateCalendar(for occ: Occurrence, calendars: [String: CalendarInfo], writable: [CalendarInfo]) -> String? {
+    public static func duplicateCalendar(
+        for occ: Occurrence, calendars: [String: CalendarInfo], writable: [CalendarInfo], storedDefault: String?
+    ) -> String? {
         if calendars[occ.calendarId]?.writable == true { return occ.calendarId }
-        return writable.first?.id
+        return DefaultCalendar.choose(stored: storedDefault, writable: writable)
     }
 
     /// Kopie um `days` Tage verschoben (0 = gleicher Tag) im Kalender `calendarId`.

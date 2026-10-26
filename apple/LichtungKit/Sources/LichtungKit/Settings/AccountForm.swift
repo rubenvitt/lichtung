@@ -79,6 +79,11 @@ extension CalendarSettings {
         if let openingsBusy { c.openingsBusy = openingsBusy }
         if let allDayBlocks { c.allDayBlocks = allDayBlocks }
         if let position { c.position = position }
+        if let isWork {
+            // Wie der Server: Kennzeichnen sperrt Claude, außer ausdrücklich anders.
+            if isWork, c.isWork != true, mcpWrite == nil { c.mcpWrite = false }
+            c.isWork = isWork
+        }
         return c
     }
 }

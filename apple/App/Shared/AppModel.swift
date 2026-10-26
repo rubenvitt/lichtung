@@ -97,4 +97,32 @@ final class AppModel {
     func refresh() async {
         _ = try? await engine.sync()
     }
+
+    // MARK: Raster (LIC-22, LIC-42)
+
+    /// Zweite Zeitzone als schmale Spalte im Raster; `nil` blendet sie aus.
+    /// Gesetzt wird sie in den Einstellungen (LIC-43).
+    var secondaryTimeZone: TimeZone?
+
+    /// Ob sich der Termin im Raster ziehen lässt (nicht ganztägig, Kalender beschreibbar).
+    func canDrag(_ occ: Occurrence) -> Bool {
+        GridInteraction.isDraggable(occ, calendar: state.calendars[occ.calendarId])
+    }
+
+    /// Verschieben oder Länge ändern aus dem Raster. Bei Serien nur dieses
+    /// Vorkommen (`scope .this`). Über `perform`, damit Rückgängig geht.
+    func move(_ occ: Occurrence, start: Date, end: Date) async {
+        guard end >= start, start != occ.start || end != occ.end,
+              let intent = GridInteraction.moveIntent(occ, to: DateInterval(start: start, end: end), deviceTimeZone: timeZone)
+        else { return }
+        let sameLength = end.timeIntervalSince(start) == occ.end.timeIntervalSince(occ.start)
+        await engine.perform(intent, label: sameLength ? "Termin verschieben" : "Termindauer ändern")
+    }
+
+    /// Termin aus einem Zug in leerer Fläche anlegen, im ersten beschreibbaren Kalender.
+    func createTimed(start: Date, end: Date) async {
+        guard end > start, let calendarId = writableCalendars.first?.id else { return }
+        let intent = GridInteraction.createIntent(calendarId: calendarId, interval: DateInterval(start: start, end: end), timeZone: timeZone)
+        await engine.perform(intent, label: "Termin anlegen")
+    }
 }

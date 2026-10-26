@@ -142,10 +142,19 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
             hour = 9
         }
         let start = LocalDateTime(date: day, hour: hour, minute: 0)
-        return EventDraft(
+        return new(startingAt: start, calendarId: calendarId, deviceTimeZone: tz, id: id)
+    }
+
+    /// Neuer Termin mit festem Beginn, z. B. „Neuer Termin hier“ im Raster
+    /// (LIC-24). `minutes` lang, in der Zeitzone des Geräts.
+    public static func new(
+        startingAt start: LocalDateTime, minutes: Int = 60, calendarId: String?, deviceTimeZone tz: TimeZone,
+        id: String = UUID().uuidString
+    ) -> EventDraft {
+        EventDraft(
             id: id, deviceTimeZone: tz, original: nil,
             fields: Fields(
-                title: "", isAllDay: false, start: start, end: start.addingSeconds(3600),
+                title: "", isAllDay: false, start: start, end: start.addingSeconds(max(1, minutes) * 60),
                 timeZoneID: tz.identifier, endTimeZoneID: tz.identifier, location: "", notes: "",
                 alarms: [], repetition: .none, calendarId: calendarId ?? ""
             ),

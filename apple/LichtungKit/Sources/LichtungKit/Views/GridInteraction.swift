@@ -83,6 +83,16 @@ public enum GridInteraction {
         return interval(s, e)
     }
 
+    /// Beginn für „Neuer Termin hier“ (Kontextmenü, LIC-24) an der Stelle `y`
+    /// der Spalte: Wanduhrzeit auf das Raster abgerundet, spätestens 23:00,
+    /// damit eine Stunde in den Tag passt. Ohne `y` 9 Uhr.
+    public static func slotStart(day: LocalDate, atY y: Double?, columnHeight: Double) -> LocalDateTime {
+        guard let y else { return LocalDateTime(date: day, hour: 9, minute: 0) }
+        let raw = snapped(minutes(atY: y, columnHeight: columnHeight), rule: .down)
+        let m = Int(min(raw, WallClockAxis.minutesPerDay - 60))
+        return LocalDateTime(date: day, hour: m / 60, minute: m % 60)
+    }
+
     // MARK: - Verschieben
 
     /// Termin um `deltaMinutes` (Achse, wird auf ganze Raster-Schritte

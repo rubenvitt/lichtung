@@ -22,7 +22,8 @@
 //! [`App::check_opening_slot`], the event through the write path
 //! (`create_event`, origin `server`) with the guest as `ATTENDEE`
 //! (`RSVP=TRUE`) and the account's own address as `ORGANIZER`, then
-//! [`App::complete_opening_booking`]. The provider sends the invitation
+//! [`App::mark_opening_booked`] (tried twice); after releasing the guard
+//! [`App::remove_booked_placeholders`]. The provider sends the invitation
 //! from the own address (CalDAV scheduling, RFC 6638; targets need
 //! `can_invite`).
 //!
@@ -43,8 +44,9 @@ use axum::http::{Extensions, HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::routing::get;
 use axum::{Form, Router};
-use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Duration, NaiveDate, NaiveTime, Utc};
 use chrono_tz::Tz;
+use lichtung_ical::Zone;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -113,10 +115,11 @@ struct BookingForm {
     website: Option<String>,
 }
 
-/// One request: language, client key, time.
+/// One request: language, client key (and IPv6 /48), time.
 struct Visit {
     lang: Lang,
     source: String,
+    net: Option<String>,
     now: DateTime<Utc>,
 }
 
@@ -124,9 +127,11 @@ impl Visit {
     fn new(extensions: &Extensions, headers: &HeaderMap, lang: Option<&str>) -> Self {
         let peer = extensions.get::<ConnectInfo<SocketAddr>>().map(|c| c.0);
         let accept = headers.get(ACCEPT_LANGUAGE).and_then(|v| v.to_str().ok());
+        let ip = guard::source_of(peer, headers);
         Visit {
             lang: Lang::choose(lang, accept),
-            source: guard::source_key(guard::source_of(peer, headers)),
+            source: guard::source_key(ip),
+            net: guard::net_key(ip),
             now: Utc::now(),
         }
     }
@@ -157,13 +162,11 @@ fn guest_zone(raw: Option<&str>, opening: &Opening) -> Tz {
         .unwrap_or(Tz::UTC)
 }
 
-/// Local midnight of `day` in `tz` as UTC.
+/// Local midnight of `day` in `tz` as UTC; where midnight falls into a
+/// gap (a zone that starts summer time at 00:00), the first moment after
+/// it, as in [`crate::free`].
 fn day_start(day: NaiveDate, tz: Tz) -> DateTime<Utc> {
-    let naive = day.and_hms_opt(0, 0, 0).unwrap_or_default();
-    tz.from_local_datetime(&naive)
-        .earliest()
-        .map(|t| t.with_timezone(&Utc))
-        .unwrap_or_else(|| tz.from_utc_datetime(&naive).with_timezone(&Utc))
+    Zone::Iana(tz).to_utc(day.and_time(NaiveTime::MIN))
 }
 
 /// Latest start the link can offer.
@@ -220,12 +223,16 @@ impl BookingState {
     /// too many unknown links waits, then the request is counted.
     fn admit(&self, visit: &Visit, bucket: Bucket, limit: u32) -> Option<Response> {
         let now = visit.now_ms();
-        let probing = !self.limiter.allows(
-            Bucket::Miss,
-            &visit.source,
-            self.limits().misses_per_source,
-            now,
-        );
+        let limits = self.limits();
+        let probing =
+            !self
+                .limiter
+                .allows(Bucket::Miss, &visit.source, limits.misses_per_source, now)
+                || visit.net.as_deref().is_some_and(|net| {
+                    !self
+                        .limiter
+                        .allows(Bucket::MissNet, net, limits.misses_per_net, now)
+                });
         if probing {
             return Some(html::too_many(visit.lang, RETRY_LONG_SECS));
         }
@@ -255,6 +262,9 @@ impl BookingState {
             None => {
                 self.limiter
                     .hit(Bucket::Miss, &visit.source, visit.now_ms());
+                if let Some(net) = &visit.net {
+                    self.limiter.hit(Bucket::MissNet, net, visit.now_ms());
+                }
                 Err(html::message(
                     visit.lang,
                     StatusCode::NOT_FOUND,
@@ -575,10 +585,10 @@ async fn book(
 
     // From here on one booking at a time: limits, the last check and the
     // write see every earlier booking.
-    let _guard = state.app.opening_booking_guard().await;
+    let guard = state.app.opening_booking_guard().await;
     let limits = state.limits();
     let email_key = email.to_lowercase();
-    let counted = [
+    let mut counted = vec![
         (
             Bucket::BookingSource,
             visit.source.as_str(),
@@ -596,6 +606,9 @@ async fn book(
         ),
         (Bucket::BookingTotal, "all", limits.bookings_total),
     ];
+    if let Some(net) = &visit.net {
+        counted.push((Bucket::BookingNet, net.as_str(), limits.bookings_per_net));
+    }
     if let Some((bucket, _, _)) = counted
         .iter()
         .find(|(b, key, limit)| !state.limiter.allows(*b, key, *limit, now_ms))
@@ -656,21 +669,50 @@ async fn book(
             return unavailable(lang);
         }
     };
-    if let Err(e) = state
-        .app
-        .complete_opening_booking(&opening.id, &event_id, visit.now)
-        .await
-    {
-        // The event exists and the invitation is out; only the link's
-        // bookkeeping failed.
-        tracing::error!(opening = %opening.id, event = %event_id, error = %e,
-            "booking written, but the link was not marked booked");
-    }
+    let queued = mark_booked(&state.app, &opening.id, &event_id, visit.now).await;
     for (bucket, key, _) in counted {
         state.limiter.hit(bucket, key, now_ms);
     }
+    // The placeholders go at the provider without holding up other
+    // bookings.
+    drop(guard);
     tracing::info!(opening = %opening.id, event = %event_id, "booking created");
+    if queued {
+        state.app.remove_booked_placeholders().await;
+    }
     html::success_page(&ctx, slot.start, slot.end, &email)
+}
+
+/// Marks the link booked after its event was written ([`App::mark_opening_booked`]),
+/// trying once more if that fails: the event exists and the invitation is
+/// out, so a one-off link left unmarked would stay bookable. `true` if
+/// placeholders wait for removal.
+async fn mark_booked(app: &App, opening_id: &str, event_id: &str, now: DateTime<Utc>) -> bool {
+    let mut result = app.mark_opening_booked(opening_id, event_id, now).await;
+    if let Err(e) = &result {
+        if !matches!(e, crate::error::AppError::Conflict(_)) {
+            tracing::warn!(opening = %opening_id, event = %event_id, error = %e,
+                "marking the link booked failed, trying again");
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            result = app.mark_opening_booked(opening_id, event_id, now).await;
+        }
+    }
+    match result {
+        Ok(queued) => queued,
+        // Booked already (cannot happen under the booking guard): it is
+        // marked, only not with this event.
+        Err(e @ crate::error::AppError::Conflict(_)) => {
+            tracing::error!(opening = %opening_id, event = %event_id, error = %e,
+                "booking written for a link that was booked already");
+            false
+        }
+        Err(e) => {
+            tracing::error!(opening = %opening_id, event = %event_id, error = %e,
+                "BOOKING WRITTEN, BUT THE LINK WAS NOT MARKED BOOKED: a one-off link stays \
+                 bookable until it is deleted");
+            false
+        }
+    }
 }
 
 /// The `create_event` mutation of a booking: in the link's zone, title
@@ -746,6 +788,29 @@ mod tests {
         assert_eq!(
             day_start(d, Tz::UTC).to_rfc3339(),
             "2026-11-03T00:00:00+00:00"
+        );
+    }
+
+    #[test]
+    fn a_day_without_midnight_starts_after_the_gap() {
+        use chrono::TimeZone;
+        // Chile starts summer time at 00:00 (2026-09-06: 00:00 → 01:00).
+        let santiago: Tz = "America/Santiago".parse().unwrap();
+        let d = NaiveDate::from_ymd_opt(2026, 9, 6).unwrap();
+        let midnight = d.and_time(NaiveTime::MIN);
+        assert!(
+            santiago.from_local_datetime(&midnight).earliest().is_none(),
+            "midnight does not exist that day"
+        );
+        let start = day_start(d, santiago);
+        assert_eq!(start.to_rfc3339(), "2026-09-06T04:00:00+00:00");
+        assert_eq!(
+            start.with_timezone(&santiago).to_rfc3339(),
+            "2026-09-06T01:00:00-03:00"
+        );
+        assert_eq!(
+            day_start(d.pred_opt().unwrap(), santiago).to_rfc3339(),
+            "2026-09-05T04:00:00+00:00"
         );
     }
 }

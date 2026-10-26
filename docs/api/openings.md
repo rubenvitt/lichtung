@@ -112,7 +112,7 @@ API-Tokens (`lt_…`) dürfen Links nur lesen (`403 forbidden`): Ein Link schrei
 
 - Pflicht: `kind`, `duration_minutes` (5 bis 720), `calendar_id`; bei `template` auch `title` (1 bis 200 Zeichen, ohne Steuerzeichen).
 - Optional: `title`, `time_zone` (IANA), `windows` (1 bis 50), `buffer_before_minutes`/`buffer_after_minutes` (0 bis 720), `min_notice_minutes` (0 bis 43200), `horizon_days` (1 bis 365), `video_url` (`http(s)`, höchstens 2000 Zeichen; leer = keiner).
-- `suggestions` nur bei `once`: höchstens 20, `start` (RFC 3339 mit Offset) in der Zukunft und höchstens 365 Tage voraus, `end` optional und sonst `start` + Dauer; ein Vorschlag dauert genau `duration_minutes`, keiner doppelt.
+- `suggestions` nur bei `once`: höchstens 20, `start` (RFC 3339 mit Offset) in der Zukunft und höchstens 365 Tage voraus, `end` optional und sonst `start` + Dauer; ein Vorschlag dauert genau `duration_minutes`, keiner doppelt. Sekundenbruchteile in `start` und `end` schneidet der Server ab (die Buchungsseite nennt Zeiten auf die Sekunde); das gilt auch für `create_opening_link` über MCP.
 - Unbekannte Felder, ungültige Werte: `400 invalid_request`.
 
 **Ändern** (`PATCH`): `title`, `duration_minutes`, `calendar_id`, `time_zone`, `windows` (ersetzt alle Fenster), Puffer, `min_notice_minutes`, `horizon_days`, `video_url` (`null` entfernt ihn). Nur genannte Felder ändern sich. `kind` und `suggestions` lassen sich nicht ändern (`400`). Bei einem Einmal-Link mit Vorschlägen bleiben auch `calendar_id` und `duration_minutes` fest (die Platzhalter liegen schon), sonst `400 invalid_request`. Ein neuer `calendar_id` wird geprüft wie beim Anlegen. Die `url` bleibt.
@@ -153,27 +153,29 @@ Der einzige Teil von Lichtung ohne Anmeldung. Server-gerendertes HTML ohne exter
 4. Eingaben: Name 1 bis 100 Zeichen ohne Steuerzeichen, Links (`://`, `www.`, `domain/pfad`), `@` oder `<>`; E-Mail-Adresse syntaktisch (ASCII, `local@domain.tld`, höchstens 254 Zeichen); Notiz höchstens 1000 Zeichen. Fehler → `400` mit dem ausgefüllten Formular und den Meldungen.
 5. Unter `App::opening_booking_guard` (eine Buchung nach der anderen): Buchungsgrenzen (unten) → `429`; `App::check_opening_slot` prüft den Slot gegen den aktuellen Stand; vergeben, vergangen oder kein gültiger Slot → `409` mit der Seite und frischen Zeiten.
 6. Termin über den Schreibpfad (`create_event`, Herkunft `server`) im Zielkalender, in der Zone des Links: Titel `<Titel des Links> (<Name>)`, Beschreibung mit Name, E-Mail und Notiz des Gastes (in der Sprache der Seite), Videolink als Ort und `URL`, `availability: busy`, der Gast als `ATTENDEE` (`CN`, `ROLE=REQ-PARTICIPANT`, `PARTSTAT=NEEDS-ACTION`, `RSVP=TRUE`) und die eigene Adresse des Kontos (erste aus `calendar-user-address-set`, sonst der Login, wenn er eine E-Mail-Adresse ist) als `ORGANIZER`. Hat das Konto keine eigene Adresse, bucht die Seite nicht (`503`), weil keine Einladung herausginge. Den Versand übernimmt der Anbieter (CalDAV-Scheduling, RFC 6638; deshalb nur Zielkalender mit `can_invite`).
-7. `App::complete_opening_booking`: ein Einmal-Link ist verbraucht, seine Platzhalter gehen.
+7. Noch unter dem Guard `App::mark_opening_booked`: ein Einmal-Link ist verbraucht (nur wenn `booked_at` noch leer ist), seine Platzhalter kommen in die Löschwarteschlange. Scheitert das, versucht der Server es einmal erneut, sonst steht ein lauter Fehler im Log (`BOOKING WRITTEN, BUT THE LINK WAS NOT MARKED BOOKED`). Erst nach dem Guard löscht `App::remove_booked_placeholders` die Platzhalter beim Anbieter, damit andere Buchungen nicht darauf warten.
 8. Antwort `200`: gebuchte Zeit in der Zone des Gastes, Hinweis, dass die Einladung per E-Mail kommt und Absagen über sie läuft.
 
 Anbieter nicht erreichbar oder Schreiben abgelehnt → `503` („gerade nicht möglich“).
 
 **Antworten ohne Buchung:** unbekannte, gelöschte und falsch geformte Kennungen sind nicht zu unterscheiden (`404`, gleiche Seite). Ein gebuchter Einmal-Link sagt „bereits genutzt“ (`410`).
 
-**Grenzen** (im Speicher, ein Container; ein Neustart setzt sie zurück; Adresse = Client-IP, IPv6 als /64, hinter Traefik der von ihm angehängte letzte `X-Forwarded-For`-Eintrag):
+**Grenzen** (im Speicher, ein Container; ein Neustart setzt sie zurück; Adresse = Client-IP, IPv6 als /64, IPv4 in IPv6 (`::ffff:a.b.c.d`) als IPv4, hinter Traefik der von ihm angehängte letzte `X-Forwarded-For`-Eintrag):
 
 | Was | Grenze | Antwort |
 |---|---|---|
 | Seitenaufrufe pro Adresse | 120 in 10 Minuten | `429`, `Retry-After: 600` |
 | Buchungsversuche (`POST`) pro Adresse | 20 in 10 Minuten | `429`, `Retry-After: 600` |
 | unbekannte Kennungen pro Adresse | 20 pro Stunde, danach jede Buchungsseite für diese Adresse gesperrt | `429`, `Retry-After: 3600` |
+| unbekannte Kennungen pro IPv6-/48 | 60 pro Stunde, danach jede Buchungsseite für das ganze /48 gesperrt | `429`, `Retry-After: 3600` |
 | Buchungen pro Adresse | 5 in 24 Stunden | `429`, `Retry-After: 3600` |
+| Buchungen pro IPv6-/48 | 10 in 24 Stunden | `429`, `Retry-After: 3600` |
 | Buchungen pro Link | 20 in 24 Stunden | `429` |
 | Buchungen pro Gast-E-Mail (alle Links) | 3 in 24 Stunden | `429` |
 | Buchungen insgesamt | 50 in 24 Stunden | `429` |
 
-Gezählt werden nur erfolgreiche Buchungen. Die Werte stehen in `BookingLimits` (`server/crates/lichtung-server/src/config.rs`), nicht in der Umgebung.
+Gezählt werden nur erfolgreiche Buchungen. Der Zähler merkt sich höchstens 20 000 Schlüssel; ist er voll, fallen zuerst abgelaufene, dann die am längsten nicht mehr gezählten Einträge weg (nie die Gesamtzahl der Buchungen). Neue Besucher werden also nie abgewiesen, weil der Speicher voll ist; eine Flut von Adressen kann höchstens alte Zählstände vergessen lassen. Die Werte stehen in `BookingLimits` (`server/crates/lichtung-server/src/config.rs`), nicht in der Umgebung.
 
 **Header** aller Seiten: `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-…'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` (die Kennung in der URL geht nicht weiter), `X-Robots-Tag: noindex, nofollow`, `Cache-Control: no-store`.
 
-**Serverintern:** Die Seite liest den Link über `App::opening_by_token`, die Slots über `App::opening_slots` (Zeitraum und „jetzt“ als Parameter) und bucht so: `App::opening_booking_guard` halten, `App::check_opening_slot` prüft den Slot erneut, Termin anlegen, `App::complete_opening_booking` markiert einen Einmal-Link als gebucht und entfernt seine Platzhalter (`409 conflict`, wenn er schon gebucht ist). Siehe `server/crates/lichtung-server/src/openings/mod.rs`.
+**Serverintern:** Die Seite liest den Link über `App::opening_by_token`, die Slots über `App::opening_slots` (Zeitraum und „jetzt“ als Parameter) und bucht so: `App::opening_booking_guard` halten, `App::check_opening_slot` prüft den Slot erneut, Termin anlegen, `App::mark_opening_booked` markiert einen Einmal-Link als gebucht und stellt seine Platzhalter zum Löschen an (`409 conflict`, wenn er schon gebucht ist); nach dem Guard entfernt `App::remove_booked_placeholders` sie. `App::complete_opening_booking` macht beides nacheinander. Siehe `server/crates/lichtung-server/src/openings/mod.rs`.

@@ -48,9 +48,14 @@ struct MacRootView: View {
                     }
                     .pickerStyle(.segmented)
                 }
+                // MARK: Editor (LIC-20)
+                ToolbarItem(placement: .primaryAction) {
+                    Button { model.newEvent() } label: { Image(systemName: "plus") }
+                        .help("Neuer Termin (⌘N)")
+                }
             }
         }
-        .sheet(item: $model.selectedOccurrence) { occ in
+        .sheet(item: $model.selectedOccurrence, onDismiss: { model.detailDismissed() }) { occ in
             EventDetailView(occurrence: occ).frame(minWidth: 360, minHeight: 420)
         }
         // Suche in der Toolbar, ⌘F über das Menü (LIC-42)
@@ -144,6 +149,11 @@ struct LichtungCommands: Commands {
     let model: AppModel
 
     var body: some Commands {
+        // MARK: Editor (LIC-20)
+        CommandGroup(replacing: .newItem) {
+            Button("Neuer Termin") { Task { @MainActor in model.newEvent() } }
+                .keyboardShortcut("n", modifiers: .command)
+        }
         CommandGroup(replacing: .undoRedo) {
             Button("Widerrufen") { Task { await model.undo() } }
                 .keyboardShortcut("z", modifiers: .command)

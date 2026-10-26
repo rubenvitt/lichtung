@@ -40,13 +40,13 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
             }
         }
 
-        /// Einheit für „Alle n …“.
-        public func unit(_ n: Int) -> String {
+        /// „Jede Woche“, „Alle 2 Wochen“.
+        public func intervalText(_ n: Int) -> String {
             switch self {
-            case .daily: n == 1 ? "Tag" : "Tage"
-            case .weekly: n == 1 ? "Woche" : "Wochen"
-            case .monthly: n == 1 ? "Monat" : "Monate"
-            case .yearly: n == 1 ? "Jahr" : "Jahre"
+            case .daily: n == 1 ? "Jeden Tag" : "Alle \(n) Tage"
+            case .weekly: n == 1 ? "Jede Woche" : "Alle \(n) Wochen"
+            case .monthly: n == 1 ? "Jeden Monat" : "Alle \(n) Monate"
+            case .yearly: n == 1 ? "Jedes Jahr" : "Alle \(n) Jahre"
             case .none, .custom: ""
             }
         }
@@ -305,6 +305,42 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
                 end = start.addingSeconds(3600)
             }
         }
+    }
+
+    // Für die Oberfläche: Datumsauswahlen zeigen ein `Date` in der Zone des
+    // Geräts. Sie bekommen die Wanduhrzeit des Termins als Zeitpunkt in dieser
+    // Zone, so steht dort „9:00“, auch wenn der Termin in New York liegt.
+
+    private var pickerCalendar: Calendar { .lichtung(timeZone: deviceTimeZone) }
+
+    /// Beginn für die Datumsauswahl; Setzen verschiebt das Ende mit.
+    public var startPickerDate: Date {
+        get { start.instant(in: pickerCalendar) }
+        set { moveStart(to: LocalDateTime(newValue, calendar: pickerCalendar)) }
+    }
+
+    /// Ende für die Datumsauswahl (ganztägig: der letzte Tag).
+    public var endPickerDate: Date {
+        get { end.instant(in: pickerCalendar) }
+        set { end = LocalDateTime(newValue, calendar: pickerCalendar) }
+    }
+
+    /// Schalter „Ganztägig“ (siehe `setAllDay`).
+    public var allDay: Bool {
+        get { isAllDay }
+        set { setAllDay(newValue) }
+    }
+
+    /// Auswahl der Zeitzone; `""` steht für floating.
+    public var timeZoneSelection: String {
+        get { timeZoneID ?? "" }
+        set { setTimeZone(newValue.isEmpty ? nil : newValue) }
+    }
+
+    /// Letzter Tag der Serie für die Datumsauswahl.
+    public var repeatUntilPickerDate: Date {
+        get { repeatUntil.startDate(in: pickerCalendar) }
+        set { repeatUntil = LocalDate(newValue, calendar: pickerCalendar) }
     }
 
     /// Zeitzone für Beginn und Ende; die Wanduhrzeit bleibt. `nil` = floating.

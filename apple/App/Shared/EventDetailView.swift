@@ -4,7 +4,7 @@
 import LichtungKit
 import SwiftUI
 
-/// Einfache Detailansicht. Der Editor folgt mit LIC-20.
+/// Einfache Detailansicht. „Bearbeiten“ öffnet den Editor (LIC-20).
 struct EventDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -78,6 +78,12 @@ struct EventDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Fertig") { dismiss() }
+                }
+                // MARK: Editor (LIC-20)
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Bearbeiten") { model.edit(occurrence) }
+                        .disabled(!model.canEdit(occurrence))
+                        .keyboardShortcut("e", modifiers: .command)
                 }
             }
         }

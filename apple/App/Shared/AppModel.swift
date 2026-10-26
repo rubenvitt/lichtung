@@ -155,4 +155,61 @@ final class AppModel {
         selectedDay = LocalDate(occurrence.start, calendar: calendar)
         selectedOccurrence = occurrence
     }
+
+    // MARK: Editor (LIC-20)
+
+    /// Offener Termin-Editor (Sheet in `RootView`).
+    var editorDraft: EventDraft?
+    /// Editor, der aufgeht, sobald die Detailansicht geschlossen ist: Zwei
+    /// Sheets gleichzeitig zeigt SwiftUI nicht.
+    private var pendingEditorDraft: EventDraft?
+
+    /// Neuer Termin am ausgewählten Tag im ersten beschreibbaren Kalender.
+    func newEvent() {
+        editorDraft = EventDraft.new(on: selectedDay, now: Date(), calendarId: writableCalendars.first?.id, deviceTimeZone: timeZone)
+    }
+
+    /// Editor für ein Vorkommen öffnen (aus der Detailansicht: nach deren Schließen).
+    func edit(_ occ: Occurrence) {
+        let event = state.visibleEvents(deviceTimeZone: timeZone)[occ.eventId]
+        let draft = EventDraft(editing: occ, event: event, deviceTimeZone: timeZone)
+        if selectedOccurrence != nil {
+            pendingEditorDraft = draft
+            selectedOccurrence = nil
+        } else {
+            editorDraft = draft
+        }
+    }
+
+    /// `onDismiss` der Detailansicht.
+    func detailDismissed() {
+        guard let draft = pendingEditorDraft else { return }
+        pendingEditorDraft = nil
+        editorDraft = draft
+    }
+
+    /// Nur Termine in beschreibbaren Kalendern lassen sich bearbeiten.
+    func canEdit(_ occ: Occurrence) -> Bool {
+        state.calendars[occ.calendarId]?.writable == true
+    }
+
+    /// Kalender zur Auswahl im Editor: die beschreibbaren, dazu der eigene
+    /// des Termins, falls er ausgeblendet ist.
+    func editorCalendars(for draft: EventDraft) -> [CalendarInfo] {
+        var list = writableCalendars
+        for id in [draft.calendarId, draft.original?.calendarId].compactMap({ $0 }) where !list.contains(where: { $0.id == id }) {
+            if let cal = state.calendars[id], cal.writable { list.append(cal) }
+        }
+        return list
+    }
+
+    func save(_ draft: EventDraft, scope: EditScope) async {
+        guard let intent = draft.saveIntent(scope: scope) else { return }
+        await engine.perform(intent, label: draft.saveLabel)
+    }
+
+    func delete(_ draft: EventDraft, scope: EditScope) async {
+        guard let intent = draft.deleteIntent(scope: scope) else { return }
+        await engine.perform(intent, label: "Termin löschen")
+    }
 }

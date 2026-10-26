@@ -12,6 +12,7 @@ struct LichtungApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .eventEditorSheet() // Termin-Editor (LIC-20)
                 .environment(model)
                 .task { await model.observe() }
                 // Rückgängig-Verlauf für Knöpfe und Beschriftung (LIC-42).

@@ -252,6 +252,28 @@ struct EventDraftTimeTests {
         #expect(EventDraft.timeZoneLabel("America/New_York") == "New York")
         #expect(EventDraft.timeZoneLabel(nil) == "Ohne Zeitzone")
     }
+
+    @Test func pickerDatesShowWallClockInDeviceZone() {
+        var d = draft()
+        d.timeZoneSelection = "America/New_York"
+        #expect(d.timeZoneID == "America/New_York")
+        // Die Auswahl zeigt 9:00 Gerätezeit, obwohl der Termin in New York liegt.
+        #expect(APICoding.formatTimestamp(d.startPickerDate) == "2026-11-03T08:00:00Z")
+        d.startPickerDate = APICoding.parseTimestamp("2026-11-04T10:30:00Z")!
+        #expect(d.start == D.time(4, 11, 30))
+        #expect(d.end == D.time(4, 12, 30))
+        d.endPickerDate = APICoding.parseTimestamp("2026-11-04T13:00:00Z")!
+        #expect(d.end == D.time(4, 14))
+        d.allDay = true
+        #expect(d.isAllDay)
+        d.timeZoneSelection = ""
+        #expect(d.timeZoneID == nil)
+        d.repeatFrequency = .daily
+        d.repeatUntilPickerDate = APICoding.parseTimestamp("2026-11-20T12:00:00Z")!
+        #expect(d.repeatUntil == D.day(20))
+        #expect(EventDraft.RepeatFrequency.weekly.intervalText(1) == "Jede Woche")
+        #expect(EventDraft.RepeatFrequency.yearly.intervalText(3) == "Alle 3 Jahre")
+    }
 }
 
 @Suite("Termin-Editor: bestehender Termin")

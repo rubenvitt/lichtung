@@ -46,6 +46,11 @@ struct PhoneRootView: View {
                         }
                         .accessibilityLabel("Ansicht wählen")
                     }
+                    // MARK: Editor (LIC-20)
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { model.newEvent() } label: { Image(systemName: "plus") }
+                            .accessibilityLabel("Neuer Termin")
+                    }
                 }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) { undoMenu }
@@ -54,7 +59,7 @@ struct PhoneRootView: View {
                     QuickEntryBar().background(.bar)
                 }
         }
-        .sheet(item: $model.selectedOccurrence) { occ in
+        .sheet(item: $model.selectedOccurrence, onDismiss: { model.detailDismissed() }) { occ in
             EventDetailView(occurrence: occ)
         }
         .onShake { if model.undoHistory.canUndo || model.undoHistory.canRedo { showsUndoAlert = true } }

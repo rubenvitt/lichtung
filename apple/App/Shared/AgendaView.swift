@@ -29,8 +29,9 @@ struct AgendaView: View {
                         ForEach(section.items) { item in
                             AgendaRow(item: item)
                                 .contentShape(Rectangle())
-                                .onTapGesture { model.selectedOccurrence = item.occurrence }
+                                .modifier(OccurrenceTap(occurrence: item.occurrence)) // LIC-24
                                 .contextMenu { OccurrenceMenu(occurrence: item.occurrence) }
+                                .listRowBackground(rowBackground(item.occurrence))
                         }
                     } header: {
                         Text(section.heading)
@@ -41,6 +42,12 @@ struct AgendaView: View {
             }
             .listStyle(.plain)
         }
+    }
+
+    /// Markierter Termin (Mac, LIC-24) hinterlegt; sonst der Standard der Liste.
+    private func rowBackground(_ occ: Occurrence) -> Color? {
+        guard model.highlightedOccurrence?.id == occ.id else { return nil }
+        return Color.accentColor.opacity(0.18)
     }
 }
 
@@ -129,18 +136,5 @@ struct TickerCell: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(day.weekdayShort) \(day.dayNumber)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-}
-
-/// Kontextmenü eines Termins (Mac: Rechtsklick, iPhone: lange drücken).
-struct OccurrenceMenu: View {
-    @Environment(AppModel.self) private var model
-    let occurrence: Occurrence
-
-    var body: some View {
-        Button("Duplizieren") { Task { await model.duplicate(occurrence) } }
-        Button("Auf morgen duplizieren") { Task { await model.duplicate(occurrence, days: 1) } }
-        Divider()
-        Button("Löschen", role: .destructive) { Task { await model.delete(occurrence) } }
     }
 }

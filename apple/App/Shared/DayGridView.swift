@@ -89,11 +89,22 @@ struct DayGridView: View {
                 }
                 .foregroundStyle(isToday ? Color.accentColor : Color.primary)
                 .frame(maxWidth: .infinity)
+                .background { selectedDayMarker(day) }
                 .contentShape(Rectangle())
                 .onTapGesture { model.selectedDay = day }
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// Mac: gewählter Tag der Woche (Ziel für Einfügen und „Neuer Termin“, LIC-24).
+    @ViewBuilder
+    private func selectedDayMarker(_ day: LocalDate) -> some View {
+        #if os(macOS)
+        if dayCount > 1 && day == model.selectedDay {
+            RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.12))
+        }
+        #endif
     }
 
     /// Immer 24 Zeilen: Das Raster hat eine Wanduhr-Achse (`WallClockAxis`),
@@ -158,6 +169,8 @@ struct DayColumn: View {
     let hourHeight: CGFloat
 
     @GestureState private var drag: GridDrag? = nil
+    /// Mausposition für „Neuer Termin hier“ (Mac, LIC-24).
+    @State private var hover = HoverPoint()
 
     var body: some View {
         GeometryReader { geo in
@@ -169,6 +182,7 @@ struct DayColumn: View {
                     .frame(width: width, height: height)
                     .contentShape(Rectangle())
                     .gesture(createGesture(height: height))
+                    .modifier(EmptyAreaInteraction(day: day, height: height, hover: hover))
                 ForEach(0..<24, id: \.self) { hour in
                     Rectangle()
                         .fill(Color.secondary.opacity(0.15))
@@ -231,7 +245,7 @@ struct DayColumn: View {
             .opacity(isDragged ? 0.35 : 1)
             .frame(width: max(0, width * block.width - 2), height: max(14, height * block.height - 1))
             .offset(x: width * block.leading + 1, y: height * block.top)
-            .onTapGesture { model.selectedOccurrence = occ }
+            .modifier(OccurrenceTap(occurrence: occ)) // Mac: markieren, doppelt öffnen (LIC-24)
             .gesture(moveGesture(occ, width: width, height: height), including: draggable ? .all : .subviews)
             .modifier(BlockMenu(occurrence: occ, draggable: draggable))
     }
@@ -406,6 +420,36 @@ private struct ResizeHandle: View {
     }
 }
 
+/// Leere Fläche einer Spalte am Mac (LIC-24): Klick hebt die Markierung auf
+/// und wählt den Tag, Rechtsklick bietet „Neuer Termin hier“ zur Uhrzeit
+/// unter dem Mauszeiger. Am iPhone bleibt es beim Anlegen per Ziehen.
+private struct EmptyAreaInteraction: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let day: LocalDate
+    let height: CGFloat
+    let hover: HoverPoint
+
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content
+            .onTapGesture { model.tapEmptyArea(day: day) }
+            .onContinuousHover { phase in
+                if case let .active(point) = phase { hover.y = point.y }
+            }
+            .contextMenu {
+                DaySlotMenu(day: day, start: { slotStart() })
+            }
+        #else
+        content
+        #endif
+    }
+
+    private func slotStart() -> LocalDateTime {
+        let y: Double? = hover.y.map { Double($0) }
+        return GridInteraction.slotStart(day: day, atY: y, columnHeight: Double(height))
+    }
+}
+
 /// Kontextmenü am Block. Am iPhone ist langes Drücken bei ziehbaren Terminen
 /// das Aufnehmen zum Verschieben, dort gibt es das Menü nur bei den übrigen.
 private struct BlockMenu: ViewModifier {
@@ -467,6 +511,7 @@ struct EventBlockView: View {
 
     var body: some View {
         let color = model.color(for: occurrence.calendarId)
+        let isHighlighted: Bool = model.highlightedOccurrence?.id == occurrence.id
         HStack(alignment: .top, spacing: 0) {
             Rectangle().fill(color).frame(width: 3)
             VStack(alignment: .leading, spacing: 0) {
@@ -483,7 +528,22 @@ struct EventBlockView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(color.opacity(0.18))
         .clipShape(RoundedRectangle(cornerRadius: 4))
+        .modifier(HighlightBorder(isOn: isHighlighted))
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isHighlighted ? .isSelected : [])
+    }
+}
+
+/// Rahmen um den markierten Termin (LIC-24).
+struct HighlightBorder: ViewModifier {
+    let isOn: Bool
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if isOn {
+                RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: 2)
+            }
+        }
     }
 }
 
@@ -509,14 +569,17 @@ struct AllDayRow: View {
                     let width: CGFloat = max(0, columnWidth * span - 4)
                     let x: CGFloat = leadingInset + columnWidth * CGFloat(bar.firstColumn) + 2
                     let y: CGFloat = CGFloat(bar.lane) * laneHeight
+                    let isHighlighted: Bool = model.highlightedOccurrence?.id == bar.occurrence.id
                     Text(bar.occurrence.title)
                         .font(.caption2.weight(.semibold))
                         .lineLimit(1)
                         .padding(.horizontal, 4)
                         .frame(width: width, height: laneHeight - 2, alignment: .leading)
                         .background(RoundedRectangle(cornerRadius: 4).fill(color.opacity(0.3)))
+                        .modifier(HighlightBorder(isOn: isHighlighted))
                         .offset(x: x, y: y)
-                        .onTapGesture { model.selectedOccurrence = bar.occurrence }
+                        .modifier(OccurrenceTap(occurrence: bar.occurrence)) // LIC-24
+                        .contextMenu { OccurrenceMenu(occurrence: bar.occurrence) }
                 }
                 ForEach(0..<columns, id: \.self) { column in
                     if hidden[column] > 0 {

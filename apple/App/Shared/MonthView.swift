@@ -48,17 +48,42 @@ struct MonthWeekRow: View {
                         .font(.caption.weight(isToday ? .bold : .regular))
                         .foregroundStyle(isToday ? Color.white : (day.month == month ? Color.primary : Color.secondary))
                         .frame(width: 22, height: 22)
-                        .background(Circle().fill(isToday ? Color.accentColor : Color.clear))
+                        .background(Circle().fill(numberFill(day, isToday: isToday)))
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .padding(.leading, 2)
                         .contentShape(Rectangle())
                         .onTapGesture { model.selectedDay = day }
+                        .modifier(DaySlotContextMenu(day: day)) // LIC-24
                 }
             }
             AllDayRow(bars: bars, columns: 7, visibleLanes: visibleLanes, laneHeight: 16)
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity)
+        .background { emptyDayAreas }
+    }
+
+    /// Heute gefüllt, der gewählte Tag (Ziel für Einfügen, LIC-24) blass.
+    private func numberFill(_ day: LocalDate, isToday: Bool) -> Color {
+        if isToday { return Color.accentColor }
+        if day == model.selectedDay { return Color.accentColor.opacity(0.2) }
+        return Color.clear
+    }
+
+    /// Mac: freie Fläche je Tag unter den Balken. Klick wählt den Tag und hebt
+    /// die Markierung auf, Rechtsklick bietet „Neuer Termin hier“ (LIC-24).
+    @ViewBuilder
+    private var emptyDayAreas: some View {
+        #if os(macOS)
+        HStack(spacing: 0) {
+            ForEach(days, id: \.self) { day in
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.tapEmptyArea(day: day) }
+                    .modifier(DaySlotContextMenu(day: day))
+            }
+        }
+        #endif
     }
 }
 

@@ -57,6 +57,7 @@ struct SessionRootView: View {
             let model = session.model
             RootView()
                 .eventEditorSheet() // Termin-Editor (LIC-20)
+                .occurrenceDeleteDialog() // Serie löschen aus Menüs und Tastatur (LIC-24)
                 .environment(model)
                 .task(id: ObjectIdentifier(model)) { await model.observe() }
                 // Rückgängig-Verlauf für Knöpfe und Beschriftung (LIC-42).

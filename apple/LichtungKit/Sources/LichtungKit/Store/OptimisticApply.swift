@@ -26,11 +26,17 @@ enum OptimisticApply {
             case (.thisAndFollowing, let occ?) where e.isRecurring:
                 var details = overrideDetails(of: e, at: occ, tz: tz)
                 details.apply(changes)
-                var tail = Event(id: SyncState.placeholderPrefix + m.id, calendarId: e.calendarId, version: 0, details: details, recurrence: e.recurrence)
-                if case let .set(r)? = changes.recurrence { tail.recurrence = r }
-                if case .clear? = changes.recurrence { tail.recurrence = nil }
-                if let r = tail.recurrence?.rrule {
-                    tail.recurrence?.rrule = RRuleText.removing(["COUNT", "UNTIL"], from: r)
+                var tail = Event(id: SyncState.placeholderPrefix + m.id, calendarId: e.calendarId, version: 0, details: details)
+                switch changes.recurrence {
+                case let .set(r)?:
+                    // Der Server übernimmt eine mitgeschickte Regel wörtlich.
+                    tail.recurrence = r
+                case .clear?:
+                    tail.recurrence = nil
+                case nil:
+                    tail.recurrence = e.recurrence.map {
+                        remainder($0, seriesStart: e.details.start, from: occ, movedTo: changes.start.map { _ in details.start }, tz: tz)
+                    }
                 }
                 truncate(&e, before: occ, tz: tz)
                 events[eventId] = e
@@ -111,6 +117,20 @@ enum OptimisticApply {
         }
     }
 
+    /// Was die neue Serie bei „dieser und folgende“ von der alten übernimmt,
+    /// wie `split_series` im Server: RDATEs und EXDATEs ab `occ`, `UNTIL`
+    /// bleibt, `COUNT` wird zur Restzahl. Wandert der neue Beginn (`movedTo`),
+    /// wandern Daten und `UNTIL` mit.
+    static func remainder(_ r: Recurrence, seriesStart: DateValue, from occ: DateValue, movedTo: DateValue?, tz: TimeZone) -> Recurrence {
+        var out = r.keepingDates(from: occ, deviceTimeZone: tz)
+        if let text = r.rrule, let total = RRule(text)?.count {
+            let before = SeriesExpander(deviceTimeZone: tz).ruleInstances(of: text, seriesStart: seriesStart, before: occ)
+            out.rrule = RRuleText.setting("COUNT", to: String(max(1, total - before)), in: text)
+        }
+        guard let movedTo else { return out }
+        return out.movingDates(from: occ, to: movedTo, deviceTimeZone: tz)
+    }
+
     /// Serie endet vor `occ`; Overrides ab `occ` fallen weg.
     static func truncate(_ e: inout Event, before occ: DateValue, tz: TimeZone) {
         guard var r = e.recurrence else { return }
@@ -130,6 +150,11 @@ enum RRuleText {
             .joined(separator: ";")
     }
 
+    /// Ersetzt den Teil `key` (ans Ende gestellt).
+    static func setting(_ key: String, to value: String, in rrule: String) -> String {
+        removing([key], from: rrule) + ";\(key)=" + value
+    }
+
     /// Setzt `UNTIL` auf den Moment vor `occ` (ganztägig: den Tag davor) und entfernt `COUNT`.
     static func until(_ rrule: String, before occ: DateValue, deviceTimeZone tz: TimeZone) -> String {
         let base = removing(["COUNT", "UNTIL"], from: rrule)
@@ -138,11 +163,15 @@ enum RRuleText {
         case let .date(d):
             until = d.adding(days: -1).icalString
         case .dateTime:
-            let instant = occ.instant(deviceTimeZone: tz).addingTimeInterval(-1)
-            let c = Calendar.gregorianUTC.dateComponents([.year, .month, .day, .hour, .minute, .second], from: instant)
-            until = String(format: "%04d%02d%02dT%02d%02d%02dZ", c.year!, c.month!, c.day!, c.hour!, c.minute!, c.second!)
+            until = utcStamp(occ.instant(deviceTimeZone: tz).addingTimeInterval(-1))
         }
         return base + ";UNTIL=" + until
+    }
+
+    /// `20261116T075959Z`.
+    static func utcStamp(_ instant: Date) -> String {
+        let c = Calendar.gregorianUTC.dateComponents([.year, .month, .day, .hour, .minute, .second], from: instant)
+        return String(format: "%04d%02d%02dT%02d%02d%02dZ", c.year!, c.month!, c.day!, c.hour!, c.minute!, c.second!)
     }
 }
 

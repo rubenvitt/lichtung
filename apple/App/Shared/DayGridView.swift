@@ -14,6 +14,10 @@ import AppKit // NSCursor am Griff
 /// ändert die Länge. Am Mac direkt, am iPhone erst lange drücken, damit das
 /// Scrollen frei bleibt. Gerechnet wird in `GridInteraction`.
 ///
+/// Menü am iPhone (LIC-54): Ein aufgenommener Block, der ohne Bewegung
+/// losgelassen wird, öffnet das Menü des Termins als Popover
+/// (`OccurrenceMenuPopover`); bewegt ihn der Finger, wird verschoben.
+///
 /// Feinschliff (LIC-47): Nach dem Aufziehen und nach einem Doppelklick (Mac)
 /// öffnet der Editor mit dem neuen Termin. Vorkommen einer Serie fragen vor
 /// dem Verschieben nach dem Geltungsbereich. Am oberen und unteren Rand
@@ -292,6 +296,12 @@ struct DayColumn: View {
     @State private var settling: Settling?
     /// Verschieben eines Serientermins, das auf die Wahl des Geltungsbereichs wartet.
     @State private var pendingSeriesMove: PendingMove?
+    #if os(iOS)
+    /// Block, dessen Menü gerade offen ist (LIC-54).
+    @State private var menuOccurrenceId: String?
+    /// Im Menü gewählte Aktion; sie läuft, sobald das Popover zu ist.
+    @State private var pendingMenuAction: PendingMenuAction?
+    #endif
 
     var body: some View {
         GeometryReader { geo in
@@ -399,6 +409,16 @@ struct DayColumn: View {
             }
             .opacity(isDragged ? 0.35 : 1)
             .frame(width: max(0, width * block.width - 2), height: max(14, height * block.height - 1))
+            #if os(iOS)
+            // Vor `offset`, damit das Popover am gezeichneten Block hängt.
+            .popover(isPresented: menuBinding(for: occ.id)) {
+                OccurrenceMenuPopover(model: model, occurrence: occ) { action in
+                    pendingMenuAction = PendingMenuAction(run: action)
+                    menuOccurrenceId = nil
+                }
+                .onDisappear { runPendingMenuAction() }
+            }
+            #endif
             .offset(x: width * block.leading + 1, y: height * block.top)
             .modifier(OccurrenceTap(occurrence: occ)) // Mac: markieren, doppelt öffnen (LIC-24)
             .gesture(moveGesture(occ, width: width, height: height), including: draggable ? .all : .subviews)
@@ -457,7 +477,8 @@ struct DayColumn: View {
     }
 
     /// Verschieben: Mac direkt ziehen, iPhone lange drücken und dann ziehen.
-    /// Ein kurzer Tap bleibt beim `onTapGesture` und öffnet das Detail.
+    /// Ein kurzer Tap bleibt beim `onTapGesture` und öffnet das Detail. Am
+    /// iPhone öffnet Loslassen ohne Bewegung das Menü (LIC-54).
     private func moveGesture(_ occ: Occurrence, width: CGFloat, height: CGFloat) -> some Gesture {
         let id = occ.id
         #if os(iOS)
@@ -472,8 +493,15 @@ struct DayColumn: View {
                 if case .second(true, let d?) = value { scroller.dragChanged(pointerY: d.location.y) }
             }
             .onEnded { value in
-                if case .second(true, let d?) = value {
-                    commitMove(occ, translation: d.translation, width: width, height: height)
+                if case .second(true, let d) = value {
+                    let translation = d?.translation ?? .zero
+                    if GridInteraction.opensMenuOnRelease(
+                        dx: Double(translation.width), dy: Double(translation.height + scroller.scrolled), columnHeight: Double(height)
+                    ) {
+                        menuOccurrenceId = id
+                    } else {
+                        commitMove(occ, translation: translation, width: width, height: height)
+                    }
                 }
                 scroller.dragEnded()
             }
@@ -623,6 +651,28 @@ struct DayColumn: View {
         var interval: DateInterval
     }
 
+    #if os(iOS)
+    // MARK: Menü am Block (iPhone, LIC-54)
+
+    /// Aktion aus dem Popover-Menü, die auf dessen Schließen wartet.
+    private struct PendingMenuAction {
+        var run: @MainActor () -> Void
+    }
+
+    private func menuBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { menuOccurrenceId == id },
+            set: { shown in if !shown, menuOccurrenceId == id { menuOccurrenceId = nil } }
+        )
+    }
+
+    private func runPendingMenuAction() {
+        guard let action = pendingMenuAction else { return }
+        pendingMenuAction = nil
+        action.run()
+    }
+    #endif
+
     /// Gezeichnet wird in der Spalte, in der der neue Beginn liegt; `nil`,
     /// wenn die außerhalb der sichtbaren Tage liegt.
     private func targetPreview(_ target: DateInterval, calendarId: String?) -> PreviewTarget? {
@@ -745,7 +795,8 @@ private struct EmptyAreaInteraction: ViewModifier {
 }
 
 /// Kontextmenü am Block. Am iPhone ist langes Drücken bei ziehbaren Terminen
-/// das Aufnehmen zum Verschieben, dort gibt es das Menü nur bei den übrigen.
+/// das Aufnehmen zum Verschieben; ihr Menü öffnet sich beim Loslassen ohne
+/// Bewegung als Popover (`DayColumn.moveGesture`, LIC-54).
 private struct BlockMenu: ViewModifier {
     let occurrence: Occurrence
     let draggable: Bool

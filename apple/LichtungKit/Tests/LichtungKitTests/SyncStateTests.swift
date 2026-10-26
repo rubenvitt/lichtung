@@ -245,7 +245,20 @@ struct OptimisticSeriesTests {
         #expect(v["ev_s"]?.recurrence?.rrule == "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261116T075959Z")
         #expect(v["local:m"]?.title == "Review neu")
         #expect(v["local:m"]?.details.start == F.at(16, 9))
-        #expect(v["local:m"]?.recurrence?.rrule == "FREQ=WEEKLY;BYDAY=MO")
+        // Die neue Serie bekommt die Restzahl, wie im Server (LIC-52).
+        #expect(v["local:m"]?.recurrence?.rrule == "FREQ=WEEKLY;BYDAY=MO;COUNT=8")
+    }
+
+    @Test func thisAndFollowingMovesUntilWithTime() {
+        var s = SyncState()
+        s.events["ev_s"] = F.event("ev_s", version: 2, day: 2, hour: 9, rrule: "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261123T080000Z")
+        s.enqueue(Mutation(id: "m", .updateEvent(eventId: "ev_s", baseVersion: 2, scope: .thisAndFollowing, occurrence: F.at(16, 9),
+                                                 changes: EventChanges(start: F.at(16, 11), end: F.at(16, 12)))), now: F.now)
+        let tail = s.visibleEvents(deviceTimeZone: F.tz)["local:m"]
+        #expect(tail?.recurrence?.rrule == "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261123T100000Z")
+        let window = DateInterval(start: APICoding.parseTimestamp("2026-11-01T00:00:00Z")!, duration: 60 * 86_400)
+        let starts = tail.map { SeriesExpander(deviceTimeZone: F.tz).occurrences(of: $0, in: window).map(\.details.start) }
+        #expect(starts == [F.at(16, 11), F.at(23, 11)])
     }
 
     @Test func deleteFollowingOfAllDaySeries() {

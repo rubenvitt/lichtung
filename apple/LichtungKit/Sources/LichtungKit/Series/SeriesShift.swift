@@ -7,14 +7,18 @@ import Foundation
 /// Regel mitkommt. Wer Regel und Zeit zugleich ändert, muss sie deshalb
 /// genauso verschieben, sonst taucht ein ausgelassenes Vorkommen wieder auf.
 extension Recurrence {
-    /// RDATEs und EXDATEs, wenn der Serienbeginn von `old` nach `new` wandert:
-    /// gleicher Abstand in Wanduhrzeit, Form (Tag/Zeitpunkt) und Zone des
-    /// neuen Beginns. Die Regel bleibt, wie sie ist.
+    /// RDATEs, EXDATEs und `UNTIL`, wenn der Serienbeginn von `old` nach
+    /// `new` wandert: gleicher Abstand in Wanduhrzeit, Form (Tag/Zeitpunkt)
+    /// und Zone des neuen Beginns. Der Rest der Regel bleibt (LIC-52).
     public func movingDates(from old: DateValue, to new: DateValue, deviceTimeZone tz: TimeZone) -> Recurrence {
         guard old.normalized != new.normalized else { return self }
         var r = self
         r.rdates = rdates.map { SeriesShift.shift($0, from: old, to: new, deviceTimeZone: tz) }
         r.exdates = exdates.map { SeriesShift.shift($0, from: old, to: new, deviceTimeZone: tz) }
+        if let text = rrule, let until = RRule(text)?.until {
+            let moved = SeriesShift.shiftUntil(until, from: old, to: new, deviceTimeZone: tz)
+            r.rrule = RRuleText.setting("UNTIL", to: moved, in: text)
+        }
         return r
     }
 
@@ -62,6 +66,32 @@ enum SeriesShift {
         }
     }
 
+    /// `UNTIL` als RRULE-Text, wenn der Beginn von `old` nach `new` wandert.
+    /// Wie `shift_until` im Server: Ein Tag bekommt die Uhrzeit des alten
+    /// Beginns, UTC wird in dessen Zone gelesen. Ergebnis ist ein Tag bei
+    /// ganztägigen Serien, eine Wanduhrzeit bei floating, sonst UTC (ein Tag
+    /// gilt dann bis 23:59:59 in der Zone des neuen Beginns).
+    static func shiftUntil(_ until: RRule.Until, from old: DateValue, to new: DateValue, deviceTimeZone tz: TimeZone) -> String {
+        let oldWall = wall(old)
+        let oldZone = old.timeZoneID.flatMap(TimeZone.init(identifier:)) ?? tz
+        let start: LocalDateTime = switch until {
+        case let .date(d): LocalDateTime(date: d, hour: oldWall.hour, minute: oldWall.minute, second: oldWall.second)
+        case let .utc(t): LocalDateTime(t, calendar: .lichtung(timeZone: oldZone))
+        case let .local(l): l
+        }
+        var moved = start.addingSeconds(wall(new).secondsSince(oldWall))
+        switch new {
+        case .date:
+            return moved.date.icalString
+        case let .dateTime(_, zoneID, _):
+            let isUTC = if case .utc = until { true } else { false }
+            if zoneID == nil, !isUTC { return moved.icalString }
+            if case .date = until { moved = LocalDateTime(date: moved.date, hour: 23, minute: 59, second: 59) }
+            let zone = zoneID.flatMap(TimeZone.init(identifier:)) ?? tz
+            return RRuleText.utcStamp(moved.instant(in: .lichtung(timeZone: zone)))
+        }
+    }
+
     /// Liegt `v` am oder nach `occurrence`? Bei Tagen zählt der Tag.
     static func isAtOrAfter(_ v: DateValue, _ occurrence: DateValue, deviceTimeZone tz: TimeZone) -> Bool {
         if v.isAllDay || occurrence.isAllDay { return wall(v).date >= wall(occurrence).date }
@@ -78,5 +108,12 @@ enum SeriesShift {
         case let .date(d): LocalDateTime(date: d, hour: 0, minute: 0)
         case let .dateTime(l, _, _): l
         }
+    }
+}
+
+extension LocalDateTime {
+    /// `20261103T140000` (Wanduhrzeit ohne Zone, wie in `UNTIL`).
+    var icalString: String {
+        date.icalString + String(format: "T%02d%02d%02d", hour, minute, second)
     }
 }

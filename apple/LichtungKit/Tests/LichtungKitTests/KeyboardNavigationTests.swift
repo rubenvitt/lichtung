@@ -276,11 +276,29 @@ struct OccurrenceActionsTests {
     @Test func duplicateFallsBackToWritableCalendar() {
         let (occ, _) = D.single()
         let writable = [calendars["cal_0"]!, calendars["cal_1"]!]
-        #expect(A.duplicateCalendar(for: occ, calendars: calendars, writable: writable) == "cal_1")
+        #expect(A.duplicateCalendar(for: occ, calendars: calendars, writable: writable, storedDefault: nil) == "cal_1")
         var ics = occ
         ics.calendarId = "cal_ics"
-        #expect(A.duplicateCalendar(for: ics, calendars: calendars, writable: writable) == "cal_0")
-        #expect(A.duplicateCalendar(for: ics, calendars: calendars, writable: []) == nil)
+        #expect(A.duplicateCalendar(for: ics, calendars: calendars, writable: writable, storedDefault: nil) == "cal_0")
+        #expect(A.duplicateCalendar(for: ics, calendars: calendars, writable: [], storedDefault: nil) == nil)
+    }
+
+    /// LIC-53: Aus einem Abo landet die Kopie im Standardkalender, nicht im
+    /// ersten beschreibbaren; der eigene beschreibbare Kalender geht vor.
+    @Test func duplicateFromReadOnlyUsesDefaultCalendar() {
+        let (occ, _) = D.single()
+        let writable = [calendars["cal_0"]!, calendars["cal_1"]!, calendars["cal_2"]!]
+        var ics = occ
+        ics.calendarId = "cal_ics"
+        #expect(A.duplicateCalendar(for: ics, calendars: calendars, writable: writable, storedDefault: "cal_2") == "cal_2")
+        #expect(A.duplicateCalendar(for: occ, calendars: calendars, writable: writable, storedDefault: "cal_2") == "cal_1")
+        // Wahl nicht (mehr) beschreibbar oder leer: erster beschreibbarer.
+        #expect(A.duplicateCalendar(for: ics, calendars: calendars, writable: writable, storedDefault: "cal_ics") == "cal_0")
+        #expect(A.duplicateCalendar(for: ics, calendars: calendars, writable: writable, storedDefault: "") == "cal_0")
+        // Kalender der Kopie unbekannt (gelöscht, LIC-50 Einfügen): wie Abo.
+        var gone = occ
+        gone.calendarId = "cal_weg"
+        #expect(A.duplicateCalendar(for: gone, calendars: calendars, writable: writable, storedDefault: "cal_2") == "cal_2")
     }
 
     @Test func duplicateNextWeekKeepsWallClock() {

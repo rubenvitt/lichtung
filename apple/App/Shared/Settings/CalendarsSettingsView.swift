@@ -86,6 +86,7 @@ private struct CalendarSettingsRow: View {
     private var badges: String {
         var parts: [String] = []
         if calendar.hidden { parts.append("ausgeblendet") }
+        if calendar.isWork == true { parts.append("Arbeitskalender") }
         if !calendar.writable { parts.append("nur lesen") }
         parts.append(calendar.mcpWrite ? "Claude darf schreiben" : "Claude nur lesend")
         return parts.joined(separator: " · ")
@@ -171,6 +172,17 @@ private struct CalendarSettingsSheet: View {
             }
 
             Section {
+                if MCPWriteGuard.canMark(calendar) {
+                    Toggle(MCPWriteGuard.markTitle, isOn: Binding(
+                        get: { calendar.isWork == true },
+                        set: { update(CalendarSettings(isWork: $0)) }
+                    ))
+                    if MCPWriteGuard.suggestsMarking(calendar, account: account) {
+                        Text(MCPWriteGuard.suggestion)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Toggle("Claude darf hier schreiben", isOn: Binding(
                     get: { calendar.mcpWrite },
                     set: { allow in
@@ -193,7 +205,7 @@ private struct CalendarSettingsSheet: View {
             } header: {
                 Text("Claude (MCP)")
             } footer: {
-                Text(MCPWriteGuard.explanation)
+                Text(MCPWriteGuard.canMark(calendar) ? MCPWriteGuard.explanation + " " + MCPWriteGuard.markExplanation : MCPWriteGuard.explanation)
             }
 
             Section {

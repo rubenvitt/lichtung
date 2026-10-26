@@ -136,15 +136,34 @@ struct OccurrenceDeleteDialog: ViewModifier {
 
     func body(content: Content) -> some View {
         @Bindable var bindable = model
+        content.modifier(SeriesDeleteDialog(
+            model: model,
+            isPresented: $bindable.isConfirmingDelete,
+            occurrence: model.pendingDelete,
+            onDelete: {}
+        ))
+    }
+}
+
+/// Die Frage selbst: ein Knopf je Geltungsbereich (`OccurrenceActions.deleteScopes`).
+/// `onDelete` läuft nach der Wahl, z. B. schließt das Detail-Blatt (LIC-50).
+struct SeriesDeleteDialog: ViewModifier {
+    let model: AppModel
+    @Binding var isPresented: Bool
+    let occurrence: Occurrence?
+    let onDelete: @MainActor () -> Void
+
+    func body(content: Content) -> some View {
         content.confirmationDialog(
             "Serientermin löschen",
-            isPresented: $bindable.isConfirmingDelete,
+            isPresented: $isPresented,
             titleVisibility: .visible,
-            presenting: model.pendingDelete
+            presenting: occurrence
         ) { occ in
             ForEach(OccurrenceActions.deleteScopes(occ), id: \.self) { scope in
                 Button(scope.editorLabel, role: .destructive) {
                     Task { await model.delete(occ, scope: scope) }
+                    onDelete()
                 }
             }
             Button("Abbrechen", role: .cancel) {}

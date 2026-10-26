@@ -99,11 +99,6 @@ final class AppModel {
         await engine.perform(.create(calendarId: calendarId, event: input), label: "Termin anlegen")
     }
 
-    func delete(_ occ: Occurrence) async {
-        let scope: EditScope = occ.recurrenceId == nil ? .all : .this
-        await engine.perform(.delete(eventId: occ.eventId, scope: scope, occurrence: occ.recurrenceId), label: "Termin löschen")
-    }
-
     /// Kopie, optional um `days` Tage verschoben. Aus einem schreibgeschützten
     /// Kalender (Abo) landet sie im ersten beschreibbaren (LIC-24).
     func duplicate(_ occ: Occurrence, days: Int = 0) async {

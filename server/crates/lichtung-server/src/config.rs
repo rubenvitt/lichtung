@@ -98,8 +98,12 @@ pub struct BookingLimits {
     /// the address gets `429` for every booking page for the rest of the
     /// hour.
     pub misses_per_source: u32,
+    /// Like `misses_per_source`, per IPv6 /48 (all its /64s together).
+    pub misses_per_net: u32,
     /// Bookings per address in 24 hours.
     pub bookings_per_source: u32,
+    /// Bookings per IPv6 /48 in 24 hours.
+    pub bookings_per_net: u32,
     /// Bookings per link in 24 hours.
     pub bookings_per_link: u32,
     /// Bookings per guest e-mail address in 24 hours (all links).
@@ -118,7 +122,9 @@ impl Default for BookingLimits {
             views_per_source: 120,
             posts_per_source: 20,
             misses_per_source: 20,
+            misses_per_net: 60,
             bookings_per_source: 5,
+            bookings_per_net: 10,
             bookings_per_link: 20,
             bookings_per_email: 3,
             bookings_total: 50,

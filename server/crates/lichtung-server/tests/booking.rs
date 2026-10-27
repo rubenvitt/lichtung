@@ -662,6 +662,55 @@ async fn unknown_links_look_alike_and_probing_is_limited() {
 }
 
 #[tokio::test]
+async fn probing_counts_per_ipv6_48_and_mapped_ipv4_per_address() {
+    let t = setup_configured(
+        |_| {},
+        |c| {
+            c.booking_limits.misses_per_source = 2;
+            c.booking_limits.misses_per_net = 4;
+        },
+    )
+    .await;
+    let device = device_token(&t.s, "iPhone von Anna");
+    let o = t.template(&device).await;
+    // Two misses each from two /64s of one /48 stay under the per-address
+    // limit, but use up the /48.
+    for (i, peer) in [
+        "[2001:db8:1:a::1]:1",
+        "[2001:db8:1:a::1]:1",
+        "[2001:db8:1:b::1]:1",
+        "[2001:db8:1:b::1]:1",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let r = get_from(&t.s, &format!("/o/{i:0>43}"), peer).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND);
+    }
+    let r = get_from(&t.s, &path_of(&o), "[2001:db8:1:c::1]:1").await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS, "same /48");
+    let r = get_from(&t.s, &path_of(&o), "[2001:db8:2:c::1]:1").await;
+    assert_eq!(r.status, StatusCode::OK, "another /48");
+
+    // A listener on [::] sees IPv4 guests as ::ffff:a.b.c.d: each counts
+    // on its own, not all together as ::/64.
+    for i in 0..2 {
+        let r = get_from(&t.s, &format!("/o/{i:0>43}"), "[::ffff:192.0.2.1]:1").await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND);
+    }
+    let r = get_from(&t.s, &path_of(&o), "[::ffff:192.0.2.1]:1").await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    let r = get_from(&t.s, &path_of(&o), "[::ffff:192.0.2.2]:1").await;
+    assert_eq!(r.status, StatusCode::OK);
+    let r = get_from(&t.s, &path_of(&o), "192.0.2.1:1").await;
+    assert_eq!(
+        r.status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "same as plain IPv4"
+    );
+}
+
+#[tokio::test]
 async fn page_views_are_rate_limited() {
     let s = TestServer::with_config(|c| {
         c.booking_limits.views_per_source = 3;

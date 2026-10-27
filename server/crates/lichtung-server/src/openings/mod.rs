@@ -34,15 +34,16 @@
 //!
 //! The booking page (LIC-33) calls [`App::opening_by_token`],
 //! [`App::opening_slots`], and under [`App::opening_booking_guard`]
-//! [`App::check_opening_slot`], creates the event, then
-//! [`App::complete_opening_booking`].
+//! [`App::check_opening_slot`], creates the event and
+//! [`App::mark_opening_booked`]; after releasing the guard it calls
+//! [`App::remove_booked_placeholders`].
 
 pub mod slots;
 pub mod store;
 
 use std::str::FromStr;
 
-use chrono::{DateTime, Duration, NaiveTime, Utc, Weekday};
+use chrono::{DateTime, Duration, NaiveTime, SubsecRound, Utc, Weekday};
 use chrono_tz::Tz;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
@@ -371,9 +372,12 @@ fn check_video_url(raw: &str) -> AppResult<Option<String>> {
     }
 }
 
+/// A time of a suggestion, cut to whole seconds: the booking page names
+/// times in whole seconds, so a fraction would make the suggestion
+/// unbookable.
 fn parse_instant(name: &str, raw: &str) -> AppResult<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(raw.trim())
-        .map(|t| t.with_timezone(&Utc))
+        .map(|t| t.with_timezone(&Utc).trunc_subsecs(0))
         .map_err(|_| {
             invalid(format!(
                 "{name} muss ein Zeitpunkt nach RFC 3339 mit Offset sein, z. B. \
@@ -1009,7 +1013,7 @@ impl App {
 
     /// Checks one slot again right before booking: `Some` if `[start, end)`
     /// is still bookable. Hold [`App::opening_booking_guard`] from this
-    /// check until [`App::complete_opening_booking`].
+    /// check until [`App::mark_opening_booked`].
     pub async fn check_opening_slot(
         &self,
         opening_id: &str,
@@ -1026,32 +1030,52 @@ impl App {
     /// Records a booking (the booking page created `event_id`): a one-off
     /// link is used up and all its placeholders are removed (the booked
     /// suggestion's too). A template stays as it is. `409 conflict` if the
-    /// one-off link was booked already.
+    /// one-off link was booked already. [`App::mark_opening_booked`], then
+    /// [`App::remove_booked_placeholders`].
     pub async fn complete_opening_booking(
         &self,
         opening_id: &str,
         event_id: &str,
         now: DateTime<Utc>,
     ) -> AppResult<()> {
-        let (id, event_id) = (opening_id.to_owned(), event_id.to_owned());
-        let queued = self
-            .with_change_tx(move |tx| {
-                let row = store::opening(tx, &id)?.ok_or_else(not_found)?;
-                if row.kind == OpeningKind::Template {
-                    return Ok(false);
-                }
-                let at = now.timestamp_millis();
-                if !store::mark_booked(tx, &id, &event_id, at)? {
-                    return Err(AppError::Conflict("Dieser Link ist bereits gebucht".into()));
-                }
-                store::queue_placeholders(tx, &id, None, at)?;
-                Ok(true)
-            })
-            .await?;
-        if queued {
-            self.remove_placeholders_logged().await;
+        if self.mark_opening_booked(opening_id, event_id, now).await? {
+            self.remove_booked_placeholders().await;
         }
         Ok(())
+    }
+
+    /// The bookkeeping of a booking, quick and local: a one-off link is
+    /// marked booked (only while it is not, else `409 conflict`) and its
+    /// placeholders are queued for removal. `true` if placeholders were
+    /// queued: then call [`App::remove_booked_placeholders`], after
+    /// releasing [`App::opening_booking_guard`] (the removal talks to the
+    /// provider). A template stays as it is (`false`).
+    pub async fn mark_opening_booked(
+        &self,
+        opening_id: &str,
+        event_id: &str,
+        now: DateTime<Utc>,
+    ) -> AppResult<bool> {
+        let (id, event_id) = (opening_id.to_owned(), event_id.to_owned());
+        self.with_change_tx(move |tx| {
+            let row = store::opening(tx, &id)?.ok_or_else(not_found)?;
+            if row.kind == OpeningKind::Template {
+                return Ok(false);
+            }
+            let at = now.timestamp_millis();
+            if !store::mark_booked(tx, &id, &event_id, at)? {
+                return Err(AppError::Conflict("Dieser Link ist bereits gebucht".into()));
+            }
+            store::queue_placeholders(tx, &id, None, at)?;
+            Ok(true)
+        })
+        .await
+    }
+
+    /// Removes the placeholders queued by [`App::mark_opening_booked`] at
+    /// the provider; what fails is logged and left for the next cleanup.
+    pub async fn remove_booked_placeholders(&self) {
+        self.remove_placeholders_logged().await;
     }
 
     // ----- placeholders ---------------------------------------------------------------
@@ -1223,6 +1247,23 @@ mod tests {
         .unwrap();
         assert_eq!(ok[0].0, t("2026-11-03T09:00:00Z"), "ordered");
         assert_eq!(ok[1].1, t("2026-11-04T09:30:00Z"), "end from the length");
+        let cut = check_suggestions(
+            vec![
+                s("2026-11-05T10:00:00.750+01:00", None),
+                s("2026-11-06T10:00:00.250Z", Some("2026-11-06T10:30:00.999Z")),
+            ],
+            half,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            cut,
+            vec![
+                (t("2026-11-05T09:00:00Z"), t("2026-11-05T09:30:00Z")),
+                (t("2026-11-06T10:00:00Z"), t("2026-11-06T10:30:00Z")),
+            ],
+            "fractions of a second are cut"
+        );
         for bad in [
             vec![s("2026-11-03T10:00:00", None)],
             vec![s(

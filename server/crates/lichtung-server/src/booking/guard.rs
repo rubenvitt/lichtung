@@ -4,8 +4,11 @@
 //!
 //! - **Rate limits** ([`Limiter`]): sliding windows per client address
 //!   ([`crate::oauth::routes::client_source`], an IPv6 address counts as
-//!   its /64), per link, per guest address and in total. One container,
-//!   so memory is enough; a restart starts the counts over.
+//!   its /64, unknown links and bookings also per /48), per link, per
+//!   guest address and in total. One container, so memory is enough; a
+//!   restart starts the counts over. The number of keys is capped: when
+//!   full, the entries hit longest ago make room (never the total), so a
+//!   flood of addresses cannot lock out new visitors.
 //! - **Form token** ([`sign_form`], [`check_form`]): `<issued ms>.<HMAC>`
 //!   over the link token, the slot start and the time the form was
 //!   issued, keyed with a key derived from `LICHTUNG_SECRET_KEY`. A form
@@ -31,9 +34,12 @@ pub const MAX_NAME_CHARS: usize = 100;
 pub const MAX_EMAIL_CHARS: usize = 254;
 /// Longest note of a guest.
 pub const MAX_NOTE_CHARS: usize = 1_000;
-/// At most this many keys are tracked at once; beyond that new keys are
-/// refused until old ones expire (fail closed under a flood).
+/// At most this many keys are tracked at once; beyond that the entries
+/// hit longest ago are dropped (see [`Limiter`]).
 const MAX_KEYS: usize = 20_000;
+/// How many entries one eviction drops, so a flood does not pay for a
+/// full scan on every new key.
+const EVICT_BATCH: usize = MAX_KEYS / 10;
 
 const MINUTE_MS: i64 = 60 * 1000;
 
@@ -46,8 +52,12 @@ pub enum Bucket {
     Post,
     /// Requests with an unknown link per address (1 hour).
     Miss,
+    /// Requests with an unknown link per IPv6 /48 (1 hour).
+    MissNet,
     /// Bookings per address (24 hours).
     BookingSource,
+    /// Bookings per IPv6 /48 (24 hours).
+    BookingNet,
     /// Bookings per link (24 hours).
     BookingLink,
     /// Bookings per guest e-mail address (24 hours).
@@ -60,8 +70,9 @@ impl Bucket {
     pub fn window_ms(self) -> i64 {
         match self {
             Bucket::View | Bucket::Post => 10 * MINUTE_MS,
-            Bucket::Miss => 60 * MINUTE_MS,
+            Bucket::Miss | Bucket::MissNet => 60 * MINUTE_MS,
             Bucket::BookingSource
+            | Bucket::BookingNet
             | Bucket::BookingLink
             | Bucket::BookingEmail
             | Bucket::BookingTotal => 24 * 60 * MINUTE_MS,
@@ -70,69 +81,111 @@ impl Bucket {
 }
 
 /// The key of a client address: the address, an IPv6 address as its /64,
-/// `unknown` without one.
+/// `unknown` without one. An IPv4-mapped IPv6 address counts as IPv4.
 pub fn source_key(source: Option<IpAddr>) -> String {
-    match source {
-        Some(IpAddr::V6(v6)) => {
-            let bits = u128::from(v6) & !((1u128 << 64) - 1);
-            format!("{}/64", std::net::Ipv6Addr::from(bits))
-        }
+    match source.map(|ip| ip.to_canonical()) {
+        Some(IpAddr::V6(v6)) => v6_prefix(v6, 64),
         Some(v4) => v4.to_string(),
         None => "unknown".to_owned(),
     }
 }
 
+/// The coarser network of a client address: an IPv6 address as its /48
+/// (many /64s are cheap to come by there); `None` for IPv4 and without
+/// an address.
+pub fn net_key(source: Option<IpAddr>) -> Option<String> {
+    match source.map(|ip| ip.to_canonical()) {
+        Some(IpAddr::V6(v6)) => Some(v6_prefix(v6, 48)),
+        _ => None,
+    }
+}
+
+fn v6_prefix(v6: std::net::Ipv6Addr, len: u32) -> String {
+    let bits = u128::from(v6) & !((1u128 << (128 - len)) - 1);
+    format!("{}/{len}", std::net::Ipv6Addr::from(bits))
+}
+
 /// Sliding-window counters (timestamps in Unix milliseconds).
+///
+/// At most [`MAX_KEYS`] keys: a new key in a full map first drops the
+/// expired entries, then the [`EVICT_BATCH`] entries hit longest ago
+/// (never [`Bucket::BookingTotal`]). A new key is never refused for lack
+/// of room; forgetting an old count is the lesser harm than locking out
+/// every new visitor, and the total booking limit stays.
 #[derive(Debug, Default)]
 pub struct Limiter {
     hits: Mutex<HashMap<(Bucket, String), VecDeque<i64>>>,
 }
 
+fn make_room(map: &mut HashMap<(Bucket, String), VecDeque<i64>>, now: i64) {
+    map.retain(|(b, _), times| times.back().is_some_and(|t| *t > now - b.window_ms()));
+    if map.len() < MAX_KEYS {
+        return;
+    }
+    let mut by_age: Vec<(i64, (Bucket, String))> = map
+        .iter()
+        .filter(|((b, _), _)| *b != Bucket::BookingTotal)
+        .map(|(k, times)| (times.back().copied().unwrap_or(i64::MIN), k.clone()))
+        .collect();
+    let n = EVICT_BATCH.min(by_age.len());
+    if n == 0 {
+        return;
+    }
+    by_age.select_nth_unstable_by_key(n - 1, |(last, _)| *last);
+    for (_, key) in by_age.into_iter().take(n) {
+        map.remove(&key);
+    }
+    tracing::warn!(
+        evicted = n,
+        "booking page rate limiter full, oldest entries dropped"
+    );
+}
+
 impl Limiter {
+    /// Runs `f` on the hits of `key` within the window. Without an entry
+    /// `f` gets `None`, unless `insert`: then the entry is created, making
+    /// room if needed.
     fn with_entry<T>(
         &self,
         bucket: Bucket,
         key: &str,
         now: i64,
-        f: impl FnOnce(Option<&mut VecDeque<i64>>, bool) -> T,
+        insert: bool,
+        f: impl FnOnce(Option<&mut VecDeque<i64>>) -> T,
     ) -> T {
         let mut map = self.hits.lock().unwrap_or_else(PoisonError::into_inner);
-        if map.len() >= MAX_KEYS {
-            map.retain(|(b, _), times| times.back().is_some_and(|t| *t > now - b.window_ms()));
-        }
-        let room = map.len() < MAX_KEYS;
         let entry_key = (bucket, key.to_owned());
-        match map.get_mut(&entry_key) {
-            Some(times) => {
-                let since = now - bucket.window_ms();
-                while times.front().is_some_and(|t| *t <= since) {
-                    times.pop_front();
-                }
-                f(Some(times), room)
+        if !map.contains_key(&entry_key) {
+            if !insert {
+                return f(None);
             }
-            None if room => {
-                let times = map.entry(entry_key).or_default();
-                f(Some(times), room)
+            if map.len() >= MAX_KEYS {
+                make_room(&mut map, now);
             }
-            None => f(None, room),
         }
+        let times = map.entry(entry_key).or_default();
+        let since = now - bucket.window_ms();
+        while times.front().is_some_and(|t| *t <= since) {
+            times.pop_front();
+        }
+        f(Some(times))
     }
 
     /// Hits of `key` within the window.
     pub fn count(&self, bucket: Bucket, key: &str, now: i64) -> usize {
-        self.with_entry(bucket, key, now, |times, _| times.map_or(0, |t| t.len()))
+        self.with_entry(bucket, key, now, false, |times| {
+            times.map_or(0, |t| t.len())
+        })
     }
 
     /// Whether one more hit stays within `limit` (nothing is counted).
     pub fn allows(&self, bucket: Bucket, key: &str, limit: u32, now: i64) -> bool {
-        self.with_entry(bucket, key, now, |times, _| {
-            times.is_some_and(|t| t.len() < limit as usize)
-        })
+        self.count(bucket, key, now) < limit as usize
     }
 
     /// Counts a hit.
     pub fn hit(&self, bucket: Bucket, key: &str, now: i64) {
-        self.with_entry(bucket, key, now, |times, _| {
+        self.with_entry(bucket, key, now, true, |times| {
             if let Some(t) = times {
                 t.push_back(now);
             }
@@ -141,13 +194,21 @@ impl Limiter {
 
     /// Counts a hit if it stays within `limit`; `false` = refused.
     pub fn try_hit(&self, bucket: Bucket, key: &str, limit: u32, now: i64) -> bool {
-        self.with_entry(bucket, key, now, |times, _| match times {
+        self.with_entry(bucket, key, now, true, |times| match times {
             Some(t) if t.len() < limit as usize => {
                 t.push_back(now);
                 true
             }
             _ => false,
         })
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.hits
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
     }
 }
 
@@ -344,6 +405,71 @@ mod tests {
         assert_eq!(source_key(Some(a)), source_key(Some(b)));
         assert_eq!(source_key(Some("192.0.2.7".parse().unwrap())), "192.0.2.7");
         assert_eq!(source_key(None), "unknown");
+        assert_eq!(source_key(Some(a)), "2001:db8:1:2::/64");
+        let c: IpAddr = "2001:db8:1:ffff::3".parse().unwrap();
+        assert_eq!(net_key(Some(a)), net_key(Some(c)), "one /48");
+        assert_eq!(net_key(Some(a)).unwrap(), "2001:db8:1::/48");
+        assert_eq!(net_key(Some("192.0.2.7".parse().unwrap())), None);
+    }
+
+    #[test]
+    fn ipv4_mapped_counts_as_ipv4() {
+        let mapped: IpAddr = "::ffff:192.0.2.7".parse().unwrap();
+        let other: IpAddr = "::ffff:198.51.100.9".parse().unwrap();
+        assert_eq!(source_key(Some(mapped)), "192.0.2.7");
+        assert_ne!(source_key(Some(mapped)), source_key(Some(other)));
+        assert_eq!(net_key(Some(mapped)), None);
+
+        // A listener on [::] sees Traefik as ::ffff:172.x: still a proxy.
+        let proxy: std::net::SocketAddr = "[::ffff:172.18.0.2]:40000".parse().unwrap();
+        let mut headers = axum::http::HeaderMap::new();
+        assert_eq!(
+            source_of(Some(proxy), &headers),
+            Some("172.18.0.2".parse().unwrap())
+        );
+        headers.insert("x-forwarded-for", "203.0.113.5".parse().unwrap());
+        assert_eq!(
+            source_of(Some(proxy), &headers),
+            Some("203.0.113.5".parse().unwrap())
+        );
+        headers.insert("x-forwarded-for", "::ffff:198.51.100.9".parse().unwrap());
+        assert_eq!(
+            source_of(Some(proxy), &headers),
+            Some("198.51.100.9".parse().unwrap())
+        );
+        let direct: std::net::SocketAddr = "[::ffff:198.51.100.77]:40000".parse().unwrap();
+        assert_eq!(
+            source_of(Some(direct), &headers),
+            Some("198.51.100.77".parse().unwrap()),
+            "a public peer's header is ignored"
+        );
+    }
+
+    #[test]
+    fn a_full_limiter_evicts_instead_of_refusing() {
+        let l = Limiter::default();
+        l.hit(Bucket::BookingTotal, "all", 0);
+        l.hit(Bucket::Miss, "old", 1);
+        for i in 0..MAX_KEYS {
+            l.hit(Bucket::View, &format!("flood-{i}"), 10 + i as i64);
+        }
+        assert!(l.len() <= MAX_KEYS);
+        let now = 10 + MAX_KEYS as i64;
+        assert!(
+            l.try_hit(Bucket::View, "new visitor", 1, now),
+            "a new key gets room"
+        );
+        assert!(
+            l.allows(Bucket::Miss, "another visitor", 1, now),
+            "an unknown key is not probing"
+        );
+        assert_eq!(l.count(Bucket::Miss, "old", now), 0, "the oldest went");
+        assert_eq!(
+            l.count(Bucket::BookingTotal, "all", now),
+            1,
+            "the total stays"
+        );
+        assert_eq!(l.count(Bucket::View, "new visitor", now), 1);
     }
 
     #[test]

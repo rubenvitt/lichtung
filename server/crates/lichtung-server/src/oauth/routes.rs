@@ -170,8 +170,9 @@ async fn authorization_server(State(state): State<OAuthState>) -> Response {
 /// The address a request comes from: the peer, or behind a reverse proxy on
 /// a loopback or private address (Traefik in the same Docker network) the
 /// right-most `X-Forwarded-For` entry, which the proxy itself appended.
+/// IPv4-mapped IPv6 addresses (a listener on `[::]`) count as IPv4.
 pub(crate) fn client_source(peer: Option<SocketAddr>, headers: &HeaderMap) -> Option<IpAddr> {
-    let peer = peer?.ip();
+    let peer = peer?.ip().to_canonical();
     let behind_proxy = match peer {
         IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
         IpAddr::V6(v6) => v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00,
@@ -185,7 +186,8 @@ pub(crate) fn client_source(peer: Option<SocketAddr>, headers: &HeaderMap) -> Op
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(','))
         .last()
-        .and_then(|ip| ip.trim().parse::<IpAddr>().ok());
+        .and_then(|ip| ip.trim().parse::<IpAddr>().ok())
+        .map(|ip| ip.to_canonical());
     Some(forwarded.unwrap_or(peer))
 }
 

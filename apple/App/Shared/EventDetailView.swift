@@ -69,6 +69,15 @@ struct EventDetailView: View {
                         }
                     }
                 }
+                // Über einen Buchungslink gebucht (LIC-33): Gast und Notiz
+                // stehen nur in Lichtung, nicht im Termin.
+                if let found = model.state.openingBooking(forEvent: occurrence.eventId) {
+                    Section {
+                        OpeningBookingRow(booking: found.booking, today: model.today, calendar: model.calendar, showsTime: false)
+                    } header: {
+                        Text("Gebucht über „\(found.opening.title)“")
+                    }
+                }
                 Section {
                     Button("Duplizieren") {
                         Task { await model.duplicate(occurrence) }

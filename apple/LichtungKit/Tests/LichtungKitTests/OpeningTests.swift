@@ -77,6 +77,42 @@ struct OpeningTests {
         #expect(!o.isBooked && !o.isExhausted)
     }
 
+    @Test func decodesBookingsWithTheGuestsNote() throws {
+        #expect(try F.decode(F.templateJSON).bookings.isEmpty, "older servers send none")
+        let json = F.templateJSON.replacingOccurrences(of: "\"booked_event_id\": null,", with: """
+        "booked_event_id": null,
+        "bookings": [
+          {"id": "bkg_2", "event_id": "ev_22", "start": "2026-11-04T13:00:00Z", "end": "2026-11-04T13:30:00Z",
+           "guest_name": "Cora Clever", "guest_email": "cora@example.org", "note": null,
+           "created_at": "2026-10-27T10:00:00Z"},
+          {"id": "bkg_1", "event_id": "ev_21", "start": "2026-11-03T09:00:00Z", "end": "2026-11-03T09:30:00Z",
+           "guest_name": "Bert Beispiel", "guest_email": "bert@example.org", "note": "  Ich bringe Unterlagen mit.\\n",
+           "created_at": "2026-10-26T12:00:00.250Z"}
+        ],
+        """)
+        let t = try F.decode(json)
+        #expect(t.bookings.map(\.id) == ["bkg_2", "bkg_1"])
+        let b = try #require(t.booking(forEvent: "ev_21"))
+        #expect(b.guestName == "Bert Beispiel")
+        #expect(b.guestText == "Bert Beispiel <bert@example.org>")
+        #expect(b.noteText == "Ich bringe Unterlagen mit.")
+        #expect(b.start == APICoding.parseTimestamp("2026-11-03T09:00:00Z"))
+        #expect(b.createdAt != nil)
+        #expect(t.bookings[0].note == nil && t.bookings[0].noteText == nil)
+        #expect(b.timeText(today: F.today, calendar: F.cal).hasSuffix("10:00–10:30"))
+        #expect(OpeningText.bookingCount(1) == "1 Buchung" && OpeningText.bookingCount(2) == "2 Buchungen")
+
+        // Über den Pull und den Cache: der Termin findet seine Buchung.
+        var s = SyncState()
+        s.openings[t.id] = t
+        s.openings["opn_02"] = try F.decode(F.onceJSON)
+        #expect(s.openingBooking(forEvent: "ev_22")?.booking.guestName == "Cora Clever")
+        #expect(s.openingBooking(forEvent: "ev_22")?.opening.id == "opn_01")
+        #expect(s.openingBooking(forEvent: "ev_7") == nil, "a placeholder is no booking")
+        let data = try JSONEncoder().encode(s)
+        #expect(try JSONDecoder().decode(SyncState.self, from: data) == s)
+    }
+
     @Test func toleratesMissingFieldsAndUnknownValues() throws {
         let o = try F.decode("""
         {"id": "opn_9", "kind": "sammeltermin", "url": "https://lichtung.example.org/o/x", "duration_minutes": 15, "calendar_id": "cal_privat",

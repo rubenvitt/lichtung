@@ -61,6 +61,36 @@ public struct Opening: Codable, Hashable, Sendable, Identifiable {
         }
     }
 
+    /// Eine Buchung über die Buchungsseite mit dem, was der Gast eingegeben
+    /// hat (LIC-33). Steht nur hier, nicht im Termin: Die Einladung geht von
+    /// der eigenen Adresse an den Gast und trägt nichts, was er eingetippt hat.
+    public struct Booking: Codable, Hashable, Sendable, Identifiable {
+        public var id: String
+        /// Der angelegte Termin.
+        public var eventId: String
+        public var start: Date
+        public var end: Date
+        public var guestName: String
+        public var guestEmail: String
+        public var note: String?
+        /// Zeitpunkt der Buchung.
+        public var createdAt: Date?
+
+        public init(
+            id: String, eventId: String, start: Date, end: Date, guestName: String, guestEmail: String,
+            note: String? = nil, createdAt: Date? = nil
+        ) {
+            self.id = id
+            self.eventId = eventId
+            self.start = start
+            self.end = end
+            self.guestName = guestName
+            self.guestEmail = guestEmail
+            self.note = note
+            self.createdAt = createdAt
+        }
+    }
+
     public var id: String
     public var kind: Kind
     /// Öffentliche Buchungsseite `<öffentliche URL>/o/<token>`.
@@ -81,6 +111,8 @@ public struct Opening: Codable, Hashable, Sendable, Identifiable {
     public var suggestions: [Suggestion]
     public var bookedAt: Date?
     public var bookedEventId: String?
+    /// Buchungen, neueste zuerst (höchstens 50; ältere Server: leer).
+    public var bookings: [Booking]
     public var createdAt: Date?
     public var updatedAt: Date?
 
@@ -90,7 +122,8 @@ public struct Opening: Codable, Hashable, Sendable, Identifiable {
         bufferBeforeMinutes: Int = 0, bufferAfterMinutes: Int = 0,
         minNoticeMinutes: Int = Opening.defaultMinNoticeMinutes, horizonDays: Int = Opening.defaultHorizonDays,
         videoUrl: String? = nil, suggestionsOnly: Bool = false, suggestions: [Suggestion] = [],
-        bookedAt: Date? = nil, bookedEventId: String? = nil, createdAt: Date? = nil, updatedAt: Date? = nil
+        bookedAt: Date? = nil, bookedEventId: String? = nil, bookings: [Booking] = [],
+        createdAt: Date? = nil, updatedAt: Date? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -109,13 +142,15 @@ public struct Opening: Codable, Hashable, Sendable, Identifiable {
         self.suggestions = suggestions
         self.bookedAt = bookedAt
         self.bookedEventId = bookedEventId
+        self.bookings = bookings
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, url, title, durationMinutes, calendarId, timeZone, windows, bufferBeforeMinutes, bufferAfterMinutes
-        case minNoticeMinutes, horizonDays, videoUrl, suggestionsOnly, suggestions, bookedAt, bookedEventId, createdAt, updatedAt
+        case minNoticeMinutes, horizonDays, videoUrl, suggestionsOnly, suggestions, bookedAt, bookedEventId, bookings
+        case createdAt, updatedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -137,6 +172,7 @@ public struct Opening: Codable, Hashable, Sendable, Identifiable {
         suggestionsOnly = try c.decodeIfPresent(Bool.self, forKey: .suggestionsOnly) ?? !suggestions.isEmpty
         bookedAt = try c.decodeIfPresent(Date.self, forKey: .bookedAt)
         bookedEventId = try c.decodeIfPresent(String.self, forKey: .bookedEventId)
+        bookings = try c.decodeIfPresent([Booking].self, forKey: .bookings) ?? []
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt)
     }

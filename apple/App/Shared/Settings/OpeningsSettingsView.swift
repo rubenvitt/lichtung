@@ -196,12 +196,59 @@ private struct OpeningRow: View {
                     Text(opening.rulesText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if !opening.bookings.isEmpty {
+                        Text(OpeningText.bookingCount(opening.bookings.count))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            // Wer gebucht hat und seine Notiz (LIC-33): nur hier, nicht im Termin.
+            if opening.kind == .once, let booking = opening.bookings.first {
+                Text(booking.guestText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let note = booking.noteText {
+                    Text(note)
+                        .font(.caption)
+                        .lineLimit(3)
                 }
             }
             if let status = opening.statusText(calendars: calendars, today: today, calendar: calendar) {
                 Label(status, systemImage: opening.isBooked ? "checkmark.circle" : "exclamationmark.circle")
                     .font(.caption)
                     .foregroundStyle(opening.isBooked ? Color.secondary : Color.orange)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// Gast, gebuchte Zeit und Notiz einer Buchung (LIC-33). Die Notiz steht
+/// nur hier und in der Termindetailansicht, nie in der Einladung.
+struct OpeningBookingRow: View {
+    let booking: Opening.Booking
+    let today: LocalDate
+    let calendar: Calendar
+    var showsTime = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(booking.guestName)
+            Text(booking.guestEmail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            if showsTime {
+                Text(booking.timeText(today: today, calendar: calendar))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let note = booking.noteText {
+                Text(note)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .padding(.top, 2)
             }
         }
         .padding(.vertical, 2)
@@ -492,6 +539,20 @@ private struct OpeningTemplateEditor: View {
                             copied = true
                         } label: {
                             Label(copied ? "Kopiert" : "Link kopieren", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        }
+                    }
+
+                    // Buchungen mit Name, E-Mail-Adresse und Notiz der Gäste (LIC-33).
+                    let bookings = settings.opening(original.id)?.bookings ?? original.bookings
+                    if !bookings.isEmpty {
+                        Section {
+                            ForEach(bookings) { booking in
+                                OpeningBookingRow(booking: booking, today: session.model.today, calendar: session.model.calendar)
+                            }
+                        } header: {
+                            Text("Buchungen")
+                        } footer: {
+                            Text("Nur für dich. Die Einladung an den Gast enthält den Titel des Links und den Videolink, nicht seine Notiz.")
                         }
                     }
                 }

@@ -107,6 +107,13 @@ enum DemoData {
                     videoUrl: "https://meet.example.org/kennenlernen", createdAt: now.addingTimeInterval(-7 * 86_400)),
             Opening(id: "demo_o4", kind: .once, url: base + "demo-fahrrad", title: "Fahrrad abholen", durationMinutes: 15,
                     calendarId: "demo_privat", timeZone: zone, bookedAt: now.addingTimeInterval(-26 * 3_600),
+                    bookedEventId: "demo_fahrrad",
+                    bookings: [
+                        Opening.Booking(id: "demo_b1", eventId: "demo_fahrrad", start: instant(first, 18),
+                                        end: instant(first, 18).addingTimeInterval(900), guestName: "Bert Beispiel",
+                                        guestEmail: "bert@example.org", note: "Ich komme mit dem Lastenrad.",
+                                        createdAt: now.addingTimeInterval(-26 * 3_600)),
+                    ],
                     createdAt: now.addingTimeInterval(-3 * 86_400)),
         ]
         for o in openings { s.openings[o.id] = o }

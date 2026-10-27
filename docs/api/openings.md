@@ -38,6 +38,12 @@ Ein Opening ist ein Buchungslink. Gäste buchen über die öffentliche Seite `<�
   "suggestions": [],
   "booked_at": null,
   "booked_event_id": null,
+  "bookings": [
+    {"id": "bkg_0190…", "event_id": "ev_0190…",
+     "start": "2026-11-03T09:00:00Z", "end": "2026-11-03T09:30:00Z",
+     "guest_name": "Bert Beispiel", "guest_email": "bert@example.org",
+     "note": "Ich bringe Unterlagen mit.", "created_at": "2026-10-27T10:12:00.456Z"}
+  ],
   "created_at": "2026-10-26T08:00:00.123Z",
   "updated_at": "2026-10-26T08:00:00.123Z"
 }
@@ -53,6 +59,7 @@ Ein Opening ist ein Buchungslink. Gäste buchen über die öffentliche Seite `<�
 | `video_url` | Fester Videolink oder `null`. Die Buchungsseite übernimmt ihn in den Termin. |
 | `suggestions` | Nur bei `once`: Vorschläge, die noch nicht begonnen haben, frühester zuerst (siehe unten). Vergangene fehlen. |
 | `booked_at`, `booked_event_id` | Nur bei `once`: Zeitpunkt der Buchung und das angelegte Event; sonst `null`. |
+| `bookings` | *(LIC-33, LIC-35)* Buchungen über die Buchungsseite, neueste zuerst, höchstens 50: `event_id` (der angelegte Termin), `start`/`end` (gebuchte Zeit, UTC), `guest_name`, `guest_email`, `note` (oder `null`) wie vom Gast eingegeben (geprüft, Abschnitt 7), `created_at` (Zeitpunkt der Buchung). Ein Einmal-Link hat höchstens eine, eine Vorlage beliebig viele. Nur hier, nicht im Termin (Abschnitt 8). |
 
 **Vorschlag:**
 
@@ -86,11 +93,13 @@ Ein Opening ist ein Buchungslink. Gäste buchen über die öffentliche Seite `<�
 
 | Aufruf | Zweck | Wer |
 |---|---|---|
-| `GET /api/openings` | alle Links, neueste zuerst | jedes Token für `/api` |
-| `GET /api/openings/{id}` | ein Link (`404` wenn unbekannt) | jedes Token für `/api` |
+| `GET /api/openings` | alle Links, neueste zuerst, mit ihren Buchungen | jedes Token für `/api` |
+| `GET /api/openings/{id}` | ein Link mit seinen Buchungen (`404` wenn unbekannt) | jedes Token für `/api` |
 | `POST /api/openings` | Link anlegen → `201` mit dem Opening | Geräte der App und Browser-Sitzungen |
 | `PATCH /api/openings/{id}` | Link ändern → `200` mit dem Opening | Geräte der App und Browser-Sitzungen |
 | `DELETE /api/openings/{id}` | Link löschen, Platzhalter entfernen → `204` | Geräte der App und Browser-Sitzungen |
+
+Die Buchungen (`bookings`) lesen dieselben Principals wie die Links: alle, die der Eigentümer selbst angelegt hat (Geräte, Browser-Sitzungen, API-Tokens); eine eigene Freigabe gibt es nicht. Die Buchungsseite zeigt sie nie, auch nicht die früherer Gäste derselben Vorlage, und das MCP-Werkzeug `create_opening_link` gibt sie nicht zurück.
 
 API-Tokens (`lt_…`) dürfen Links nur lesen (`403 forbidden`): Ein Link schreibt Platzhalter in seinen Zielkalender, unabhängig von `mcp_write`, und API-Tokens öffnen auch `/mcp`. Claude legt Einmal-Links über das MCP-Werkzeug `create_opening_link` an (LIC-45, [`mcp.md`](../mcp.md)); es prüft zusätzlich `mcp_write` des Zielkalenders.
 
@@ -129,7 +138,7 @@ Verliert ein Zielkalender später diese Eigenschaften oder verschwindet er, blei
 
 ## 6. Im Pull
 
-Links kommen über den Pull der Sync-API als eigener Objekttyp `opening` (Daten wie in Abschnitt 2), Löschungen als `{"type": "opening", "op": "delete", "id": …}`. Jede Änderung (Anlegen, Ändern, Platzhalter angelegt, Vorschlag verfallen, Buchung) erscheint dort, also auch Links, die Claude anlegt. Clients, die den Typ nicht kennen, überspringen ihn.
+Links kommen über den Pull der Sync-API als eigener Objekttyp `opening` (Daten wie in Abschnitt 2), Löschungen als `{"type": "opening", "op": "delete", "id": …}`. Jede Änderung (Anlegen, Ändern, Platzhalter angelegt, Vorschlag verfallen, Buchung, auch die einer Vorlage, und das Löschen alter Buchungen) erscheint dort, mit `bookings` wie in Abschnitt 2, also auch Links, die Claude anlegt. Clients, die den Typ nicht kennen, überspringen ihn.
 
 ## 7. Öffentliche Buchungsseite (LIC-33, LIC-34)
 
@@ -152,8 +161,8 @@ Der einzige Teil von Lichtung ohne Anmeldung. Server-gerendertes HTML ohne exter
 3. Honeypot `website` (für Menschen unsichtbar) gefüllt → `400`.
 4. Eingaben: Name 1 bis 100 Zeichen ohne Steuerzeichen, Links (`://`, `www.`, `domain/pfad`), `@` oder `<>`; E-Mail-Adresse syntaktisch (ASCII, `local@domain.tld`, höchstens 254 Zeichen); Notiz höchstens 1000 Zeichen. Fehler → `400` mit dem ausgefüllten Formular und den Meldungen.
 5. Unter `App::opening_booking_guard` (eine Buchung nach der anderen): Buchungsgrenzen (unten) → `429`; `App::check_opening_slot` prüft den Slot gegen den aktuellen Stand; vergeben, vergangen oder kein gültiger Slot → `409` mit der Seite und frischen Zeiten.
-6. Termin über den Schreibpfad (`create_event`, Herkunft `server`) im Zielkalender, in der Zone des Links: Titel `<Titel des Links> (<Name>)`, Beschreibung mit Name, E-Mail und Notiz des Gastes (in der Sprache der Seite), Videolink als Ort und `URL`, `availability: busy`, der Gast als `ATTENDEE` (`CN`, `ROLE=REQ-PARTICIPANT`, `PARTSTAT=NEEDS-ACTION`, `RSVP=TRUE`) und die eigene Adresse des Kontos (erste aus `calendar-user-address-set`, sonst der Login, wenn er eine E-Mail-Adresse ist) als `ORGANIZER`. Hat das Konto keine eigene Adresse, bucht die Seite nicht (`503`), weil keine Einladung herausginge. Den Versand übernimmt der Anbieter (CalDAV-Scheduling, RFC 6638; deshalb nur Zielkalender mit `can_invite`).
-7. Noch unter dem Guard `App::mark_opening_booked`: ein Einmal-Link ist verbraucht (nur wenn `booked_at` noch leer ist), seine Platzhalter kommen in die Löschwarteschlange. Scheitert das, versucht der Server es einmal erneut, sonst steht ein lauter Fehler im Log (`BOOKING WRITTEN, BUT THE LINK WAS NOT MARKED BOOKED`). Erst nach dem Guard löscht `App::remove_booked_placeholders` die Platzhalter beim Anbieter, damit andere Buchungen nicht darauf warten.
+6. Termin über den Schreibpfad (`create_event`, Herkunft `server`) im Zielkalender, in der Zone des Links: Titel = Titel des Links, Beschreibung nur `Video: <Videolink>` (ohne Videolink keine), Videolink als Ort und `URL`, `availability: busy`, der Gast als `ATTENDEE` (`CN`, `ROLE=REQ-PARTICIPANT`, `PARTSTAT=NEEDS-ACTION`, `RSVP=TRUE`) und die eigene Adresse des Kontos (erste aus `calendar-user-address-set`, sonst der Login, wenn er eine E-Mail-Adresse ist) als `ORGANIZER`. Hat das Konto keine eigene Adresse, bucht die Seite nicht (`503`), weil keine Einladung herausginge. Den Versand übernimmt der Anbieter (CalDAV-Scheduling, RFC 6638; deshalb nur Zielkalender mit `can_invite`). Name (außer als `CN`), E-Mail-Adresse (außer als `ATTENDEE`) und Notiz des Gastes stehen nicht im Termin (Abschnitt 8).
+7. Noch unter dem Guard `App::mark_opening_booked`: die Buchung mit Zeit, Name, E-Mail-Adresse und Notiz kommt in `opening_bookings` (`bookings` am Opening); ein Einmal-Link ist verbraucht (nur wenn `booked_at` noch leer ist), seine Platzhalter kommen in die Löschwarteschlange. Scheitert das, versucht der Server es einmal erneut, sonst steht ein lauter Fehler im Log (`BOOKING WRITTEN, BUT THE LINK WAS NOT MARKED BOOKED`). Erst nach dem Guard löscht `App::remove_booked_placeholders` die Platzhalter beim Anbieter, damit andere Buchungen nicht darauf warten.
 8. Antwort `200`: gebuchte Zeit in der Zone des Gastes, Hinweis, dass die Einladung per E-Mail kommt und Absagen über sie läuft.
 
 Anbieter nicht erreichbar oder Schreiben abgelehnt → `503` („gerade nicht möglich“).
@@ -178,4 +187,13 @@ Gezählt werden nur erfolgreiche Buchungen. Der Zähler merkt sich höchstens 20
 
 **Header** aller Seiten: `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-…'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` (die Kennung in der URL geht nicht weiter), `X-Robots-Tag: noindex, nofollow`, `Cache-Control: no-store`.
 
-**Serverintern:** Die Seite liest den Link über `App::opening_by_token`, die Slots über `App::opening_slots` (Zeitraum und „jetzt“ als Parameter) und bucht so: `App::opening_booking_guard` halten, `App::check_opening_slot` prüft den Slot erneut, Termin anlegen, `App::mark_opening_booked` markiert einen Einmal-Link als gebucht und stellt seine Platzhalter zum Löschen an (`409 conflict`, wenn er schon gebucht ist); nach dem Guard entfernt `App::remove_booked_placeholders` sie. `App::complete_opening_booking` macht beides nacheinander. Siehe `server/crates/lichtung-server/src/openings/mod.rs`.
+**Serverintern:** Die Seite liest den Link über `App::opening_by_token`, die Slots über `App::opening_slots` (Zeitraum und „jetzt“ als Parameter) und bucht so: `App::opening_booking_guard` halten, `App::check_opening_slot` prüft den Slot erneut, Termin anlegen, `App::mark_opening_booked` speichert die Buchung (Zeit und Eingaben des Gastes), markiert einen Einmal-Link als gebucht und stellt seine Platzhalter zum Löschen an (`409 conflict`, wenn er schon gebucht ist; dann wird auch nichts gespeichert); nach dem Guard entfernt `App::remove_booked_placeholders` sie. `App::complete_opening_booking` macht beides nacheinander. Siehe `server/crates/lichtung-server/src/openings/mod.rs`.
+
+## 8. Was der Gast eingibt, bleibt beim Eigentümer (LIC-33)
+
+Der Anbieter verschickt den gebuchten Termin als iTIP-Einladung (RFC 6638) **von der eigenen Adresse** an die Adresse, die der Gast eingetippt hat, mit `SUMMARY` und `DESCRIPTION`. Stünden Name oder Notiz darin, könnte jeder über die Buchungsseite beliebigen Text von der eigenen Adresse an beliebige Empfänger schicken lassen (Spam, Phishing). Deshalb:
+
+- `SUMMARY` ist nur der Titel des Links, `DESCRIPTION` nur der Videolink des Links (beides legt der Eigentümer fest), ohne Videolink fehlt sie.
+- Der Gast steht nur als `ATTENDEE` im Termin; sein Name als Parameter `CN` (für die Einladung nötig). Die Eingabeprüfung (Abschnitt 7, Schritt 4) lässt im Namen keine Links, `@`, `<>` und Steuerzeichen zu.
+- Name, E-Mail-Adresse und Notiz speichert der Server je Buchung in `opening_bookings` (Schema-Version 8) und zeigt sie nur in der Verwaltung (`bookings`, Abschnitt 2) und im Pull. Die App zeigt sie unter „Buchungen“ des Links.
+- **Aufbewahrung:** Buchungen gehen mit ihrem Link (Löschen des Links löscht sie). Die Aufräumrunde (alle 15 Minuten) löscht Buchungen, die vor mehr als 365 Tagen gebucht wurden und deren Termin mehr als 365 Tage vorbei ist; der Link erscheint dann neu im Pull. Der Termin im Kalender bleibt davon unberührt.

@@ -161,6 +161,11 @@ public enum OpeningText {
     public static let noticeChoices = [0, 60, 120, 240, 480, 1440, 2880]
     public static let horizonChoices = [7, 14, 21, 28, 42, 60, 90]
 
+    /// „1 Buchung“, „3 Buchungen“.
+    public static func bookingCount(_ n: Int) -> String {
+        n == 1 ? "1 Buchung" : "\(n) Buchungen"
+    }
+
     /// Text zum Teilen eines Links (iOS-Teilen-Menü, Zwischenablage).
     public static func shareText(_ opening: Opening) -> String {
         opening.url
@@ -215,6 +220,27 @@ extension Opening {
     /// Lässt sich der Zielkalender noch ändern? Nicht bei Einmal-Links mit
     /// Vorschlägen (die Platzhalter liegen fest).
     public var canChangeCalendarAndDuration: Bool { !suggestionsOnly }
+
+    /// Die Buchung, die `eventId` angelegt hat.
+    public func booking(forEvent eventId: String) -> Booking? {
+        bookings.first { $0.eventId == eventId }
+    }
+}
+
+extension Opening.Booking {
+    /// „Bert Beispiel <bert@example.org>“.
+    public var guestText: String { "\(guestName) <\(guestEmail)>" }
+
+    /// Gebuchte Zeit in der Zeitzone des Geräts: „Morgen · Di 3. · 10:00–10:30“.
+    public func timeText(today: LocalDate, calendar cal: Calendar) -> String {
+        OpeningText.slot(start: start, end: end, today: today, calendar: cal)
+    }
+
+    /// Die Notiz des Gastes ohne Leerraum, `nil` wenn leer.
+    public var noteText: String? {
+        guard let t = note?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+        return t
+    }
 }
 
 // MARK: - Liste
@@ -255,6 +281,15 @@ extension SyncState {
     /// Buchungslinks für die Verwaltung.
     public func openingList(now: Date) -> OpeningList {
         OpeningList(openings.values, now: now)
+    }
+
+    /// Link und Buchung hinter einem Termin, den die Buchungsseite angelegt
+    /// hat (Notiz des Gastes in der Termindetailansicht); `nil` sonst.
+    public func openingBooking(forEvent eventId: String) -> (opening: Opening, booking: Opening.Booking)? {
+        for opening in openings.values {
+            if let booking = opening.booking(forEvent: eventId) { return (opening, booking) }
+        }
+        return nil
     }
 }
 

@@ -22,10 +22,20 @@
 //! [`App::check_opening_slot`], the event through the write path
 //! (`create_event`, origin `server`) with the guest as `ATTENDEE`
 //! (`RSVP=TRUE`) and the account's own address as `ORGANIZER`, then
-//! [`App::mark_opening_booked`] (tried twice); after releasing the guard
+//! [`App::mark_opening_booked`] (tried twice), which also stores what the
+//! guest entered; after releasing the guard
 //! [`App::remove_booked_placeholders`]. The provider sends the invitation
 //! from the own address (CalDAV scheduling, RFC 6638; targets need
 //! `can_invite`).
+//!
+//! **Note private (LIC-33):** the invitation goes from the own address to
+//! whatever address the guest typed, so it must carry nothing the guest
+//! controls, or the booking page would send the guest's text (spam) from
+//! the own address. Title: the link's title only. Description: only the
+//! link's video link (set by the owner), else none. The guest's name stands
+//! only as the attendee's `CN` (checked: no links, no control characters);
+//! name, address and note are stored with the booking and shown only in
+//! the management API ([`crate::openings::Booking`]).
 //!
 //! Unknown and deleted links look the same (`404`); a used one-off link
 //! says so (`410`). Limits: [`guard`], [`crate::config::BookingLimits`].
@@ -54,7 +64,7 @@ use crate::accounts::store as accounts_store;
 use crate::app::App;
 use crate::error::AppResult;
 use crate::events::EventContext;
-use crate::openings::{Opening, Slot};
+use crate::openings::{Guest, Opening, Slot};
 use crate::writes::{Origin, WriteOutcome};
 use guard::{Bucket, FormError, InputError, Limiter};
 use html::{Ctx, Entered, Lang, Nav};
@@ -648,7 +658,7 @@ async fn book(
             return unavailable(lang);
         }
     }
-    let mutation = booking_mutation(&opening, &slot, &name, &email, note.as_deref(), lang);
+    let mutation = booking_mutation(&opening, &slot, &name, &email);
     let event_id = match state.app.apply_mutation(&Origin::Server, &mutation).await {
         Ok(WriteOutcome::Applied { events, .. }) => {
             match events.first().and_then(|e| e["id"].as_str()) {
@@ -669,7 +679,12 @@ async fn book(
             return unavailable(lang);
         }
     };
-    let queued = mark_booked(&state.app, &opening.id, &event_id, visit.now).await;
+    let guest = Guest {
+        name,
+        email: email.clone(),
+        note,
+    };
+    let queued = mark_booked(&state.app, &opening.id, &event_id, &slot, &guest, visit.now).await;
     for (bucket, key, _) in counted {
         state.limiter.hit(bucket, key, now_ms);
     }
@@ -687,14 +702,26 @@ async fn book(
 /// trying once more if that fails: the event exists and the invitation is
 /// out, so a one-off link left unmarked would stay bookable. `true` if
 /// placeholders wait for removal.
-async fn mark_booked(app: &App, opening_id: &str, event_id: &str, now: DateTime<Utc>) -> bool {
-    let mut result = app.mark_opening_booked(opening_id, event_id, now).await;
+async fn mark_booked(
+    app: &App,
+    opening_id: &str,
+    event_id: &str,
+    slot: &Slot,
+    guest: &Guest,
+    now: DateTime<Utc>,
+) -> bool {
+    let booking = Some((slot, guest));
+    let mut result = app
+        .mark_opening_booked(opening_id, event_id, booking, now)
+        .await;
     if let Err(e) = &result {
         if !matches!(e, crate::error::AppError::Conflict(_)) {
             tracing::warn!(opening = %opening_id, event = %event_id, error = %e,
                 "marking the link booked failed, trying again");
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            result = app.mark_opening_booked(opening_id, event_id, now).await;
+            result = app
+                .mark_opening_booked(opening_id, event_id, booking, now)
+                .await;
         }
     }
     match result {
@@ -715,19 +742,12 @@ async fn mark_booked(app: &App, opening_id: &str, event_id: &str, now: DateTime<
     }
 }
 
-/// The `create_event` mutation of a booking: in the link's zone, title
-/// `<link title> (<guest>)`, the guest as attendee (the write path adds
-/// `ORGANIZER` with the own address, `PARTSTAT=NEEDS-ACTION`,
-/// `RSVP=TRUE`), the video link as place and URL, the note in the
-/// description.
-fn booking_mutation(
-    opening: &Opening,
-    slot: &Slot,
-    name: &str,
-    email: &str,
-    note: Option<&str>,
-    lang: Lang,
-) -> serde_json::Value {
+/// The `create_event` mutation of a booking: in the link's zone, the
+/// link's title, the guest as attendee (the write path adds `ORGANIZER`
+/// with the own address, `PARTSTAT=NEEDS-ACTION`, `RSVP=TRUE`), the video
+/// link as place, URL and description. Nothing else the guest entered: the
+/// provider sends this event to the guest's address (module docs).
+fn booking_mutation(opening: &Opening, slot: &Slot, name: &str, email: &str) -> serde_json::Value {
     let tz = Tz::from_str(&opening.time_zone).unwrap_or(Tz::UTC);
     let local = |t: DateTime<Utc>| {
         json!({
@@ -735,20 +755,8 @@ fn booking_mutation(
             "time_zone": tz.name(),
         })
     };
-    let (booked_by, note_label, video_label) = match lang {
-        Lang::De => ("Gebucht über Lichtung von", "Notiz", "Video"),
-        Lang::En => ("Booked via Lichtung by", "Note", "Video"),
-    };
-    let mut notes = format!("{booked_by} {name} <{email}>.");
-    if let Some(n) = note {
-        notes.push_str(&format!("\n\n{note_label}:\n{n}"));
-    }
-    if let Some(v) = &opening.video_url {
-        notes.push_str(&format!("\n\n{video_label}: {v}"));
-    }
     let mut event = json!({
-        "title": format!("{} ({name})", opening.title),
-        "notes": notes,
+        "title": opening.title,
         "start": local(slot.start),
         "end": local(slot.end),
         "availability": "busy",
@@ -757,6 +765,7 @@ fn booking_mutation(
     if let Some(v) = &opening.video_url {
         event["location"] = json!(v);
         event["url"] = json!(v);
+        event["notes"] = json!(format!("Video: {v}"));
     }
     json!({
         "op": "create_event",

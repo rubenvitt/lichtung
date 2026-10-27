@@ -1,5 +1,6 @@
-//! Persistence of openings, their suggestions and the queue of
-//! placeholders to remove (schema version 7). Every change to an opening
+//! Persistence of openings, their suggestions, the queue of placeholders
+//! to remove (schema version 7) and their bookings (schema version 8,
+//! deleted with the opening). Every change to an opening
 //! takes a fresh `seq` ([`crate::changes`]); a deletion leaves a tombstone.
 
 use std::collections::HashSet;
@@ -400,4 +401,90 @@ pub fn removal_failed(conn: &Connection, event_id: &str, error: &str) -> rusqlit
         params![event_id, error],
     )?;
     Ok(())
+}
+
+// ----- bookings -------------------------------------------------------------------------
+
+/// One booking of a link with what the guest entered (schema version 8).
+/// Never part of the booked event: only the owner sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BookingRow {
+    pub id: String,
+    pub opening_id: String,
+    pub event_id: String,
+    pub start_utc: i64,
+    pub end_utc: i64,
+    pub guest_name: String,
+    pub guest_email: String,
+    pub note: Option<String>,
+    pub created_at: i64,
+}
+
+pub fn insert_booking(conn: &Connection, b: &BookingRow) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO opening_bookings (id, opening_id, event_id, start_utc, end_utc, guest_name,
+             guest_email, note, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            b.id,
+            b.opening_id,
+            b.event_id,
+            b.start_utc,
+            b.end_utc,
+            b.guest_name,
+            b.guest_email,
+            b.note,
+            b.created_at
+        ],
+    )?;
+    Ok(())
+}
+
+/// The newest `limit` bookings of an opening, newest first.
+pub fn bookings(
+    conn: &Connection,
+    opening_id: &str,
+    limit: usize,
+) -> rusqlite::Result<Vec<BookingRow>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, opening_id, event_id, start_utc, end_utc, guest_name, guest_email, note,
+             created_at
+         FROM opening_bookings WHERE opening_id = ?1
+         ORDER BY created_at DESC, id DESC LIMIT ?2",
+    )?;
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let rows = stmt.query_map(params![opening_id, limit], |r| {
+        Ok(BookingRow {
+            id: r.get(0)?,
+            opening_id: r.get(1)?,
+            event_id: r.get(2)?,
+            start_utc: r.get(3)?,
+            end_utc: r.get(4)?,
+            guest_name: r.get(5)?,
+            guest_email: r.get(6)?,
+            note: r.get(7)?,
+            created_at: r.get(8)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// Deletes the bookings made and ended before `cutoff`; returns the
+/// openings that lost bookings.
+pub fn prune_bookings(conn: &Connection, cutoff: i64) -> rusqlite::Result<Vec<String>> {
+    let ids = {
+        let mut stmt = conn.prepare_cached(
+            "SELECT DISTINCT opening_id FROM opening_bookings
+             WHERE created_at < ?1 AND end_utc < ?1 ORDER BY opening_id",
+        )?;
+        let rows = stmt.query_map([cutoff], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<String>>>()?
+    };
+    if !ids.is_empty() {
+        conn.execute(
+            "DELETE FROM opening_bookings WHERE created_at < ?1 AND end_utc < ?1",
+            [cutoff],
+        )?;
+    }
+    Ok(ids)
 }

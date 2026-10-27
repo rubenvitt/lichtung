@@ -13,7 +13,7 @@ Der Server ist die Autorität. Die Apps halten einen lokalen Cache, lesen ihn ü
 | Basis | `https://<server>/api/…`, nur HTTPS (lokal auch `http://localhost`) |
 | Format | JSON, UTF-8. Unbekannte Felder in Antworten ignoriert der Client (der Server darf Felder ergänzen, ohne die Version zu erhöhen). |
 | Zeitpunkte | RFC 3339 in UTC mit `Z`, z. B. `2026-11-03T13:00:00Z` |
-| IDs | undurchsichtige Strings mit Präfix (`acc_…`, `cal_…`, `set_…`, `ev_…`, `cf_…`, *(LIC-31)* `opn_…`, `sug_…`). Nie parsen. |
+| IDs | undurchsichtige Strings mit Präfix (`acc_…`, `cal_…`, `set_…`, `ev_…`, `cf_…`, *(LIC-31)* `opn_…`, `sug_…`, *(LIC-33)* `bkg_…`). Nie parsen. |
 | Fehler | HTTP-Status plus `{"error": {"code": "…", "message": "…"}}`. `code` ist stabil (snake_case, Tabelle in Abschnitt 9), `message` ist deutsch und für Menschen. |
 | Auth | `Authorization: Bearer ld_…` (Geräte-Token, Abschnitt 2). Ohne gültiges Token: `401` mit `code: unauthorized`. |
 
@@ -502,3 +502,4 @@ Zusätzliche `code`s in Mutations-Ergebnissen (`rejected`/`retry`): `calendar_re
 | 2026-10-26 | Ergänzungen aus LIC-31 und LIC-32 (keine bestehende Form geändert): Openings (Buchungslinks) mit eigenem Vertrag [`openings.md`](openings.md); neuer Objekttyp `opening` im Pull; `GET`/`POST /api/openings`, `GET`/`PATCH`/`DELETE /api/openings/{id}`; ID-Präfixe `opn_`, `sug_`; Fehlercodes `calendar_not_found`, `calendar_read_only`, `calendar_cannot_invite` für Zielkalender; Platzhalter-Termine („Reserviert: …“) erscheinen als normale Events, Konflikte ihrer Schreibvorgänge mit `origin: server` (Abschnitte 1, 7, 8, 9) |
 | 2026-10-26 | Ergänzungen aus LIC-46 und LIC-49 (keine bestehende Form geändert): Feld `is_work` am Kalender (Arbeitskalender, per `PATCH` setzbar, Kennzeichnen sperrt MCP); `GET /api/me` mit `server_name` und `server_version`; Felder von `GET /api/devices`; `PATCH /api/devices/{id}` zum Umbenennen; `client_id` je Server merken, Lebensdauer der Clients, Prüfung über `invalid_client` am Token-Endpunkt (Abschnitte 2, 3, 7) |
 | 2026-10-26 | Ergänzung aus LIC-55 (keine bestehende Form geändert): Clients der Apps bleiben 30 Tage nach dem Widerruf ihres letzten Geräts bestehen (Abschnitt 2) |
+| 2026-10-27 | Ergänzung aus LIC-33 und LIC-35 (keine bestehende Form geändert): Feld `bookings` am Objekt `opening` (Buchungen mit Name, E-Mail-Adresse und Notiz des Gastes, neueste 50), ID-Präfix `bkg_`; eine Buchung einer Vorlage und das Löschen alter Buchungen erscheinen als `upsert` des Links im Pull ([`openings.md`](openings.md), Abschnitte 2, 6, 8) |

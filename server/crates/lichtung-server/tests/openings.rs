@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 
 use common::dav::{setup_with, single, Setup, CALENDAR, WORK};
 use common::{api_token, device_token, Auth, TestResponse, BOOTSTRAP};
+use lichtung_server::openings::{Guest, Slot};
 
 /// A day a week ahead, 00:00 UTC (suggestions must lie in the future).
 fn day() -> DateTime<Utc> {
@@ -405,7 +406,7 @@ async fn placeholders_block_other_links_but_not_their_own() {
         .is_none());
 
     // Booking: the link is used up, all placeholders go.
-    app.complete_opening_booking(id, "ev_gebucht", now)
+    app.complete_opening_booking(id, "ev_gebucht", None, now)
         .await
         .unwrap();
     assert!(t.placeholders().is_empty());
@@ -418,7 +419,7 @@ async fn placeholders_block_other_links_but_not_their_own() {
     assert_eq!(o["suggestions"], json!([]));
     assert!(t.slot_starts(&o).await.is_empty());
     let e = app
-        .complete_opening_booking(id, "ev_zweiter", now)
+        .complete_opening_booking(id, "ev_zweiter", None, now)
         .await
         .unwrap_err();
     assert_eq!(e.code(), "conflict");
@@ -430,10 +431,10 @@ async fn placeholders_block_other_links_but_not_their_own() {
 
     // Templates stay bookable.
     let tid = template["id"].as_str().unwrap();
-    app.complete_opening_booking(tid, "ev_vorlage", now)
+    app.complete_opening_booking(tid, "ev_vorlage", None, now)
         .await
         .unwrap();
-    app.complete_opening_booking(tid, "ev_vorlage_2", now)
+    app.complete_opening_booking(tid, "ev_vorlage_2", None, now)
         .await
         .unwrap();
     let o = t
@@ -623,4 +624,87 @@ async fn openings_come_with_the_pull() {
         r.json()["changes"],
         json!([{"type": "opening", "op": "delete", "id": id}])
     );
+}
+
+#[tokio::test]
+async fn bookings_are_kept_for_the_owner_pulled_and_pruned() {
+    let (t, device) = prepared().await;
+    let o = t.template(&device).await;
+    let id = o["id"].as_str().unwrap();
+    let r = t
+        .api(Method::GET, "/api/sync/pull?since=0", &device, None)
+        .await;
+    let cursor = r.json()["cursor"].as_i64().unwrap();
+
+    let slot = Slot {
+        start: at(10, 0),
+        end: at(10, 30),
+        suggestion_id: None,
+    };
+    let guest = Guest {
+        name: "Bert Beispiel".into(),
+        email: "bert@example.org".into(),
+        note: Some("Bitte mit Kamera.".into()),
+    };
+    let now = Utc::now();
+    t.s.app
+        .complete_opening_booking(id, "ev_vorlage", Some((&slot, &guest)), now)
+        .await
+        .unwrap();
+
+    // The template's object in the pull carries the booking.
+    let r = t
+        .api(
+            Method::GET,
+            &format!("/api/sync/pull?since={cursor}"),
+            &device,
+            None,
+        )
+        .await;
+    let changes = r.json()["changes"].as_array().unwrap().clone();
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    let b = &changes[0]["data"]["bookings"][0];
+    assert_eq!(b["event_id"], "ev_vorlage");
+    assert_eq!(b["guest_name"], "Bert Beispiel");
+    assert_eq!(b["guest_email"], "bert@example.org");
+    assert_eq!(b["note"], "Bitte mit Kamera.");
+    assert_eq!(b["start"], rfc(at(10, 0)));
+    let cursor = r.json()["cursor"].as_i64().unwrap();
+
+    // A year after the meeting, the cleanup deletes it; the pull says so.
+    t.s.app
+        .clean_up_openings(now + Duration::days(380))
+        .await
+        .unwrap();
+    let r = t
+        .api(
+            Method::GET,
+            &format!("/api/sync/pull?since={cursor}"),
+            &device,
+            None,
+        )
+        .await;
+    let changes = r.json()["changes"].as_array().unwrap().clone();
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    assert_eq!(changes[0]["data"]["bookings"], json!([]));
+
+    // Bookings go with their link.
+    t.s.app
+        .complete_opening_booking(id, "ev_vorlage_2", Some((&slot, &guest)), now)
+        .await
+        .unwrap();
+    let count = |t: &Setup| -> i64 {
+        t.db()
+            .query_row("SELECT COUNT(*) FROM opening_bookings", [], |r| r.get(0))
+            .unwrap()
+    };
+    assert_eq!(count(&t), 1);
+    t.api(
+        Method::DELETE,
+        &format!("/api/openings/{id}"),
+        &device,
+        None,
+    )
+    .await;
+    assert_eq!(count(&t), 0);
 }

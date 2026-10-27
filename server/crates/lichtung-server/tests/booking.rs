@@ -379,10 +379,11 @@ async fn booking_invites_the_guest_and_uses_up_a_one_off_link() {
         "time in the guest's zone: {html}"
     );
 
-    // The event: guest invited, own address organizes, note and title.
-    let booked = t.at_provider("SUMMARY:Abstimmung (Bert Beispiel)");
+    // The event: guest invited, own address organizes, the link's title.
+    let booked = t.at_provider("RSVP=TRUE");
     assert_eq!(booked.len(), 1, "{booked:?}");
     let ics = &booked[0];
+    assert!(ics.contains("SUMMARY:Abstimmung\r\n"), "{ics}");
     // The account's own address from discovery organizes.
     assert!(
         ics.contains("ORGANIZER:mailto:anna.alt@example.org"),
@@ -396,8 +397,21 @@ async fn booking_invites_the_guest_and_uses_up_a_one_off_link() {
     assert!(attendee.contains("PARTSTAT=NEEDS-ACTION"));
     assert!(attendee.contains("RSVP=TRUE"));
     assert!(attendee.ends_with(":mailto:bert@example.org"));
-    assert!(ics.contains("Ich bringe Unterlagen mit."));
     assert!(ics.contains("TZID=Europe/Berlin"));
+    // Nothing the guest typed goes into the invitation but the attendee
+    // (LIC-33): the provider sends it from the own address.
+    let without_attendee: String = ics
+        .lines()
+        .filter(|l| !l.starts_with("ATTENDEE"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for typed in ["Bert", "Beispiel", "Unterlagen", "bert@example.org"] {
+        assert!(!without_attendee.contains(typed), "{typed} in {ics}");
+    }
+    assert!(
+        !ics.contains("DESCRIPTION"),
+        "no video link, no description"
+    );
 
     // The link is used up, its placeholders are gone.
     assert!(t.at_provider("SUMMARY:Reserviert: ").is_empty());
@@ -407,6 +421,18 @@ async fn booking_invites_the_guest_and_uses_up_a_one_off_link() {
             .await
             .json();
     assert!(now["booked_event_id"].as_str().unwrap().starts_with("ev_"));
+    // What the guest entered stays with the owner.
+    let bookings = now["bookings"].as_array().unwrap();
+    assert_eq!(bookings.len(), 1, "{now}");
+    let b = &bookings[0];
+    assert_eq!(b["event_id"], now["booked_event_id"]);
+    assert_eq!(b["guest_name"], "Bert Beispiel");
+    assert_eq!(b["guest_email"], "bert@example.org");
+    assert_eq!(b["note"], "Ich bringe Unterlagen mit.");
+    assert_eq!(b["start"], rfc(at(9, 0)));
+    assert_eq!(b["end"], rfc(at(9, 30)));
+    assert!(b["id"].as_str().unwrap().starts_with("bkg_"));
+    assert!(b["created_at"].is_string());
     let r = get_page(&t.s, &path).await;
     assert_eq!(r.status, StatusCode::GONE);
     assert!(r.text().contains("bereits") || r.text().contains("already"));
@@ -456,6 +482,33 @@ async fn only_one_of_two_bookings_of_a_time_wins() {
         .book(&o, at(16, 0), "Dora Dritte", "dora@example.org")
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    // The invitation: the template's title and video link, nothing typed.
+    let booked = t.at_provider("RSVP=TRUE");
+    assert_eq!(booked.len(), 2);
+    for ics in &booked {
+        assert!(ics.contains("SUMMARY:30 Minuten Kennenlernen\r\n"), "{ics}");
+        assert!(
+            ics.contains("DESCRIPTION:Video: https://meet.example.org/kennenlernen\r\n"),
+            "{ics}"
+        );
+        assert!(!ics.contains("Unterlagen"), "{ics}");
+    }
+    // Each booking is kept for the owner, newest first.
+    let id = o["id"].as_str().unwrap();
+    let now =
+        t.s.get(&format!("/api/openings/{id}"), Auth::Bearer(&device))
+            .await
+            .json();
+    let names: Vec<&str> = now["bookings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["guest_name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), 2, "{now}");
+    assert_eq!(names[0], "Dora Dritte");
+    assert!(now["bookings"][0]["note"] == "Ich bringe Unterlagen mit.");
 }
 
 #[tokio::test]

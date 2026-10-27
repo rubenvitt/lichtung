@@ -104,9 +104,11 @@ fn object(
         "opening" => match openings_store::opening(conn, id)? {
             Some(row) => {
                 let suggestions = openings_store::suggestions(conn, id)?;
+                let bookings = openings_store::bookings(conn, id, openings::MAX_LISTED_BOOKINGS)?;
                 Some(serde_json::to_value(openings::view(
                     &row,
                     &suggestions,
+                    &bookings,
                     public_url,
                     now_ms(),
                 )))

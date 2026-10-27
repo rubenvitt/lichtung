@@ -37,6 +37,15 @@
 //! [`App::check_opening_slot`], creates the event and
 //! [`App::mark_opening_booked`]; after releasing the guard it calls
 //! [`App::remove_booked_placeholders`].
+//!
+//! **Bookings** (LIC-33, LIC-35): what the guest entered (name, address,
+//! note) and the booked time are stored per booking in `opening_bookings`
+//! and shown only in the management API and the pull (`bookings`, newest
+//! [`MAX_LISTED_BOOKINGS`]). The booked event carries none of it except
+//! the guest as attendee: the provider sends it as an invitation from the
+//! own address to the address the guest typed. Bookings go with their
+//! link; the cleanup deletes those made and ended more than
+//! [`BOOKING_RETENTION_DAYS`] ago.
 
 pub mod slots;
 pub mod store;
@@ -60,7 +69,7 @@ use crate::writes::{Origin, WriteOutcome};
 pub use slots::Slot;
 use slots::{bookable, Rules};
 pub use store::OpeningKind;
-use store::{OpeningRow, SuggestionRow};
+use store::{BookingRow, OpeningRow, SuggestionRow};
 
 /// Path of the public booking page: `<public_url>/o/<token>`.
 pub const PUBLIC_PATH: &str = "o";
@@ -84,6 +93,10 @@ pub const MAX_HORIZON_DAYS: i64 = 365;
 pub const DEFAULT_MIN_NOTICE_MINUTES: i64 = 4 * 60;
 pub const DEFAULT_HORIZON_DAYS: i64 = 21;
 pub const DEFAULT_WINDOW: (&str, &str) = ("09:00", "17:00");
+/// Most bookings an opening object lists (newest first).
+pub const MAX_LISTED_BOOKINGS: usize = 50;
+/// Bookings made and ended longer ago than this are deleted by the cleanup.
+pub const BOOKING_RETENTION_DAYS: i64 = 365;
 /// How often past suggestions are cleaned up and failed removals retried.
 pub const CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
@@ -121,6 +134,30 @@ pub struct Suggestion {
     pub placeholder_status: &'static str,
 }
 
+/// A booking of a link with what the guest entered. Only in the
+/// management API and the pull: the booked event (and so the invitation
+/// the provider sends) carries none of it except the guest as attendee.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Booking {
+    pub id: String,
+    pub event_id: String,
+    pub start: String,
+    pub end: String,
+    pub guest_name: String,
+    pub guest_email: String,
+    pub note: Option<String>,
+    pub created_at: String,
+}
+
+/// What the guest entered on the booking page, checked
+/// ([`crate::booking::guard`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Guest {
+    pub name: String,
+    pub email: String,
+    pub note: Option<String>,
+}
+
 /// An opening as the API shows it (`docs/api/openings.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Opening {
@@ -145,6 +182,9 @@ pub struct Opening {
     pub suggestions: Vec<Suggestion>,
     pub booked_at: Option<String>,
     pub booked_event_id: Option<String>,
+    /// The newest [`MAX_LISTED_BOOKINGS`] bookings, newest first (empty on
+    /// the public booking page).
+    pub bookings: Vec<Booking>,
     pub created_at: String,
     pub updated_at: String,
     /// The secret part of `url`.
@@ -456,6 +496,19 @@ fn suggestion_view(s: &SuggestionRow) -> Suggestion {
     }
 }
 
+fn booking_view(b: &BookingRow) -> Booking {
+    Booking {
+        id: b.id.clone(),
+        event_id: b.event_id.clone(),
+        start: format_ms(b.start_utc),
+        end: format_ms(b.end_utc),
+        guest_name: b.guest_name.clone(),
+        guest_email: b.guest_email.clone(),
+        note: b.note.clone(),
+        created_at: format_ms(b.created_at),
+    }
+}
+
 /// The public address of a link.
 pub fn public_url(base: &url::Url, token: &str) -> String {
     base.join(&format!("{PUBLIC_PATH}/{token}"))
@@ -468,6 +521,7 @@ pub fn public_url(base: &url::Url, token: &str) -> String {
 pub(crate) fn view(
     row: &OpeningRow,
     suggestions: &[SuggestionRow],
+    bookings: &[BookingRow],
     base: &url::Url,
     now: i64,
 ) -> Opening {
@@ -493,6 +547,7 @@ pub(crate) fn view(
             .collect(),
         booked_at: row.booked_at.map(format_ms),
         booked_event_id: row.booked_event_id.clone(),
+        bookings: bookings.iter().map(booking_view).collect(),
         created_at: format_ms(row.created_at),
         updated_at: format_ms(row.updated_at),
         token: row.token.clone(),
@@ -622,7 +677,8 @@ impl App {
             let mut out = Vec::new();
             for row in store::openings(conn)? {
                 let suggestions = store::suggestions(conn, &row.id)?;
-                out.push(view(&row, &suggestions, &base, now));
+                let bookings = store::bookings(conn, &row.id, MAX_LISTED_BOOKINGS)?;
+                out.push(view(&row, &suggestions, &bookings, &base, now));
             }
             Ok(out)
         })
@@ -630,13 +686,16 @@ impl App {
     }
 
     pub async fn opening(&self, id: &str) -> AppResult<Opening> {
-        let (row, suggestions) = self.opening_rows(id).await?;
-        Ok(view(
-            &row,
-            &suggestions,
-            &self.opening_base(),
-            Utc::now().timestamp_millis(),
-        ))
+        let base = self.opening_base();
+        let now = Utc::now().timestamp_millis();
+        let id = id.to_owned();
+        self.with_reader(move |conn| {
+            let row = store::opening(conn, &id)?.ok_or_else(not_found)?;
+            let suggestions = store::suggestions(conn, &id)?;
+            let bookings = store::bookings(conn, &id, MAX_LISTED_BOOKINGS)?;
+            Ok(view(&row, &suggestions, &bookings, &base, now))
+        })
+        .await
     }
 
     /// Creates a link; for suggestions also their placeholders (module
@@ -944,7 +1003,8 @@ impl App {
                 return Ok(None);
             };
             let suggestions = store::suggestions(conn, &row.id)?;
-            Ok(Some(view(&row, &suggestions, &base, now)))
+            // Earlier guests are none of the booking page's business.
+            Ok(Some(view(&row, &suggestions, &[], &base, now)))
         })
         .await
     }
@@ -1036,38 +1096,66 @@ impl App {
         &self,
         opening_id: &str,
         event_id: &str,
+        booking: Option<(&Slot, &Guest)>,
         now: DateTime<Utc>,
     ) -> AppResult<()> {
-        if self.mark_opening_booked(opening_id, event_id, now).await? {
+        if self
+            .mark_opening_booked(opening_id, event_id, booking, now)
+            .await?
+        {
             self.remove_booked_placeholders().await;
         }
         Ok(())
     }
 
-    /// The bookkeeping of a booking, quick and local: a one-off link is
-    /// marked booked (only while it is not, else `409 conflict`) and its
-    /// placeholders are queued for removal. `true` if placeholders were
-    /// queued: then call [`App::remove_booked_placeholders`], after
-    /// releasing [`App::opening_booking_guard`] (the removal talks to the
-    /// provider). A template stays as it is (`false`).
+    /// The bookkeeping of a booking, quick and local: with `booking` (the
+    /// booked time and what the guest entered) a row in
+    /// `opening_bookings`, which only the owner sees; a one-off link is
+    /// marked booked (only while it is not, else `409 conflict` and nothing
+    /// is stored) and its placeholders are queued for removal. `true` if
+    /// placeholders were queued: then call
+    /// [`App::remove_booked_placeholders`], after releasing
+    /// [`App::opening_booking_guard`] (the removal talks to the provider).
+    /// A template stays bookable (`false`); it only gets the booking.
     pub async fn mark_opening_booked(
         &self,
         opening_id: &str,
         event_id: &str,
+        booking: Option<(&Slot, &Guest)>,
         now: DateTime<Utc>,
     ) -> AppResult<bool> {
         let (id, event_id) = (opening_id.to_owned(), event_id.to_owned());
+        let at = now.timestamp_millis();
+        let record = booking.map(|(slot, guest)| BookingRow {
+            id: new_id("bkg"),
+            opening_id: id.clone(),
+            event_id: event_id.clone(),
+            start_utc: slot.start.timestamp_millis(),
+            end_utc: slot.end.timestamp_millis(),
+            guest_name: guest.name.clone(),
+            guest_email: guest.email.clone(),
+            note: guest.note.clone(),
+            created_at: at,
+        });
         self.with_change_tx(move |tx| {
             let row = store::opening(tx, &id)?.ok_or_else(not_found)?;
-            if row.kind == OpeningKind::Template {
-                return Ok(false);
+            let queued = if row.kind == OpeningKind::Template {
+                false
+            } else {
+                if !store::mark_booked(tx, &id, &event_id, at)? {
+                    return Err(AppError::Conflict("Dieser Link ist bereits gebucht".into()));
+                }
+                store::queue_placeholders(tx, &id, None, at)?;
+                true
+            };
+            if let Some(record) = &record {
+                store::insert_booking(tx, record)?;
+                if row.kind == OpeningKind::Template {
+                    // A new `seq`: the pull shows the booking.
+                    store::touch(tx, &id, at)?;
+                }
             }
-            let at = now.timestamp_millis();
-            if !store::mark_booked(tx, &id, &event_id, at)? {
-                return Err(AppError::Conflict("Dieser Link ist bereits gebucht".into()));
-            }
-            store::queue_placeholders(tx, &id, None, at)?;
-            Ok(true)
+            Ok(queued)
         })
         .await
     }
@@ -1154,10 +1242,13 @@ impl App {
     }
 
     /// The cleanup round: suggestions that have started by `now` drop out
-    /// (their placeholders are queued), then the queue is worked off.
+    /// (their placeholders are queued), bookings made and ended more than
+    /// [`BOOKING_RETENTION_DAYS`] ago are deleted, then the queue is worked
+    /// off.
     pub async fn clean_up_openings(&self, now: DateTime<Utc>) -> AppResult<RemovalReport> {
         let at = now.timestamp_millis();
-        let expired = self
+        let cutoff = (now - Duration::days(BOOKING_RETENTION_DAYS)).timestamp_millis();
+        let (expired, pruned) = self
             .with_change_tx(move |tx| {
                 let ids = store::openings_with_expired_suggestions(tx, at)?;
                 let mut n = 0;
@@ -1165,11 +1256,18 @@ impl App {
                     n += store::queue_placeholders(tx, id, Some(at), at)?;
                     store::touch(tx, id, crate::app::now_ms())?;
                 }
-                Ok(n)
+                let pruned = store::prune_bookings(tx, cutoff)?;
+                for id in &pruned {
+                    store::touch(tx, id, crate::app::now_ms())?;
+                }
+                Ok((n, pruned.len()))
             })
             .await?;
         if expired > 0 {
             tracing::info!(expired, "past suggestions removed");
+        }
+        if pruned > 0 {
+            tracing::info!(openings = pruned, "old bookings deleted");
         }
         self.remove_placeholders().await
     }

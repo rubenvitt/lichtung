@@ -693,11 +693,12 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
     /// `base` (siehe `seriesDates`), weil der Server sie mit der neuen Regel
     /// überschreibt.
     ///
-    /// Dasselbe gilt für `COUNT` (LIC-52): Der Server rechnet beim Teilen die
-    /// Restzahl, nimmt dann aber die mitgeschickte Regel. Bei „dieser und
-    /// folgende“ geht darum die Restzahl mit, wenn die Serie schon ein `COUNT`
-    /// hatte; der Editor zeigt die Anzahl der ganzen Serie. Weglassen ginge
-    /// nicht, dann liefe die neue Serie endlos.
+    /// Für `COUNT` (LIC-52, LIC-57): Bei „dieser und folgende“ geht die
+    /// Restzahl mit, wenn die Serie schon ein `COUNT` hatte; der Editor zeigt
+    /// die Anzahl der ganzen Serie. Der Server nimmt ein gegenüber der alten
+    /// Regel geändertes `COUNT` als Zahl „ab hier“ und rechnet nur bei
+    /// unverändertem selbst ab, doppelt abgezogen wird also nicht. Weglassen
+    /// ginge nicht, dann liefe die neue Serie endlos.
     private func recurrenceValue(base: Recurrence?, scope: EditScope = .all) -> Recurrence? {
         switch repetition {
         case .none:

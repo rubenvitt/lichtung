@@ -117,7 +117,7 @@ targets:
         # Sparkle: Feed zeigt immer auf das neueste GitHub Release.
         SUFeedURL: https://github.com/rubenvitt/lichtung/releases/latest/download/appcast.xml
         # Öffentlicher EdDSA-Schlüssel; der private liegt im Secret SPARKLE_PRIVATE_KEY.
-        SUPublicEDKey: jdstzXmzNzKlPY2VysuA634vpJA6W+CeCycdMM+aAOY=
+        SUPublicEDKey: H6aM0dushMlo74vGrErL0kuDwaumFKnR/YoDi3R3ay0=
         SUEnableInstallerLauncherService: true
         SUEnableAutomaticChecks: true
         CFBundleURLTypes:

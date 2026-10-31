@@ -30,7 +30,11 @@
 //! provider simply is gone (`placeholder_status: missing`). If a
 //! placeholder cannot be created, the link is not created either (the
 //! placeholders created so far are removed again) and the error names the
-//! cause.
+//! cause. The UID of a placeholder is noted before it is written
+//! (`placeholder_attempts`, LIC-59): if the provider wrote it although the
+//! creation failed (timeout after the PUT, a local storage error), the
+//! cleanup finds it by that UID once a sync has brought it in and removes
+//! it, for [`PLACEHOLDER_ATTEMPT_DAYS`].
 //!
 //! The booking page (LIC-33) calls [`App::opening_by_token`],
 //! [`App::opening_slots`], and under [`App::opening_booking_guard`]
@@ -97,6 +101,9 @@ pub const DEFAULT_WINDOW: (&str, &str) = ("09:00", "17:00");
 pub const MAX_LISTED_BOOKINGS: usize = 50;
 /// Bookings made and ended longer ago than this are deleted by the cleanup.
 pub const BOOKING_RETENTION_DAYS: i64 = 365;
+/// A placeholder whose creation failed after the provider may have
+/// written it is looked for this long (by its UID, after each sync).
+pub const PLACEHOLDER_ATTEMPT_DAYS: i64 = 7;
 /// How often past suggestions are cleaned up and failed removals retried.
 pub const CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
@@ -830,10 +837,33 @@ impl App {
                 "time_zone": tz.name(),
             })
         };
+        // The UID is fixed and noted before the PUT, so a placeholder the
+        // provider writes although the creation fails can still be found.
+        let uid = format!("{}@lichtung", Uuid::now_v7());
+        {
+            let (uid, calendar_id, opening_id, suggestion_id) = (
+                uid.clone(),
+                row.calendar_id.clone(),
+                row.id.clone(),
+                suggestion_id.to_owned(),
+            );
+            self.with_writer(move |conn| {
+                Ok(store::begin_attempt(
+                    conn,
+                    &uid,
+                    &calendar_id,
+                    &opening_id,
+                    &suggestion_id,
+                    crate::app::now_ms(),
+                )?)
+            })
+            .await?;
+        }
         let mutation = json!({
             "op": "create_event",
             "calendar_id": row.calendar_id,
             "event": {
+                "uid": &uid,
                 "title": format!("Reserviert: {}", row.title),
                 "notes": format!(
                     "Platzhalter für einen Vorschlag des Buchungslinks „{}“. Lichtung entfernt \
@@ -854,29 +884,22 @@ impl App {
                 .ok_or_else(|| AppError::Internal(anyhow::anyhow!("placeholder without event")))?,
             other => return Err(placeholder_error(other, &at)),
         };
-        let (opening_id, suggestion_id, stored) =
-            (row.id.clone(), suggestion_id.to_owned(), event_id.clone());
+        let (opening_id, suggestion_id) = (row.id.clone(), suggestion_id.to_owned());
         let kept = self
             .with_change_tx(move |tx| {
-                let kept = store::set_placeholder(tx, &suggestion_id, &stored)?;
+                let now = crate::app::now_ms();
+                let kept = store::set_placeholder(tx, &suggestion_id, &event_id)?;
                 if kept {
-                    store::touch(tx, &opening_id, crate::app::now_ms())?;
+                    store::touch(tx, &opening_id, now)?;
+                } else {
+                    // The link went away meanwhile: remove the placeholder again.
+                    store::queue_removal(tx, &event_id, &opening_id, now)?;
                 }
+                store::end_attempt(tx, &uid)?;
                 Ok(kept)
             })
             .await?;
         if !kept {
-            // The link went away meanwhile: remove the placeholder again.
-            let (opening_id, event_id) = (row.id.clone(), event_id);
-            self.with_writer(move |conn| {
-                Ok(store::queue_removal(
-                    conn,
-                    &event_id,
-                    &opening_id,
-                    crate::app::now_ms(),
-                )?)
-            })
-            .await?;
             self.remove_placeholders().await?;
         }
         Ok(())
@@ -981,6 +1004,8 @@ impl App {
             let now = crate::app::now_ms();
             store::queue_placeholders(tx, &id, None, now)?;
             if store::delete(tx, &id, now)? {
+                // Placeholders written although their creation failed.
+                store::queue_failed_attempts(tx, now, attempts_cutoff(now))?;
                 Ok(())
             } else {
                 Err(not_found())
@@ -1243,12 +1268,13 @@ impl App {
 
     /// The cleanup round: suggestions that have started by `now` drop out
     /// (their placeholders are queued), bookings made and ended more than
-    /// [`BOOKING_RETENTION_DAYS`] ago are deleted, then the queue is worked
-    /// off.
+    /// [`BOOKING_RETENTION_DAYS`] ago are deleted, placeholders written
+    /// although their creation failed are queued (module docs), then the
+    /// queue is worked off.
     pub async fn clean_up_openings(&self, now: DateTime<Utc>) -> AppResult<RemovalReport> {
         let at = now.timestamp_millis();
         let cutoff = (now - Duration::days(BOOKING_RETENTION_DAYS)).timestamp_millis();
-        let (expired, pruned) = self
+        let (expired, pruned, failed) = self
             .with_change_tx(move |tx| {
                 let ids = store::openings_with_expired_suggestions(tx, at)?;
                 let mut n = 0;
@@ -1260,17 +1286,26 @@ impl App {
                 for id in &pruned {
                     store::touch(tx, id, crate::app::now_ms())?;
                 }
-                Ok((n, pruned.len()))
+                let failed = store::queue_failed_attempts(tx, at, attempts_cutoff(at))?;
+                Ok((n, pruned.len(), failed))
             })
             .await?;
         if expired > 0 {
             tracing::info!(expired, "past suggestions removed");
+        }
+        if failed > 0 {
+            tracing::info!(failed, "placeholders of failed creations found");
         }
         if pruned > 0 {
             tracing::info!(openings = pruned, "old bookings deleted");
         }
         self.remove_placeholders().await
     }
+}
+
+/// Attempts made before this are given up (module docs).
+fn attempts_cutoff(now_ms: i64) -> i64 {
+    now_ms - Duration::days(PLACEHOLDER_ATTEMPT_DAYS).num_milliseconds()
 }
 
 fn not_found() -> AppError {

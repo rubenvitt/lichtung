@@ -362,6 +362,65 @@ pub fn openings_with_expired_suggestions(
     rows.collect()
 }
 
+// ----- placeholder attempts (schema version 9) ----------------------------------------
+
+/// Notes the UID of a placeholder before it is written at the provider.
+pub fn begin_attempt(
+    conn: &Connection,
+    uid: &str,
+    calendar_id: &str,
+    opening_id: &str,
+    suggestion_id: &str,
+    now: i64,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO placeholder_attempts
+             (uid, calendar_id, opening_id, suggestion_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![uid, calendar_id, opening_id, suggestion_id, now],
+    )?;
+    Ok(())
+}
+
+/// Forgets an attempt: its placeholder is stored at its suggestion or
+/// queued for removal.
+pub fn end_attempt(conn: &Connection, uid: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM placeholder_attempts WHERE uid = ?1", [uid])?;
+    Ok(())
+}
+
+/// Attempts whose suggestion is gone: the placeholder the provider may
+/// have written anyway is queued for removal if it is stored (found by
+/// calendar and UID), and the attempt is forgotten. Attempts whose
+/// placeholder is not stored wait for the next sync, and are forgotten
+/// when made before `give_up_before`. Returns how many were queued.
+pub fn queue_failed_attempts(
+    conn: &Connection,
+    now: i64,
+    give_up_before: i64,
+) -> rusqlite::Result<usize> {
+    let orphaned = "NOT EXISTS (SELECT 1 FROM opening_suggestions s WHERE s.id = a.suggestion_id)";
+    let queued = conn.execute(
+        &format!(
+            "INSERT OR IGNORE INTO placeholder_removals (event_id, opening_id, created_at)
+             SELECT e.id, a.opening_id, ?1
+             FROM placeholder_attempts a
+             JOIN events e ON e.calendar_id = a.calendar_id AND e.uid = a.uid
+             WHERE {orphaned}"
+        ),
+        [now],
+    )?;
+    conn.execute(
+        &format!(
+            "DELETE FROM placeholder_attempts AS a WHERE {orphaned} AND (a.created_at < ?1
+                 OR EXISTS (SELECT 1 FROM events e
+                            WHERE e.calendar_id = a.calendar_id AND e.uid = a.uid))"
+        ),
+        [give_up_before],
+    )?;
+    Ok(queued)
+}
+
 // ----- removal queue --------------------------------------------------------------------
 
 /// A placeholder still to be deleted at the provider.

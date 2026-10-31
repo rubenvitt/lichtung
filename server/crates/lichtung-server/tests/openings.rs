@@ -590,6 +590,58 @@ async fn a_failed_placeholder_leaves_no_link() {
 }
 
 #[tokio::test]
+async fn a_placeholder_written_despite_a_failure_is_removed_by_the_cleanup() {
+    let (t, device) = prepared().await;
+    let attempts = |t: &Setup| -> i64 {
+        t.db()
+            .query_row("SELECT COUNT(*) FROM placeholder_attempts", [], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    };
+    // The provider writes the placeholder, but its answer gets lost.
+    t.dav.with(|s| s.put_status_after_write = Some(504));
+    let r = t
+        .api(
+            Method::POST,
+            "/api/openings",
+            &device,
+            Some(
+                json!({"kind": "once", "duration_minutes": 30, "calendar_id": t.calendar_id,
+                        "suggestions": [{"start": rfc(at(10, 0))}]}),
+            ),
+        )
+        .await;
+    assert!(r.status.is_server_error(), "{} {}", r.status, r.text());
+    t.dav.with(|s| s.put_status_after_write = None);
+    let r = t.api(Method::GET, "/api/openings", &device, None).await;
+    assert_eq!(r.json(), json!([]));
+    assert_eq!(t.placeholders().len(), 1);
+    assert_eq!(attempts(&t), 1);
+
+    // Not known yet: the cleanup leaves the attempt for the next sync.
+    let report = t.s.app.clean_up_openings(Utc::now()).await.unwrap();
+    assert_eq!((report.removed, report.pending), (0, 0));
+    assert_eq!(t.placeholders().len(), 1);
+    assert_eq!(attempts(&t), 1);
+
+    // After the sync the cleanup finds it by its UID and removes it.
+    t.sync().await;
+    let report = t.s.app.clean_up_openings(Utc::now()).await.unwrap();
+    assert_eq!((report.removed, report.pending), (1, 0));
+    assert!(t.placeholders().is_empty());
+    assert_eq!(attempts(&t), 0);
+    assert_eq!(t.queued_removals(), 0);
+
+    // A placeholder created normally leaves no attempt behind and stays.
+    t.once_with_suggestions(&device).await;
+    assert_eq!(attempts(&t), 0);
+    t.sync().await;
+    t.s.app.clean_up_openings(Utc::now()).await.unwrap();
+    assert_eq!(t.placeholders().len(), 2);
+}
+
+#[tokio::test]
 async fn openings_come_with_the_pull() {
     let (t, device) = prepared().await;
     let o = t.template(&device).await;

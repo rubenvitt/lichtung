@@ -31,6 +31,9 @@ final class AppSession {
     private(set) var serverURL: URL?
     /// Verwaltung (Vertrag §7); `nil` im Demo-Modus.
     private(set) var management: ManagementAPI?
+    /// Letzte Antwort von `GET /api/me` (Person, Gerät, Server-Version).
+    /// Abgleich des Gerätenamens und Einstellungen teilen den Abruf (LIC-56).
+    private(set) var me: ServerInfo?
 
     // Anmeldemaske
     var serverInput = ""
@@ -47,7 +50,8 @@ final class AppSession {
     private let defaults = UserDefaults.standard
     @ObservationIgnored private var syncAPI: SyncAPI?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
-    @ObservationIgnored private var deviceNameTask: Task<Void, Never>?
+    @ObservationIgnored private var meTask: Task<Void, Never>?
+    @ObservationIgnored private let meFetch: SharedFetch<ServerInfo>
     @ObservationIgnored private var isActive = false
 
     private enum Key {
@@ -57,7 +61,12 @@ final class AppSession {
         static let cacheServer = "session.cacheServerURL"
     }
 
+    /// So lange gilt eine Antwort von `/api/me` für die Einstellungen, ohne
+    /// neu zu fragen (Einstellungen direkt nach dem Aktivwerden öffnen).
+    static let meMaxAge: TimeInterval = 30
+
     init() {
+        meFetch = SharedFetch()
         model = AppModel.demo()
         settings = SettingsModel()
         deviceName = Self.defaultDeviceName
@@ -121,23 +130,53 @@ final class AppSession {
         if let name = flow.rememberedDeviceName(serverInput: serverInput) { deviceName = name }
     }
 
-    /// Ein anderes Gerät kann dieses umbenannt haben (LIC-55): `GET /api/me`
-    /// nennt den Namen beim Server, der gemerkte folgt ihm, damit die
-    /// Anmeldemaske nach dem nächsten Abmelden den aktuellen zeigt.
-    private func refreshDeviceName() {
-        guard stage == .server, !needsSignIn, let management, let serverURL else { return }
-        let flow = flow
-        deviceNameTask?.cancel()
-        deviceNameTask = Task { [weak self] in
-            // Ohne Verbindung bleibt der gemerkte Name; `401` meldet der Token-Provider.
-            guard let me = try? await management.me(), !Task.isCancelled else { return }
-            if let name = flow.adoptDeviceName(from: me, for: serverURL) { self?.deviceName = name }
+    // MARK: /api/me
+
+    /// Gemeinsamer Abruf von `GET /api/me` (LIC-56) für den Abgleich beim
+    /// Aktivwerden und die Einstellungen: Läuft schon einer, wartet der
+    /// Aufruf auf ihn; eine Antwort jünger als `maxAge` gilt ohne Anfrage.
+    ///
+    /// Jede Antwort gleicht den Gerätenamen ab (LIC-55): Ein anderes Gerät
+    /// kann dieses umbenannt haben, der gemerkte Name folgt dem Server, damit
+    /// die Anmeldemaske nach dem nächsten Abmelden den aktuellen zeigt.
+    /// Liefert `nil` ohne Server oder wenn inzwischen ein anderer gilt.
+    @discardableResult
+    func loadMe(maxAge: TimeInterval = 0) async throws -> ServerInfo? {
+        guard let management, let serverURL else { return nil }
+        let info = try await meFetch.load(maxAge: maxAge) { try await management.me() }
+        guard self.serverURL == serverURL else { return nil }
+        if me != info { me = info }
+        if let name = flow.deviceNameForMask(from: info, for: serverURL, current: deviceName), name != deviceName {
+            deviceName = name
         }
+        return info
+    }
+
+    /// Beim Start des Live-Abgleichs, also beim Aktivwerden.
+    private func refreshMe() {
+        guard stage == .server, !needsSignIn, management != nil else { return }
+        meTask?.cancel()
+        meTask = Task { [weak self] in
+            // Ohne Verbindung bleibt der gemerkte Name; `401` meldet der Token-Provider.
+            _ = try? await self?.loadMe()
+        }
+    }
+
+    /// Anderer Server, Demo, Abmelden: nichts vom alten stehen lassen.
+    private func forgetMe() {
+        meTask?.cancel()
+        meTask = nil
+        meFetch.reset()
+        me = nil
     }
 
     /// Dieses Gerät wurde in den Einstellungen umbenannt (LIC-46).
     func currentDeviceRenamed(_ name: String) {
         deviceName = name
+        me?.device?.name = name
+        // Die gemerkte Antwort trägt noch den alten Namen, ein laufender
+        // Abruf vielleicht auch: verwerfen, damit er den neuen nicht überschreibt.
+        meFetch.reset()
         if let serverURL { flow.rememberDeviceName(name, for: serverURL) }
     }
 
@@ -201,6 +240,7 @@ final class AppSession {
         management = ManagementAPI(sync: api)
         serverURL = url
         stage = .server
+        forgetMe()
         settings.reset()
         if isActive { startLive() }
     }
@@ -213,6 +253,7 @@ final class AppSession {
         serverURL = nil
         needsSignIn = false
         stage = .demo
+        forgetMe()
         settings.reset()
     }
 
@@ -253,6 +294,7 @@ final class AppSession {
         needsSignIn = false
         loginPhase = .idle
         model = AppModel.demo()
+        forgetMe()
         settings.reset()
         stage = .signedOut
     }
@@ -278,7 +320,7 @@ final class AppSession {
 
     private func startLive() {
         guard stage == .server, !needsSignIn, liveTask == nil, let api = syncAPI else { return }
-        refreshDeviceName()
+        refreshMe()
         let engine = model.engine
         liveTask = Task { [weak self] in
             let stop = await LiveSync.run(engine: engine, connect: { SyncEventStream(api: api).cursors() })
@@ -295,7 +337,7 @@ final class AppSession {
     private func stopLive() {
         liveTask?.cancel()
         liveTask = nil
-        deviceNameTask?.cancel()
-        deviceNameTask = nil
+        meTask?.cancel()
+        meTask = nil
     }
 }

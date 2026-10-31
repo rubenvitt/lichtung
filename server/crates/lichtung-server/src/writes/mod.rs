@@ -62,7 +62,7 @@ use crate::events::store::{self as events_store, EventRow};
 use crate::events::{default_zone, derive, event_json, normalize_ics, EventContext};
 use input::{
     build_object, check_object, check_uid, describe, edit_changes, resolve, set_alarms,
-    set_attendees, set_recurrence, DateInput, EventInput, Fields, InputError, Mutation,
+    set_attendees, set_recurrence_dates, DateInput, EventInput, Fields, InputError, Mutation,
     ResponseStatus, Scope,
 };
 
@@ -1436,7 +1436,9 @@ fn ics_for_put(object: &CalendarObject) -> String {
 }
 
 /// Applies what `edit_event` does not know (attendees, alarms, RDATE and
-/// EXDATE) to the components the scope chose.
+/// EXDATE) to the components the scope chose. The RRULE is not set again:
+/// `edit_event` has set it already, with the remaining `COUNT` after a split
+/// and a moved `UNTIL` (LIC-57).
 fn apply_extras(
     mut edit: EditOutcome,
     original: &CalendarObject,
@@ -1481,7 +1483,7 @@ fn apply_extras(
     }
     if let (Some(Some(r)), None) = (&f.recurrence, &single) {
         if let Some(mut master) = object.master_mut() {
-            set_recurrence(&mut master, r);
+            set_recurrence_dates(&mut master, r);
         }
     }
     Ok(edit)

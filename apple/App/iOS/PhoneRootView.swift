@@ -1,8 +1,10 @@
 // Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
 // Gerät gelaufen ist er noch nicht.
 
+import Combine
 import LichtungKit
 import SwiftUI
+import UIKit
 
 /// iPhone: Liste (A) als Start, dazu Raster (B) und Monat (D) (Spec §5).
 struct PhoneRootView: View {
@@ -71,6 +73,15 @@ struct PhoneRootView: View {
         // Wer in einer anderen App etwas kopiert hat, sieht „Einfügen“ nicht mehr (LIC-54).
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.expireClipboard(pasteboardText: Pasteboard.string) }
+        }
+        // Auch während die App offen ist, z. B. Text im Editor kopiert (LIC-58).
+        // Erst nach dem laufenden Durchlauf prüfen: Kopiert Lichtung selbst,
+        // kommt die Mitteilung schon beim Setzen der Zwischenablage, bevor
+        // `Pasteboard.write` den neuen Stand gemerkt hat; sofort geprüft,
+        // verfiele die eigene, gerade gemachte Kopie.
+        .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in
+            let appModel: AppModel = model
+            Task { @MainActor in appModel.expireClipboard(pasteboardText: Pasteboard.string) }
         }
         .alert(undoAlertTitle, isPresented: $showsUndoAlert) { undoAlertActions }
     }

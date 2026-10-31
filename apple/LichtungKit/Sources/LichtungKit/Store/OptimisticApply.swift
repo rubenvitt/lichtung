@@ -29,7 +29,8 @@ enum OptimisticApply {
                 var tail = Event(id: SyncState.placeholderPrefix + m.id, calendarId: e.calendarId, version: 0, details: details)
                 switch changes.recurrence {
                 case let .set(r)?:
-                    // Der Server übernimmt eine mitgeschickte Regel wörtlich.
+                    // Die App schickt die Restzahl schon mit (`recurrenceValue`),
+                    // der Server übernimmt ein geändertes COUNT wörtlich (LIC-57).
                     tail.recurrence = r
                 case .clear?:
                     tail.recurrence = nil

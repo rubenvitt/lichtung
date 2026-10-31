@@ -17,6 +17,9 @@ import AppKit // NSCursor am Griff
 /// Menü am iPhone (LIC-54): Ein aufgenommener Block, der ohne Bewegung
 /// losgelassen wird, öffnet das Menü des Termins als Popover
 /// (`OccurrenceMenuPopover`); bewegt ihn der Finger, wird verschoben.
+/// Auf leerer Fläche öffnet Halten ohne Bewegung ein Menü mit „Hier
+/// einfügen“ (`SlotMenuPopover`, LIC-58), aber nur, wenn eine Kopie vorliegt;
+/// sonst und beim Ziehen bleibt es beim Anlegen.
 ///
 /// Feinschliff (LIC-47): Nach dem Aufziehen und nach einem Doppelklick (Mac)
 /// öffnet der Editor mit dem neuen Termin. Vorkommen einer Serie fragen vor
@@ -301,6 +304,10 @@ struct DayColumn: View {
     @State private var menuOccurrenceId: String?
     /// Im Menü gewählte Aktion; sie läuft, sobald das Popover zu ist.
     @State private var pendingMenuAction: PendingMenuAction?
+    /// Menü beim Halten auf leerer Fläche (LIC-58). Die Stelle bleibt nach
+    /// dem Schließen stehen, damit das Popover nicht beim Ausblenden springt.
+    @State private var slotMenu: SlotMenuTarget?
+    @State private var showsSlotMenu = false
     #endif
 
     var body: some View {
@@ -344,6 +351,9 @@ struct DayColumn: View {
                     blockView(block, width: width, height: height)
                 }
                 preview(width: width, height: height)
+                #if os(iOS)
+                slotMenuAnchor(width: width, height: height)
+                #endif
                 if let line = TimelineLayout.nowLine(Date(), day: day, calendar: model.calendar) {
                     Rectangle()
                         .fill(Color.red)
@@ -444,7 +454,9 @@ struct DayColumn: View {
 
     // MARK: Gesten
 
-    /// Anlegen: Mac direkt ziehen, iPhone lange drücken und dann ziehen.
+    /// Anlegen: Mac direkt ziehen, iPhone lange drücken und dann ziehen. Am
+    /// iPhone öffnet Loslassen ohne Bewegung das Menü „Hier einfügen“, wenn
+    /// eine Kopie vorliegt (LIC-58); ohne Kopie bleibt alles wie bisher.
     private func createGesture(height: CGFloat) -> some Gesture {
         #if os(iOS)
         return LongPressGesture(minimumDuration: 0.4)
@@ -458,8 +470,18 @@ struct DayColumn: View {
                 if case .second(true, let d?) = value { scroller.dragChanged(pointerY: d.location.y) }
             }
             .onEnded { value in
-                if case .second(true, let d?) = value {
-                    commitCreate(fromY: d.startLocation.y, toY: d.location.y, height: height)
+                if case .second(true, let d) = value {
+                    let translation: (dx: Double, dy: Double)? = d.map {
+                        (dx: Double($0.translation.width), dy: Double($0.translation.height + scroller.scrolled))
+                    }
+                    switch GridInteraction.slotHoldRelease(translation: translation, canPaste: canPaste) {
+                    case .create:
+                        if let d { commitCreate(fromY: d.startLocation.y, toY: d.location.y, height: height) }
+                    case .menu:
+                        if let d { openSlotMenu(atViewportY: d.startLocation.y, height: height) }
+                    case .nothing:
+                        break
+                    }
                 }
                 scroller.dragEnded()
             }
@@ -670,6 +692,57 @@ struct DayColumn: View {
         guard let action = pendingMenuAction else { return }
         pendingMenuAction = nil
         action.run()
+    }
+
+    // MARK: Menü auf leerer Fläche (iPhone, LIC-58)
+
+    /// Gehaltene Stelle: Uhrzeit zum Einfügen und Lage in der Spalte (für
+    /// „Neuer Termin hier“).
+    private struct SlotMenuTarget {
+        var start: Date
+        var contentY: CGFloat
+    }
+
+    /// Ob „Hier einfügen“ geht: Kopie da, Zwischenablage hält sie noch.
+    private var canPaste: Bool {
+        model.clipboard?.matches(Pasteboard.string) == true
+    }
+
+    /// `y` im sichtbaren Ausschnitt. Der Finger stand still, also zählt der
+    /// jetzige Versatz (nicht der vom Beginn eines Zugs).
+    private func openSlotMenu(atViewportY y: CGFloat, height: CGFloat) {
+        let contentY = scroller.contentY(y)
+        let start = GridInteraction.pasteStart(day: day, atY: Double(contentY), columnHeight: Double(height), calendar: model.calendar)
+        slotMenu = SlotMenuTarget(start: start, contentY: contentY)
+        showsSlotMenu = true
+    }
+
+    /// Unsichtbarer Anker für das Popover in der Zeile der gehaltenen
+    /// Uhrzeit. Steht immer in der Spalte, damit das Popover einen Ort hat,
+    /// sobald es aufgeht.
+    private func slotMenuAnchor(width: CGFloat, height: CGFloat) -> some View {
+        let slot: GridFrame? = slotMenu.flatMap { target in
+            let interval = DateInterval(start: target.start, duration: Double(GridInteraction.snapMinutes) * 60)
+            return GridInteraction.frame(of: interval, day: day, calendar: model.calendar)
+        }
+        let top: CGFloat = slot.map { height * CGFloat($0.top) } ?? 0
+        let slotHeight: CGFloat = slot.map { max(1, height * CGFloat($0.height)) } ?? 1
+        return Color.clear
+            .frame(width: width, height: slotHeight)
+            // Vor `offset`, damit das Popover an der Zeile hängt.
+            .popover(isPresented: $showsSlotMenu) {
+                if let target = slotMenu {
+                    SlotMenuPopover(model: model, start: target.start, newEvent: {
+                        createAt(y: target.contentY, height: height)
+                    }) { action in
+                        pendingMenuAction = PendingMenuAction(run: action)
+                        showsSlotMenu = false
+                    }
+                    .onDisappear { runPendingMenuAction() }
+                }
+            }
+            .offset(y: top)
+            .allowsHitTesting(false)
     }
     #endif
 

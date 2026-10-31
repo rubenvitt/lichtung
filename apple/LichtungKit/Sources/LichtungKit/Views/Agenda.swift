@@ -118,28 +118,40 @@ public struct TickerDay: Hashable, Sendable, Identifiable {
 }
 
 public enum DayTicker {
+    /// Feste Folge ab `start` (`count` Tage). Das Band selbst nutzt `summaries(_:in:today:calendar:)`
+    /// für den gerade sichtbaren Ausschnitt (LIC-67).
     public static func days(
         _ occurrences: [Occurrence], from start: LocalDate, count: Int, today: LocalDate, calendar cal: Calendar
     ) -> [TickerDay] {
-        (0..<max(0, count)).map { offset in
-            let day = start.adding(days: offset)
-            let dayStart = day.startDate(in: cal)
-            let dayEnd = day.adding(days: 1).startDate(in: cal)
-            let touching = occurrences.filter { $0.start < dayEnd && $0.end > dayStart }
-            var counts: [String: Int] = [:]
-            for o in touching { counts[o.calendarId, default: 0] += 1 }
-            let ids = counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.prefix(4).map(\.key)
-            // Belegung im Kernbereich 8–20 Uhr, Überschneidungen nur einmal gezählt.
-            let core = DateInterval(start: day.date(hour: 8, minute: 0, in: cal), end: day.date(hour: 20, minute: 0, in: cal))
-            let busy = mergedLength(touching.filter { !$0.isAllDay && $0.details.availability == .busy }
-                .compactMap { DateInterval(start: $0.start, end: max($0.start, $0.end)).intersection(with: core) })
-            let wd = day.weekday
-            return TickerDay(
-                date: day, weekdayShort: QuickEntryPreview.weekdayShort[wd.rawValue - 1], dayNumber: day.day,
-                isToday: day == today, isWeekend: wd == .saturday || wd == .sunday,
-                calendarIds: ids, busyFraction: min(1, busy / core.duration)
-            )
-        }
+        let first = index(of: start)
+        let byIndex = summaries(occurrences, in: first..<(first + max(0, count)), today: today, calendar: cal)
+        return (0..<max(0, count)).map { byIndex[first + $0]! }
+    }
+
+    /// Ein Tag des Bands aus den Vorkommen, die ihn berühren (`touching` darf mehr enthalten,
+    /// gefiltert wird hier). Ohne Vorkommen: leerer Tag, z. B. solange der Ausschnitt nachlädt.
+    public static func day(
+        _ day: LocalDate, touching occurrences: [Occurrence] = [], today: LocalDate, calendar cal: Calendar
+    ) -> TickerDay {
+        let wd = day.weekday
+        var result = TickerDay(
+            date: day, weekdayShort: QuickEntryPreview.weekdayShort[wd.rawValue - 1], dayNumber: day.day,
+            isToday: day == today, isWeekend: wd == .saturday || wd == .sunday,
+            calendarIds: [], busyFraction: 0
+        )
+        guard !occurrences.isEmpty else { return result }
+        let dayStart = day.startDate(in: cal)
+        let dayEnd = day.adding(days: 1).startDate(in: cal)
+        let touching = occurrences.filter { $0.start < dayEnd && $0.end > dayStart }
+        var counts: [String: Int] = [:]
+        for o in touching { counts[o.calendarId, default: 0] += 1 }
+        result.calendarIds = counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.prefix(4).map(\.key)
+        // Belegung im Kernbereich 8–20 Uhr, Überschneidungen nur einmal gezählt.
+        let core = DateInterval(start: day.date(hour: 8, minute: 0, in: cal), end: day.date(hour: 20, minute: 0, in: cal))
+        let busy = mergedLength(touching.filter { !$0.isAllDay && $0.details.availability == .busy }
+            .compactMap { DateInterval(start: $0.start, end: max($0.start, $0.end)).intersection(with: core) })
+        result.busyFraction = min(1, busy / core.duration)
+        return result
     }
 
     static func mergedLength(_ intervals: [DateInterval]) -> TimeInterval {

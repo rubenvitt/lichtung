@@ -85,37 +85,95 @@ struct AgendaRow: View {
 }
 
 /// Fantasticals DayTicker: Tage nebeneinander, Farbpunkte je Kalender.
+///
+/// Virtualisiert über ±100 Jahre (LIC-67): Jede Zelle ist ein Tagesindex
+/// (`DayTicker.index(of:)`), gebaut werden nur die sichtbaren. Farbpunkte und
+/// Belegung entstehen für einen Ausschnitt um die sichtbaren Zellen
+/// (`DayTicker.window`), der beim Wischen nur alle paar Tage neu berechnet wird.
 struct DayTickerView: View {
     @Environment(AppModel.self) private var model
-    var count = 21
+    /// Ausschnitt (Indizes) mit Farbpunkten und Belegung; leer bis zur ersten Messung.
+    @State private var window: Range<Int> = 0..<0
+    /// Sichtbare Zellen. Ein schlichtes Objekt statt `@State`-Wert, damit das
+    /// Mitschreiben beim Wischen den Body nicht jedes Mal neu auswertet.
+    @State private var visibility = TickerVisibility()
 
     var body: some View {
-        let start = model.today.adding(days: -3)
-        let occurrences = model.occurrences(from: start, days: count)
-        let days = DayTicker.days(occurrences, from: start, count: count, today: model.today, calendar: model.calendar)
+        let today = model.today
+        let selected = DayTicker.index(of: model.selectedDay)
+        let shown = window.isEmpty ? DayTicker.window(current: window, visible: selected...selected) : window
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    ForEach(days) { day in
-                        TickerCell(day: day, isSelected: day.date == model.selectedDay)
-                            .id(day.date)
-                            .onTapGesture { model.selectedDay = day.date }
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                TickerStrip(range: DayTicker.indexRange(around: today), window: shown, today: today)
             }
-            .onAppear { proxy.scrollTo(model.selectedDay, anchor: .center) }
+            .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.5) { ids in
+                guard let lo = ids.min(), let hi = ids.max() else { return }
+                visibility.range = lo...hi
+                let next = DayTicker.window(current: window, visible: lo...hi)
+                if next != window { window = next }
+            }
+            .frame(height: TickerCell.height + 12)
+            .onAppear { reveal(model.selectedDay, proxy: proxy, animated: false) }
+            // Wischen im Raster, Monatsansicht, „Heute“: das Band folgt, auch weit weg.
+            .onChange(of: model.selectedDay) { _, day in reveal(day, proxy: proxy, animated: true) }
+        }
+    }
+
+    /// Scrollt den Tag in die Mitte, außer er ist schon ganz zu sehen (Tippen auf eine Zelle).
+    private func reveal(_ day: LocalDate, proxy: ScrollViewProxy, animated: Bool) {
+        let index = DayTicker.index(of: day)
+        if let visible = visibility.range, visible.lowerBound < index, index < visible.upperBound { return }
+        // Belegung für das Ziel gleich mitrechnen, nicht erst nach der nächsten Messung.
+        let next = DayTicker.window(current: window, visible: index...index)
+        if next != window { window = next }
+        let near = visibility.range.map { abs($0.lowerBound - index) <= 60 || abs($0.upperBound - index) <= 60 } ?? false
+        if animated && near {
+            withAnimation(.snappy) { proxy.scrollTo(index, anchor: .center) }
+        } else {
+            proxy.scrollTo(index, anchor: .center)
         }
     }
 }
 
-struct TickerCell: View {
+/// Zuletzt gemessene sichtbare Zellen des Bands (nicht beobachtet).
+private final class TickerVisibility {
+    var range: ClosedRange<Int>?
+}
+
+/// Die Zellen des Bands. Eigene Ansicht, damit ein Wechsel des ausgewählten
+/// Tages nur die Zellen neu zeichnet und die Belegung nicht neu rechnet.
+private struct TickerStrip: View {
     @Environment(AppModel.self) private var model
-    let day: TickerDay
-    let isSelected: Bool
+    let range: Range<Int>
+    let window: Range<Int>
+    let today: LocalDate
 
     var body: some View {
+        let start = DayTicker.day(at: window.lowerBound)
+        let occurrences = model.occurrences(from: start, days: window.count)
+        let summaries = DayTicker.summaries(occurrences, in: window, today: today, calendar: model.calendar)
+        LazyHStack(spacing: 4) {
+            ForEach(range, id: \.self) { index in
+                // Außerhalb des Ausschnitts (schnelles Wischen): Tag ohne Punkte, bis er nachgerechnet ist.
+                let day = summaries[index] ?? DayTicker.day(DayTicker.day(at: index), today: today, calendar: model.calendar)
+                TickerCell(day: day)
+                    .onTapGesture { model.selectedDay = day.date }
+            }
+        }
+        .scrollTargetLayout()
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+}
+
+struct TickerCell: View {
+    static let height: CGFloat = 58
+
+    @Environment(AppModel.self) private var model
+    let day: TickerDay
+
+    var body: some View {
+        let isSelected = day.date == model.selectedDay
         VStack(spacing: 2) {
             Text(day.weekdayShort).font(.caption2)
             Text("\(day.dayNumber)").font(.callout.weight(day.isToday ? .bold : .regular))
@@ -130,7 +188,7 @@ struct TickerCell: View {
                 .frame(width: 28 * max(0.08, day.busyFraction), height: 2)
                 .opacity(day.busyFraction > 0 ? 1 : 0)
         }
-        .frame(width: 40, height: 58)
+        .frame(width: 40, height: Self.height)
         .foregroundStyle(isSelected ? Color.white : (day.isWeekend ? Color.secondary : Color.primary))
         .background(RoundedRectangle(cornerRadius: 8).fill(isSelected ? Color.accentColor : Color.clear))
         .accessibilityElement(children: .ignore)

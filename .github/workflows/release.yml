@@ -1,0 +1,125 @@
+name: Release
+
+# semantic-release auf main: liest die Conventional Commits seit dem letzten Tag
+# (feat → Minor, fix → Patch, BREAKING CHANGE → Major), setzt den Tag vX.Y.Z und legt
+# das GitHub Release als Entwurf an. Danach baut der Mac-Job die App, signiert sie mit
+# Developer ID, notarisiert sie und hängt Zip und Sparkle-Feed (appcast.xml) an. Erst
+# dann wird der Entwurf veröffentlicht; ein Release ohne App wird also nie „latest“,
+# und die Apps finden das Update über releases/latest/download/appcast.xml.
+# TestFlight (iOS) läuft getrennt in testflight.yml weiter.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apple/**"
+      - ".releaserc.json"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+# Ein Release nach dem anderen; ein neuer Push wartet.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      published: ${{ steps.release.outputs.published }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: semantic-release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          before=$(git tag --points-at HEAD | grep -E '^v[0-9]' || true)
+          npx --yes semantic-release@25
+          after=$(git tag --points-at HEAD | grep -E '^v[0-9]' | sort -V | tail -1 || true)
+          if [ -n "$after" ] && [ "$after" != "$before" ]; then
+            echo "Neues Release: $after"
+            echo "version=${after#v}" >> "$GITHUB_OUTPUT"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Kein neues Release."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  macos-app:
+    needs: semantic-release
+    if: needs.semantic-release.outputs.published == 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.semantic-release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.semantic-release.outputs.version }}
+      - run: brew install xcodegen
+      - name: Zertifikat und Schlüssel ablegen
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          for name in MACOS_CERTIFICATE_P12 MACOS_CERTIFICATE_PASSWORD APPLE_API_KEY APPLE_API_KEY_P8 APPLE_API_ISSUER SPARKLE_PRIVATE_KEY; do
+            [ -n "${!name}" ] || { echo "::error::Secret $name fehlt"; exit 1; }
+          done
+          umask 077
+          # Developer-ID-Zertifikat (p12, base64) in einen eigenen Schlüsselbund.
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          keychain_password=$(openssl rand -hex 24)
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$keychain"
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain"
+          echo "RELEASE_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          # App Store Connect API-Key für notarytool (dieselben Secrets wie TestFlight).
+          key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$key"
+          echo "ASC_KEY_PATH=$key" >> "$GITHUB_ENV"
+          # Privater EdDSA-Schlüssel für Sparkle.
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle_key"
+          echo "SPARKLE_KEY_FILE=$RUNNER_TEMP/sparkle_key" >> "$GITHUB_ENV"
+      - name: Bauen, signieren, notarisieren
+        env:
+          ASC_KEY_ID: ${{ secrets.APPLE_API_KEY }}
+          ASC_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER }}
+        run: apple/scripts/release-macos.sh
+      - name: An das Release hängen und veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$VERSION"
+          gh release upload "$tag" "apple/build/release/Lichtung-$VERSION.zip" \
+            apple/build/release/appcast.xml --clobber
+          gh release edit "$tag" --draft=false --latest
+      - name: Schlüssel löschen
+        if: always()
+        run: |
+          [ -n "${RELEASE_KEYCHAIN:-}" ] && security delete-keychain "$RELEASE_KEYCHAIN" || true
+          rm -f "${ASC_KEY_PATH:-}" "${SPARKLE_KEY_FILE:-}"

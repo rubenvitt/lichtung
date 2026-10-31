@@ -42,7 +42,7 @@ struct MacRootView: View {
                 ToolbarItemGroup(placement: .navigation) {
                     Button { model.step(-1) } label: { Image(systemName: "chevron.left") }
                         .help("\(model.viewMode.stepTitle(forward: false)) (⌘←)")
-                    Button("Heute") { model.selectedDay = model.today }
+                    Button("Heute") { model.goToToday() }
                         .keyboardShortcut("t", modifiers: .command)
                     Button { model.step(1) } label: { Image(systemName: "chevron.right") }
                         .help("\(model.viewMode.stepTitle(forward: true)) (⌘→)")

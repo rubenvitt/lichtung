@@ -30,7 +30,7 @@ struct PhoneRootView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("Heute") { model.selectedDay = model.today }
+                        Button("Heute") { model.goToToday() }
                     }
                     // Erst nach „Kopieren“ zu sehen (LIC-50).
                     ToolbarItem(placement: .topBarLeading) { pasteMenu }

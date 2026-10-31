@@ -107,8 +107,15 @@ final class SettingsModel {
     /// `force` (Ziehen zum Aktualisieren) fragt auch `/api/me` neu.
     func loadOverview(force: Bool = false) async {
         guard let session, let api = session.management else { return }
+        let serverURL = session.serverURL
         do {
-            _ = try await session.loadMe(maxAge: force ? 0 : AppSession.meMaxAge)
+            do {
+                _ = try await session.loadMe(maxAge: force ? 0 : AppSession.meMaxAge)
+            } catch is CancellationError {
+                // Verworfen, weil dieses Gerät gerade umbenannt wurde: Geräte und
+                // Tokens trotzdem laden. Bei anderem Server oder Abmelden nicht.
+                guard session.serverURL == serverURL, session.management != nil else { return }
+            }
             devices = try await api.devices()
             tokens = try await api.tokens()
         } catch is CancellationError {

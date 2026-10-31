@@ -101,10 +101,14 @@ struct DayTickerView: View {
     var body: some View {
         let today = model.today
         let selected = DayTicker.index(of: model.selectedDay)
+        // ±100 Jahre um heute; liegt die Auswahl (z. B. über den Monat) weiter
+        // weg, wächst der Bereich bis zu ihr, damit das Band sie zeigen kann.
+        let base = DayTicker.indexRange(around: today)
+        let range = min(base.lowerBound, selected)..<max(base.upperBound, selected + 1)
         let shown = window.isEmpty ? DayTicker.window(current: window, visible: selected...selected) : window
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                TickerStrip(range: DayTicker.indexRange(around: today), window: shown, today: today)
+                TickerStrip(range: range, window: shown, today: today)
             }
             .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.5) { ids in
                 guard let lo = ids.min(), let hi = ids.max() else { return }

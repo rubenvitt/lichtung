@@ -54,6 +54,17 @@ pub struct EventChanges {
     pub end: Option<CalTime>,
     /// New recurrence rule (`Some(None)` ends recurrence). Not allowed with
     /// [`EditScope::This`].
+    ///
+    /// `COUNT` and `UNTIL` are compared with the series' rule before the
+    /// edit (LIC-57):
+    /// - An unchanged `COUNT` still counts the whole series: with
+    ///   [`EditScope::ThisAndFuture`] the new series gets the remainder
+    ///   (as without a rule change). A changed `COUNT` counts from the
+    ///   selected occurrence on and is taken as it is. A sender may thus
+    ///   pass either the series' count or the remainder; the result is the
+    ///   same, nothing is subtracted twice.
+    /// - An unchanged `UNTIL` moves along with the series when its start
+    ///   changes. A changed `UNTIL` is taken as it is.
     pub rrule: Option<Option<RecurRule>>,
 }
 
@@ -117,6 +128,8 @@ pub fn edit_event(
     let resolver = object.resolver(ctx.default_tz);
     let mut obj = object.clone();
     let normalized = normalize_changes(&obj, changes, &resolver);
+    // The rule the sender saw (before a split), see `EventChanges::rrule`.
+    let seen_rule = obj.master().and_then(|m| m.rrule().ok().flatten());
     let changes = &normalized;
 
     let Some(master_idx) = obj.master_index() else {
@@ -143,7 +156,14 @@ pub fn edit_event(
 
     match scope {
         EditScope::All => {
-            apply_all(&mut obj, occurrence, changes, ctx, &resolver)?;
+            apply_all(
+                &mut obj,
+                occurrence,
+                changes,
+                seen_rule.as_ref(),
+                ctx,
+                &resolver,
+            )?;
             Ok(EditOutcome {
                 updated: Some(obj),
                 created: None,
@@ -173,7 +193,14 @@ pub fn edit_event(
             })?;
             let split = locate(&obj, rid, &resolver)?;
             if split.is_first {
-                apply_all(&mut obj, Some(rid), changes, ctx, &resolver)?;
+                apply_all(
+                    &mut obj,
+                    Some(rid),
+                    changes,
+                    seen_rule.as_ref(),
+                    ctx,
+                    &resolver,
+                )?;
                 return Ok(EditOutcome {
                     updated: Some(obj),
                     created: None,
@@ -185,7 +212,14 @@ pub fn edit_event(
             let mut new_obj = split_series(&mut obj, &split, Some(&new_uid), ctx, &resolver)?
                 .expect("split with uid yields a new series");
             let new_resolver = new_obj.resolver(ctx.default_tz);
-            apply_all(&mut new_obj, Some(&split.rid), changes, ctx, &new_resolver)?;
+            apply_all(
+                &mut new_obj,
+                Some(&split.rid),
+                changes,
+                seen_rule.as_ref(),
+                ctx,
+                &new_resolver,
+            )?;
             // The new series starts fresh.
             if let Some(mut m) = new_obj.master_mut() {
                 m.set_sequence(0);
@@ -621,10 +655,14 @@ impl FieldSnapshot {
 // ---------------------------------------------------------------------------
 // "All"
 
+/// `seen_rule` is the series' rule as the sender saw it (before a split);
+/// `obj` may be the new series of a split, whose rule already carries the
+/// remaining `COUNT`.
 fn apply_all(
     obj: &mut CalendarObject,
     occurrence: Option<&CalTime>,
     changes: &EventChanges,
+    seen_rule: Option<&RecurRule>,
     ctx: &EditContext,
     resolver: &ZoneResolver,
 ) -> Result<()> {
@@ -712,9 +750,15 @@ fn apply_all(
             }
             None => {}
         }
-        // Rule.
+        // Rule. Whether `UNTIL` is the series' own and moves with it.
+        let mut own_until = true;
         match &changes.rrule {
-            Some(Some(rule)) => m.set_rrule(Some(rule)),
+            Some(Some(rule)) => {
+                let current = m.rrule()?;
+                let (rule, own) = rule_from_here(rule, seen_rule, current.as_ref());
+                own_until = own;
+                m.set_rrule(Some(&rule));
+            }
             Some(None) => {
                 m.set_rrule(None);
                 m.component_mut().remove_properties("RDATE");
@@ -723,8 +767,8 @@ fn apply_all(
             None => {}
         }
         if start_changed && !remove_recurrence {
-            // UNTIL follows the series.
-            if let Some(mut rule) = m.rrule()? {
+            // UNTIL follows the series (unless the sender chose a new one).
+            if let Some(mut rule) = m.rrule()?.filter(|_| own_until) {
                 if let Some(until) = rule.until() {
                     let nu = shift_until(&until, &old_start, &new_start, &old_zone, &new_zone);
                     rule.set_until(Some(nu));
@@ -810,6 +854,29 @@ impl EventChanges {
     fn is_noop(&self) -> bool {
         *self == EventChanges::default()
     }
+}
+
+/// The rule to write for a sent `rule` (see [`EventChanges::rrule`]):
+/// `seen` is the series' rule before the edit, `current` the rule of the
+/// object being edited (after a split: with the remaining `COUNT`).
+/// Returns the rule and whether its `UNTIL` is the series' own (unchanged,
+/// so it moves along with the start).
+fn rule_from_here(
+    rule: &RecurRule,
+    seen: Option<&RecurRule>,
+    current: Option<&RecurRule>,
+) -> (RecurRule, bool) {
+    let mut out = rule.clone();
+    let Some(seen) = seen else {
+        return (out, false);
+    };
+    if rule.count().is_some() && rule.count() == seen.count() {
+        if let Some(remaining) = current.and_then(RecurRule::count) {
+            out.set_count(Some(remaining));
+        }
+    }
+    let own_until = rule.until().is_some() && rule.until() == seen.until();
+    (out, own_until)
 }
 
 /// Moves a recurrence id (or EXDATE/RDATE) along with a master whose start

@@ -702,6 +702,15 @@ pub fn build_object(
 /// Writes RRULE, RDATE and EXDATE of a series master (replacing them).
 pub fn set_recurrence<C: std::borrow::BorrowMut<Component>>(ev: &mut Event<C>, r: &Recurrence) {
     ev.set_rrule(r.rrule.as_ref());
+    set_recurrence_dates(ev, r);
+}
+
+/// Writes RDATE and EXDATE of a series master (replacing them), not the
+/// RRULE: on an edit, `lichtung_ical::edit_event` sets that (LIC-57).
+pub fn set_recurrence_dates<C: std::borrow::BorrowMut<Component>>(
+    ev: &mut Event<C>,
+    r: &Recurrence,
+) {
     let rdates: Vec<RDate> = r.rdates.iter().cloned().map(RDate::Time).collect();
     ev.set_rdates(&rdates);
     ev.set_exdates(&r.exdates);

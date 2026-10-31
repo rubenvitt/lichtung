@@ -92,7 +92,7 @@ struct AccessSettingsView: View {
         .navigationTitle("Geräte und Tokens")
         .task { await session.settings.loadOverview() }
         #if os(iOS)
-        .refreshable { await session.settings.loadOverview() }
+        .refreshable { await session.settings.loadOverview(force: true) }
         #endif
         .sheet(item: Bindable(settings).createdToken) { token in
             CreatedTokenSheet(token: token)

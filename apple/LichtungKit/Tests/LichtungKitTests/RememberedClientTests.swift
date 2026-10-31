@@ -206,6 +206,31 @@ struct RememberedClientTests {
         #expect(store.client(for: other) == nil)
     }
 
+    /// LIC-56: Installationen ohne gemerkten Client (vor LIC-49) bekommen den
+    /// Namen für die Maske, ohne dass ein Client entsteht.
+    @Test func deviceNameForMaskWithAndWithoutClient() throws {
+        let renamed = try Self.me(#"{"auth": "app:Büro-Mac", "device": {"id": "d1", "name": "Büro-Mac"}}"#)
+        let store = InMemoryClientStore()
+        let flow = DeviceLoginFlow(transport: ScriptedTransport([]), clients: store)
+
+        // Ohne Client: nur die Maske folgt, gemerkt wird nichts.
+        #expect(flow.deviceNameForMask(from: renamed, for: Self.server, current: "Mac") == "Büro-Mac")
+        #expect(flow.deviceNameForMask(from: renamed, for: Self.server, current: "Büro-Mac") == nil)
+        #expect(store.client(for: Self.server) == nil)
+        let browser = try Self.me(#"{"auth": "web", "device": null}"#)
+        #expect(flow.deviceNameForMask(from: browser, for: Self.server, current: "Mac") == nil)
+
+        // Mit Client: wie adoptDeviceName, der gemerkte Name zählt, nicht die Maske.
+        store.remember(RememberedClient(clientId: "cl_1", name: "Rubens Mac"), for: Self.server)
+        #expect(flow.deviceNameForMask(from: renamed, for: Self.server, current: "Büro-Mac") == "Büro-Mac")
+        #expect(store.client(for: Self.server) == RememberedClient(clientId: "cl_1", name: "Büro-Mac"))
+        #expect(flow.deviceNameForMask(from: renamed, for: Self.server, current: "Büro-Mac") == nil)
+
+        // Ohne Speicher (Tests, ältere Aufrufer) wie ohne Client.
+        let bare = DeviceLoginFlow(transport: ScriptedTransport([]))
+        #expect(bare.deviceNameForMask(from: renamed, for: Self.server, current: "Mac") == "Büro-Mac")
+    }
+
     @Test func userDefaultsStore() throws {
         let suite = "lichtung-test-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

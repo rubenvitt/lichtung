@@ -13,7 +13,9 @@ import Observation
 final class SettingsModel {
     @ObservationIgnored private weak var session: AppSession?
 
-    private(set) var me: ServerInfo?
+    /// `GET /api/me` teilt sich die Sitzung mit dem Abgleich des
+    /// Gerätenamens (LIC-56).
+    var me: ServerInfo? { session?.me }
     private(set) var devices: [Device] = []
     private(set) var tokens: [APIToken] = []
     /// Neu erzeugtes API-Token: Das Geheimnis ist nur jetzt sichtbar.
@@ -31,7 +33,6 @@ final class SettingsModel {
 
     /// Nach Anmelden, Abmelden, Demo: nichts vom alten Server stehen lassen.
     func reset() {
-        me = nil
         devices = []
         tokens = []
         createdToken = nil
@@ -90,22 +91,27 @@ final class SettingsModel {
         await session?.model.refresh()
     }
 
-    /// Nur `me` (Allgemein: Konto, Gerät, Server-Version).
+    /// Nur `me` (Allgemein: Konto, Gerät, Server-Version). Eine frische
+    /// Antwort der Sitzung (etwa vom Aktivwerden) gilt ohne neue Anfrage.
     func loadMe() async {
-        guard let api = session?.management else { return }
+        guard let session else { return }
         do {
-            me = try await api.me()
+            _ = try await session.loadMe(maxAge: AppSession.meMaxAge)
+        } catch is CancellationError {
+            // Server gewechselt oder abgemeldet: nichts zu melden.
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    func loadOverview() async {
-        guard let api = session?.management else { return }
+    /// `force` (Ziehen zum Aktualisieren) fragt auch `/api/me` neu.
+    func loadOverview(force: Bool = false) async {
+        guard let session, let api = session.management else { return }
         do {
-            me = try await api.me()
+            _ = try await session.loadMe(maxAge: force ? 0 : AppSession.meMaxAge)
             devices = try await api.devices()
             tokens = try await api.tokens()
+        } catch is CancellationError {
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -237,7 +243,6 @@ final class SettingsModel {
             let updated = try await api.renameDevice(id, name: n)
             if let i = self.devices.firstIndex(where: { $0.id == id }) { self.devices[i] = updated }
             if updated.current == true || self.me?.device?.id == id {
-                self.me?.device?.name = updated.name
                 self.session?.currentDeviceRenamed(updated.name)
             }
         }

@@ -430,7 +430,15 @@ struct DayColumn: View {
             }
             #endif
             .offset(x: width * block.leading + 1, y: height * block.top)
-            .modifier(OccurrenceTap(occurrence: occ)) // Mac: markieren, doppelt öffnen (LIC-24)
+            #if os(iOS)
+            // Das Loslassen nach langem Halten zählt auch als Tap. Ging dabei das
+            // Menü auf, kollidiert das Detail-Blatt mit ihm: Das Menü schließt
+            // sich, das Blatt erscheint nie, und `selectedOccurrence` bleibt
+            // gesetzt und blockiert alle weiteren Blätter (LIC-64).
+            .modifier(OccurrenceTap(occurrence: occ, opensDetail: { menuOccurrenceId == nil }))
+            #else
+            .modifier(OccurrenceTap(occurrence: occ)) // markieren, doppelt öffnen (LIC-24)
+            #endif
             .gesture(moveGesture(occ, width: width, height: height), including: draggable ? .all : .subviews)
             .modifier(BlockMenu(occurrence: occ, draggable: draggable))
             .modifier(NudgeActions(enabled: draggable) { minutes in nudge(occ, by: minutes) })

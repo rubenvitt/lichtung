@@ -225,6 +225,8 @@ private extension View {
 struct OccurrenceTap: ViewModifier {
     @Environment(AppModel.self) private var model
     let occurrence: Occurrence
+    /// iPhone: `false`, wenn der Tap das Detail nicht öffnen soll.
+    var opensDetail: @MainActor () -> Bool = { true }
 
     func body(content: Content) -> some View {
         #if os(macOS)
@@ -233,7 +235,7 @@ struct OccurrenceTap: ViewModifier {
             .simultaneousGesture(TapGesture().onEnded { model.highlight(occurrence) })
         #else
         content
-            .onTapGesture { model.open(occurrence) }
+            .onTapGesture { if opensDetail() { model.open(occurrence) } }
         #endif
     }
 }

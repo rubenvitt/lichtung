@@ -15,6 +15,10 @@ options:
 packages:
   LichtungKit:
     path: LichtungKit
+  # Auto-Update der Mac-App aus den GitHub Releases (scripts/release-macos.sh)
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.10.0"
 
 settings:
   base:
@@ -84,6 +88,8 @@ targets:
     dependencies:
       - package: LichtungKit
         product: LichtungKit
+      - package: Sparkle
+        product: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.lichtung.mac
@@ -98,9 +104,22 @@ targets:
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
+        # Sparkle in der Sandbox: Installer-Dienst über XPC (Sparkle-Doku „Sandboxing“)
+        com.apple.security.temporary-exception.mach-lookup.global-name:
+          - dev.rubeen.lichtung.mac-spks
+          - dev.rubeen.lichtung.mac-spki
     info:
       path: DerivedInfo/Lichtung-macOS-Info.plist
       properties:
+        # Release-Builds setzen beides (scripts/release-macos.sh), sonst stünde hier fest 0.1 und 1.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Sparkle: Feed zeigt immer auf das neueste GitHub Release.
+        SUFeedURL: https://github.com/rubenvitt/lichtung/releases/latest/download/appcast.xml
+        # Öffentlicher EdDSA-Schlüssel; der private liegt im Secret SPARKLE_PRIVATE_KEY.
+        SUPublicEDKey: jdstzXmzNzKlPY2VysuA634vpJA6W+CeCycdMM+aAOY=
+        SUEnableInstallerLauncherService: true
+        SUEnableAutomaticChecks: true
         CFBundleURLTypes:
           - CFBundleURLName: dev.rubeen.lichtung.oauth
             CFBundleURLSchemes: [dev.rubeen.lichtung]

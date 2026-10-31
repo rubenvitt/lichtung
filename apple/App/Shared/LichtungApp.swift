@@ -9,13 +9,23 @@ struct LichtungApp: App {
     /// Anmeldung, Demo oder Server (LIC-43). Hält das aktuelle `AppModel`.
     @State private var session = AppSession()
 
+    #if os(macOS)
+    init() {
+        // Sparkle früh starten, damit er im Hintergrund nach Updates sucht.
+        _ = AppUpdater.shared
+    }
+    #endif
+
     var body: some Scene {
         WindowGroup {
             SessionRootView()
                 .environment(session)
         }
         #if os(macOS)
-        .commands { LichtungCommands(model: session.model) }
+        .commands {
+            LichtungCommands(model: session.model)
+            CheckForUpdatesCommand()
+        }
         #endif
 
         #if os(macOS)

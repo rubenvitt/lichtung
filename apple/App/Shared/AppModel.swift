@@ -30,6 +30,9 @@ final class AppModel {
     var calendarHasKeyboardFocus = false
     /// Bitte an `MacRootView`, den Fokus ins Kalenderfeld zu holen (Zähler wie `searchFocusRequests`).
     var calendarFocusRequests = 0
+    /// Zählt „Heute“ mit: Ist heute schon gewählt, ändert sich `selectedDay` nicht,
+    /// und das Tagesband muss trotzdem zurückkommen (LIC-67).
+    var todayRequests = 0
     /// Serientermin, für den die Frage nach dem Geltungsbereich beim Löschen offen ist.
     var pendingDelete: Occurrence?
     /// Zuletzt kopierter Termin (⌘C, Kontextmenü „Kopieren“).
@@ -197,6 +200,11 @@ final class AppModel {
 
     /// Springt zum Tag eines Vorkommens und öffnet sein Detail.
     /// Am Mac bleibt er danach markiert (LIC-24).
+    func goToToday() {
+        selectedDay = today
+        todayRequests += 1
+    }
+
     func show(_ occurrence: Occurrence) {
         selectedDay = LocalDate(occurrence.start, calendar: calendar)
         open(occurrence)

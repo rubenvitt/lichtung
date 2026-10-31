@@ -116,6 +116,7 @@ struct DayTickerView: View {
             .onAppear { reveal(model.selectedDay, proxy: proxy, animated: false) }
             // Wischen im Raster, Monatsansicht, „Heute“: das Band folgt, auch weit weg.
             .onChange(of: model.selectedDay) { _, day in reveal(day, proxy: proxy, animated: true) }
+            .onChange(of: model.todayRequests) { reveal(model.selectedDay, proxy: proxy, animated: true) }
         }
     }
 
@@ -188,6 +189,8 @@ struct TickerCell: View {
                 .frame(width: 28 * max(0.08, day.busyFraction), height: 2)
                 .opacity(day.busyFraction > 0 ? 1 : 0)
         }
+        // Feste Zellgröße des Bands; größere Schrift würde abgeschnitten.
+        .dynamicTypeSize(...DynamicTypeSize.large)
         .frame(width: 40, height: Self.height)
         .foregroundStyle(isSelected ? Color.white : (day.isWeekend ? Color.secondary : Color.primary))
         .background(RoundedRectangle(cornerRadius: 8).fill(isSelected ? Color.accentColor : Color.clear))

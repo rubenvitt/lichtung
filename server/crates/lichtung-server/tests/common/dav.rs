@@ -118,6 +118,9 @@ pub struct DavState {
     pub put_status: Option<u16>,
     /// Answer every DELETE with this status instead.
     pub delete_status: Option<u16>,
+    /// Store a PUT as usual, but answer it with this status (the answer
+    /// got lost after the write, e.g. a gateway timeout).
+    pub put_status_after_write: Option<u16>,
     /// PUT answers carry the new ETag. Without it the server also changes
     /// the data (adds `X-BEISPIEL-GESEHEN:1`), like servers that normalize.
     pub etag_in_put_response: bool,
@@ -147,6 +150,7 @@ impl Default for DavState {
             sync_reports: 0,
             put_status: None,
             delete_status: None,
+            put_status_after_write: None,
             etag_in_put_response: true,
             uid_conflict_across: false,
             writes: Vec::new(),
@@ -558,6 +562,9 @@ impl FakeDav {
                     body.replacen("END:VEVENT", "X-BEISPIEL-GESEHEN:1\r\nEND:VEVENT", 1)
                 };
                 let etag = s.store(&collection, &name, &data);
+                if let Some(status) = s.put_status_after_write {
+                    return ResponseTemplate::new(status);
+                }
                 let status = if current.is_some() { 204 } else { 201 };
                 let response = ResponseTemplate::new(status);
                 if exact {

@@ -101,10 +101,11 @@ struct DayTickerView: View {
     var body: some View {
         let today = model.today
         let selected = DayTicker.index(of: model.selectedDay)
-        // ±100 Jahre um heute; liegt die Auswahl (z. B. über den Monat) weiter
-        // weg, wächst der Bereich bis zu ihr, damit das Band sie zeigen kann.
+        // ±100 Jahre um heute und um die Auswahl: Liegt sie (z. B. über den
+        // Monat) weiter weg, bleibt auch um sie herum genug Band zum Scrollen.
         let base = DayTicker.indexRange(around: today)
-        let range = min(base.lowerBound, selected)..<max(base.upperBound, selected + 1)
+        let around = DayTicker.indexRange(around: model.selectedDay)
+        let range = min(base.lowerBound, around.lowerBound)..<max(base.upperBound, around.upperBound)
         let shown = window.isEmpty ? DayTicker.window(current: window, visible: selected...selected) : window
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {

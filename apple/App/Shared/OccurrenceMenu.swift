@@ -141,6 +141,49 @@ struct OccurrenceMenuPopover: View {
     }
 }
 
+/// iPhone: Menü beim Halten auf leerer Fläche im Raster (LIC-58). Erscheint
+/// nur, wenn eine Kopie vorliegt und der Finger ohne Bewegung loslässt
+/// (`GridInteraction.slotHoldRelease`); wer zieht, legt wie bisher an.
+/// „Neuer Termin hier“ steht dabei, damit das Anlegen an der Stelle auch
+/// ohne Ziehen erreichbar bleibt.
+struct SlotMenuPopover: View {
+    let model: AppModel
+    /// Gehaltene Uhrzeit, gerundet wie beim Anlegen (`GridInteraction.pasteStart`).
+    let start: Date
+    /// Editor für einen neuen Termin an der Stelle.
+    let newEvent: @MainActor () -> Void
+    /// Wie bei `OccurrenceMenuPopover.choose`: schließt das Popover, die
+    /// Aktion läuft danach.
+    let choose: @MainActor (@escaping @MainActor () -> Void) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let clip = model.clipboard {
+                Text(clip.pasteTitle(at: start, calendar: model.calendar))
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                Divider()
+            }
+            Button("Hier einfügen") {
+                let start = start
+                choose {
+                    let text = Pasteboard.string
+                    Task { await model.paste(at: start, pasteboardText: text) }
+                }
+            }
+            .disabled(model.clipboard == nil)
+            Button("Neuer Termin hier") { choose(newEvent) }
+        }
+        .buttonStyle(MenuRowButtonStyle())
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: 260)
+        .presentationCompactAdaptation(.popover)
+    }
+}
+
 /// Zeile im Popover: ganze Breite, wie ein Eintrag im Kontextmenü.
 private struct MenuRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -247,7 +290,8 @@ extension View {
 
 /// Kontextmenü auf leerer Fläche im Raster (Mac) oder an einem Monatstag.
 /// Am iPhone ist langes Drücken im Raster das Anlegen per Ziehen, dort gibt
-/// es das Menü nur am Monatstag (LIC-50).
+/// es das Menü nur am Monatstag (LIC-50); im Raster öffnet Halten ohne
+/// Bewegung mit einer Kopie `SlotMenuPopover` (LIC-58).
 struct DaySlotMenu: View {
     @Environment(AppModel.self) private var model
     let day: LocalDate
@@ -262,6 +306,22 @@ struct DaySlotMenu: View {
                 Task { await model.paste(on: day, pasteboardText: text) }
             }
         }
+    }
+}
+
+extension AppModel {
+    /// Einfügen mit Beginn `start` (iPhone-Raster, „Hier einfügen“, LIC-58),
+    /// sonst wie `paste(on:pasteboardText:)`: Hält die Zwischenablage etwas
+    /// anderes, gilt die Kopie nicht mehr.
+    func paste(at start: Date, pasteboardText: String?) async {
+        guard let clip = clipboard else { return }
+        guard clip.matches(pasteboardText) else {
+            clipboard = nil
+            return
+        }
+        guard let calendarId = duplicateCalendarId(for: clip.occurrence) else { return }
+        let intent = clip.intent(pastingAt: start, calendarId: calendarId, deviceTimeZone: timeZone)
+        await engine.perform(intent, label: "Termin einfügen")
     }
 }
 

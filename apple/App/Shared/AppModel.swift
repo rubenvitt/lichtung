@@ -198,13 +198,15 @@ final class AppModel {
         query.search(text, selection: calendarSelection, now: Date())
     }
 
-    /// Springt zum Tag eines Vorkommens und öffnet sein Detail.
-    /// Am Mac bleibt er danach markiert (LIC-24).
+    /// Springt auf heute; zählt `todayRequests` hoch, damit das Tagesband
+    /// auch dann zurückkommt, wenn heute schon gewählt war (LIC-67).
     func goToToday() {
         selectedDay = today
         todayRequests += 1
     }
 
+    /// Springt zum Tag eines Vorkommens und öffnet sein Detail.
+    /// Am Mac bleibt er danach markiert (LIC-24).
     func show(_ occurrence: Occurrence) {
         selectedDay = LocalDate(occurrence.start, calendar: calendar)
         open(occurrence)

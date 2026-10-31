@@ -378,7 +378,17 @@ struct DayColumn: View {
             if ended { scroller.dragEnded() }
         }
         // Der neue Stand ist da: Die Blöcke zeigen ihn selbst.
-        .onChange(of: blocks) { settling = nil }
+        .onChange(of: blocks) { _, newBlocks in
+            #if os(iOS)
+            // Verschwindet der Block mit offenem Menü (z. B. gelöscht), ruft das
+            // Popover den Setter nicht immer auf; sonst blieben Taps in der
+            // ganzen Spalte ohne Detail (LIC-64).
+            if let id = menuOccurrenceId, !newBlocks.contains(where: { $0.occurrence.id == id }) {
+                menuOccurrenceId = nil
+            }
+            #endif
+            settling = nil
+        }
         // Editor für einen neuen Termin zu (oder ein anderer offen).
         .onChange(of: model.editorDraft?.id) { _, id in
             if let draftId = settling?.draftId, draftId != id { settling = nil }

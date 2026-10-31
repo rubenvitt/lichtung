@@ -205,6 +205,16 @@ public struct DeviceLoginFlow: Sendable {
         return name
     }
 
+    /// Name für die Anmeldemaske nach `GET /api/me` (LIC-56). Mit gemerktem
+    /// Client wie `adoptDeviceName`. Ohne (Installation vor LIC-49, Client
+    /// vergessen) gibt es nichts fortzuschreiben: Der Name beim Server gilt
+    /// dann nur für die Maske dieser Sitzung (`current`), und die nächste
+    /// Anmeldung registriert das Gerät unter ihm und merkt sich den Client.
+    public func deviceNameForMask(from me: ServerInfo, for server: URL, current: String) -> String? {
+        if clients?.client(for: server) != nil { return adoptDeviceName(from: me, for: server) }
+        return Self.deviceNameUpdate(remembered: current, me: me)
+    }
+
     /// Entscheidung des Abgleichs: der Name des Geräts laut Server, wenn er
     /// gesetzt ist und vom gemerkten abweicht. Ohne Geräte-Token (`device`
     /// fehlt) oder bei leerem Namen bleibt der gemerkte.

@@ -174,8 +174,9 @@ final class AppSession {
     func currentDeviceRenamed(_ name: String) {
         deviceName = name
         me?.device?.name = name
-        // Die gemerkte Antwort trägt noch den alten Namen.
-        meFetch.invalidate()
+        // Die gemerkte Antwort trägt noch den alten Namen, ein laufender
+        // Abruf vielleicht auch: verwerfen, damit er den neuen nicht überschreibt.
+        meFetch.reset()
         if let serverURL { flow.rememberDeviceName(name, for: serverURL) }
     }
 

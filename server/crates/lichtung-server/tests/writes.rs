@@ -291,6 +291,44 @@ async fn update_this_and_following_splits_the_series() {
 }
 
 #[tokio::test]
+async fn split_with_new_rule_keeps_the_remaining_count() {
+    // LIC-57: Team-Sync has COUNT=4 (2., 9., 16. [EXDATE], 23.11.). Split at
+    // the 2nd with a new rule: the new series gets the remaining 3, whether
+    // the writer sends the series' COUNT (MCP) or already the remainder (app).
+    for sent in [
+        "FREQ=WEEKLY;BYDAY=MO,TU;COUNT=4",
+        "FREQ=WEEKLY;BYDAY=MO,TU;COUNT=3",
+    ] {
+        let (t, _, series) = synced().await;
+        let r = t
+            .mutate(json!({
+                "id": "m-split-rule", "op": "update_event", "event_id": series,
+                "base_version": 1, "scope": "this_and_following",
+                "occurrence": zoned("2026-11-09T09:00:00"),
+                "changes": {"recurrence": {
+                    "rrule": sent, "exdates": [zoned("2026-11-16T09:00:00")]
+                }}
+            }))
+            .await;
+        assert_eq!(r["status"], "applied", "{sent}: {r}");
+        let events = r["events"].as_array().unwrap();
+        assert_eq!(events.len(), 2, "{r}");
+        assert_eq!(
+            events[0]["recurrence"]["rrule"], "FREQ=WEEKLY;BYDAY=MO;COUNT=1",
+            "{sent}: {r}"
+        );
+        assert_eq!(
+            events[1]["recurrence"]["rrule"], "FREQ=WEEKLY;BYDAY=MO,TU;COUNT=3",
+            "{sent}: {r}"
+        );
+        assert_eq!(
+            events[1]["recurrence"]["exdates"][0]["date_time"], "2026-11-16T09:00:00",
+            "{sent}: {r}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn delete_whole_event_and_single_occurrence() {
     let (t, single, series) = synced().await;
     let r = t

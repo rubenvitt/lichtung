@@ -406,6 +406,133 @@ fn this_and_future_recomputes_count_and_moves_time() {
     );
 }
 
+/// Splits `ics` at `occurrence` with a new rule (and optional start) and
+/// returns the rules of the old and the new series.
+fn split_with_rule(
+    ics: &str,
+    occurrence: CalTime,
+    rule: &str,
+    start: Option<CalTime>,
+) -> (String, String) {
+    let obj = CalendarObject::parse(&cal(ics)).unwrap();
+    let out = edit_event(
+        &obj,
+        Some(&occurrence),
+        EditScope::ThisAndFuture,
+        &EventChanges {
+            rrule: Some(Some(RecurRule::parse(rule).unwrap())),
+            start,
+            ..Default::default()
+        },
+        &ctx().with_new_uid("neu@example.org"),
+    )
+    .unwrap();
+    let rule_of = |o: &CalendarObject| o.master().unwrap().rrule().unwrap().unwrap().to_string();
+    (
+        rule_of(&updated(&out)),
+        rule_of(&roundtrip(out.created.as_ref().unwrap())),
+    )
+}
+
+const COURSE: &str = "BEGIN:VEVENT
+     UID:kurs@example.org
+     DTSTAMP:20261001T080000Z
+     DTSTART;TZID=Europe/Berlin:20261005T090000
+     DTEND;TZID=Europe/Berlin:20261005T093000
+     RRULE:FREQ=WEEKLY;COUNT=6
+     SUMMARY:Kurs
+     END:VEVENT";
+
+#[test]
+fn this_and_future_with_new_rule_keeps_the_remaining_count() {
+    // LIC-57: Split at the 4th of 6. Whether the sender passes the series'
+    // COUNT (6) or already the remainder (3), the new series gets 3.
+    let at = || berlin_at("2026-10-26", (9, 0));
+    for sent in [
+        "FREQ=WEEKLY;INTERVAL=2;COUNT=6",
+        "FREQ=WEEKLY;INTERVAL=2;COUNT=3",
+    ] {
+        let (old, new) = split_with_rule(COURSE, at(), sent, None);
+        assert_eq!(old, "FREQ=WEEKLY;COUNT=3", "{sent}");
+        assert_eq!(new, "FREQ=WEEKLY;INTERVAL=2;COUNT=3", "{sent}");
+    }
+    // Also with a time change.
+    let (_, new) = split_with_rule(
+        COURSE,
+        at(),
+        "FREQ=WEEKLY;INTERVAL=2;COUNT=6",
+        Some(berlin_at("2026-10-26", (10, 0))),
+    );
+    assert_eq!(new, "FREQ=WEEKLY;INTERVAL=2;COUNT=3");
+    // A changed COUNT counts from the occurrence on.
+    let (_, new) = split_with_rule(COURSE, at(), "FREQ=WEEKLY;COUNT=5", None);
+    assert_eq!(new, "FREQ=WEEKLY;COUNT=5");
+    // No COUNT before: the sent one counts from here.
+    let endless = COURSE.replace(";COUNT=6", "");
+    let (old, new) = split_with_rule(&endless, at(), "FREQ=WEEKLY;COUNT=6", None);
+    assert_eq!(old, "FREQ=WEEKLY;UNTIL=20261026T075959Z");
+    assert_eq!(new, "FREQ=WEEKLY;COUNT=6");
+
+    // „Alle“ keeps the whole count.
+    let obj = CalendarObject::parse(&cal(COURSE)).unwrap();
+    let out = edit_event(
+        &obj,
+        None,
+        EditScope::All,
+        &EventChanges {
+            rrule: Some(Some(
+                RecurRule::parse("FREQ=WEEKLY;INTERVAL=2;COUNT=6").unwrap(),
+            )),
+            ..Default::default()
+        },
+        &ctx(),
+    )
+    .unwrap();
+    let rule = updated(&out).master().unwrap().rrule().unwrap().unwrap();
+    assert_eq!(rule.to_string(), "FREQ=WEEKLY;INTERVAL=2;COUNT=6");
+}
+
+#[test]
+fn new_rule_with_unchanged_until_moves_with_the_series() {
+    // LIC-57: The last occurrence is Mo 23.11. 09:00 (= UNTIL). Moved to
+    // 11:00 together with a rule change, an unchanged UNTIL moves along
+    // (otherwise the 23.11. would be lost); a changed UNTIL stays.
+    let ics = COURSE.replace("COUNT=6", "UNTIL=20261123T080000Z");
+    let at = || berlin_at("2026-10-26", (9, 0));
+    let later = || Some(berlin_at("2026-10-26", (11, 0)));
+    let (old, new) = split_with_rule(
+        &ics,
+        at(),
+        "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261123T080000Z",
+        later(),
+    );
+    assert_eq!(old, "FREQ=WEEKLY;UNTIL=20261026T075959Z");
+    assert_eq!(new, "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261123T100000Z");
+    let (_, new) = split_with_rule(
+        &ics,
+        at(),
+        "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261116T225959Z",
+        later(),
+    );
+    assert_eq!(new, "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261116T225959Z");
+    // Without a rule change UNTIL moves as before.
+    let obj = CalendarObject::parse(&cal(&ics)).unwrap();
+    let out = edit_event(
+        &obj,
+        Some(&at()),
+        EditScope::ThisAndFuture,
+        &EventChanges {
+            start: later(),
+            ..Default::default()
+        },
+        &ctx().with_new_uid("neu@example.org"),
+    )
+    .unwrap();
+    let new = roundtrip(out.created.as_ref().unwrap());
+    let rule = new.master().unwrap().rrule().unwrap().unwrap();
+    assert_eq!(rule.to_string(), "FREQ=WEEKLY;UNTIL=20261123T100000Z");
+}
+
 #[test]
 fn this_and_future_on_all_day_series_uses_date_until() {
     let obj = CalendarObject::parse(&cal("BEGIN:VEVENT

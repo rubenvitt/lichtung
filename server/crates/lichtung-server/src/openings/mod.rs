@@ -34,7 +34,8 @@
 //! (`placeholder_attempts`, LIC-59): if the provider wrote it although the
 //! creation failed (timeout after the PUT, a local storage error), the
 //! cleanup finds it by that UID once a sync has brought it in and removes
-//! it, for [`PLACEHOLDER_ATTEMPT_DAYS`].
+//! it (unless title or start were changed at the provider meanwhile: then
+//! it stays), for [`PLACEHOLDER_ATTEMPT_DAYS`].
 //!
 //! The booking page (LIC-33) calls [`App::opening_by_token`],
 //! [`App::opening_slots`], and under [`App::opening_booking_guard`]
@@ -840,22 +841,26 @@ impl App {
         // The UID is fixed and noted before the PUT, so a placeholder the
         // provider writes although the creation fails can still be found.
         let uid = format!("{}@lichtung", Uuid::now_v7());
+        let title = format!("Reserviert: {}", row.title);
         {
-            let (uid, calendar_id, opening_id, suggestion_id) = (
+            let (uid, calendar_id, opening_id, suggestion_id, title) = (
                 uid.clone(),
                 row.calendar_id.clone(),
                 row.id.clone(),
                 suggestion_id.to_owned(),
+                title.clone(),
             );
+            let start_utc = start.timestamp_millis();
             self.with_writer(move |conn| {
-                Ok(store::begin_attempt(
-                    conn,
-                    &uid,
-                    &calendar_id,
-                    &opening_id,
-                    &suggestion_id,
-                    crate::app::now_ms(),
-                )?)
+                let attempt = store::Attempt {
+                    uid: &uid,
+                    calendar_id: &calendar_id,
+                    opening_id: &opening_id,
+                    suggestion_id: &suggestion_id,
+                    title: &title,
+                    start_utc,
+                };
+                Ok(store::begin_attempt(conn, &attempt, crate::app::now_ms())?)
             })
             .await?;
         }
@@ -864,7 +869,7 @@ impl App {
             "calendar_id": row.calendar_id,
             "event": {
                 "uid": &uid,
-                "title": format!("Reserviert: {}", row.title),
+                "title": title,
                 "notes": format!(
                     "Platzhalter für einen Vorschlag des Buchungslinks „{}“. Lichtung entfernt \
                      ihn, sobald der Link gebucht oder gelöscht wird oder die Zeit vorbei ist.",

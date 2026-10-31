@@ -364,20 +364,33 @@ pub fn openings_with_expired_suggestions(
 
 // ----- placeholder attempts (schema version 9) ----------------------------------------
 
+/// A placeholder about to be written at the provider.
+pub struct Attempt<'a> {
+    pub uid: &'a str,
+    pub calendar_id: &'a str,
+    pub opening_id: &'a str,
+    pub suggestion_id: &'a str,
+    /// Title and start as written, to tell a placeholder changed at the
+    /// provider (kept) from the one written.
+    pub title: &'a str,
+    pub start_utc: i64,
+}
+
 /// Notes the UID of a placeholder before it is written at the provider.
-pub fn begin_attempt(
-    conn: &Connection,
-    uid: &str,
-    calendar_id: &str,
-    opening_id: &str,
-    suggestion_id: &str,
-    now: i64,
-) -> rusqlite::Result<()> {
+pub fn begin_attempt(conn: &Connection, a: &Attempt<'_>, now: i64) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO placeholder_attempts
-             (uid, calendar_id, opening_id, suggestion_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![uid, calendar_id, opening_id, suggestion_id, now],
+             (uid, calendar_id, opening_id, suggestion_id, title, start_utc, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            a.uid,
+            a.calendar_id,
+            a.opening_id,
+            a.suggestion_id,
+            a.title,
+            a.start_utc,
+            now
+        ],
     )?;
     Ok(())
 }
@@ -391,31 +404,31 @@ pub fn end_attempt(conn: &Connection, uid: &str) -> rusqlite::Result<()> {
 
 /// Attempts whose suggestion is gone: the placeholder the provider may
 /// have written anyway is queued for removal if it is stored (found by
-/// calendar and UID), and the attempt is forgotten. Attempts whose
-/// placeholder is not stored wait for the next sync, and are forgotten
-/// when made before `give_up_before`. Returns how many were queued.
+/// calendar and UID) and still has the title and start it was written
+/// with (changed at the provider, it stays: the provider wins), and the
+/// attempt is forgotten. Attempts whose placeholder is not stored wait for
+/// the next sync, and are forgotten when made before `give_up_before`.
+/// Returns how many were queued.
 pub fn queue_failed_attempts(
     conn: &Connection,
     now: i64,
     give_up_before: i64,
 ) -> rusqlite::Result<usize> {
-    let orphaned = "NOT EXISTS (SELECT 1 FROM opening_suggestions s WHERE s.id = a.suggestion_id)";
     let queued = conn.execute(
-        &format!(
-            "INSERT OR IGNORE INTO placeholder_removals (event_id, opening_id, created_at)
-             SELECT e.id, a.opening_id, ?1
-             FROM placeholder_attempts a
-             JOIN events e ON e.calendar_id = a.calendar_id AND e.uid = a.uid
-             WHERE {orphaned}"
-        ),
+        "INSERT OR IGNORE INTO placeholder_removals (event_id, opening_id, created_at)
+         SELECT e.id, a.opening_id, ?1
+         FROM placeholder_attempts a
+         JOIN events e ON e.calendar_id = a.calendar_id AND e.uid = a.uid
+         WHERE e.title = a.title AND e.start_utc = a.start_utc
+           AND NOT EXISTS (SELECT 1 FROM opening_suggestions s WHERE s.id = a.suggestion_id)",
         [now],
     )?;
     conn.execute(
-        &format!(
-            "DELETE FROM placeholder_attempts AS a WHERE {orphaned} AND (a.created_at < ?1
-                 OR EXISTS (SELECT 1 FROM events e
-                            WHERE e.calendar_id = a.calendar_id AND e.uid = a.uid))"
-        ),
+        "DELETE FROM placeholder_attempts AS a
+         WHERE NOT EXISTS (SELECT 1 FROM opening_suggestions s WHERE s.id = a.suggestion_id)
+           AND (a.created_at < ?1
+                OR EXISTS (SELECT 1 FROM events e
+                           WHERE e.calendar_id = a.calendar_id AND e.uid = a.uid))",
         [give_up_before],
     )?;
     Ok(queued)

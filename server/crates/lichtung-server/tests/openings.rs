@@ -642,6 +642,47 @@ async fn a_placeholder_written_despite_a_failure_is_removed_by_the_cleanup() {
 }
 
 #[tokio::test]
+async fn a_placeholder_changed_at_the_provider_after_a_failure_stays() {
+    let (t, device) = prepared().await;
+    t.dav.with(|s| s.put_status_after_write = Some(504));
+    let r = t
+        .api(
+            Method::POST,
+            "/api/openings",
+            &device,
+            Some(
+                json!({"kind": "once", "duration_minutes": 30, "calendar_id": t.calendar_id,
+                        "suggestions": [{"start": rfc(at(10, 0))}]}),
+            ),
+        )
+        .await;
+    assert!(r.status.is_server_error(), "{} {}", r.status, r.text());
+    t.dav.with(|s| s.put_status_after_write = None);
+    // Someone renames the placeholder before the next sync.
+    let name = t.dav.with(|s| {
+        s.calendars[CALENDAR]
+            .resources
+            .iter()
+            .find(|(_, (_, d))| d.contains("SUMMARY:Reserviert: "))
+            .map(|(n, (_, d))| (n.clone(), d.clone()))
+            .expect("placeholder")
+    });
+    let edited = name.1.replace("SUMMARY:Reserviert: ", "SUMMARY:Behalten: ");
+    t.dav.put(&name.0, &edited);
+    t.sync().await;
+    let report = t.s.app.clean_up_openings(Utc::now()).await.unwrap();
+    assert_eq!((report.removed, report.pending), (0, 0));
+    assert!(t.dav.get_in(CALENDAR, &name.0).is_some());
+    let attempts: i64 = t
+        .db()
+        .query_row("SELECT COUNT(*) FROM placeholder_attempts", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(attempts, 0);
+}
+
+#[tokio::test]
 async fn openings_come_with_the_pull() {
     let (t, device) = prepared().await;
     let o = t.template(&device).await;

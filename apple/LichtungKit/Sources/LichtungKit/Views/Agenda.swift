@@ -29,10 +29,11 @@ public struct AgendaItem: Hashable, Sendable, Identifiable {
 
 public enum AgendaBuilder {
     /// Tage ab `start` (`days` Tage), jeder Tag mit seinen Vorkommen.
-    /// Leere Tage fehlen, außer heute (für „Keine Termine“).
+    /// Leere Tage fehlen, außer heute und `anchor` (für „Keine Termine“ und
+    /// als Sprungziel der Liste, wenn sie auch vergangene Tage zeigt).
     public static func days(
         _ occurrences: [Occurrence], from start: LocalDate, days count: Int,
-        today: LocalDate, calendar cal: Calendar, includeEmpty: Bool = false
+        today: LocalDate, calendar cal: Calendar, includeEmpty: Bool = false, anchor: LocalDate? = nil
     ) -> [AgendaDay] {
         var result: [AgendaDay] = []
         for offset in 0..<max(0, count) {
@@ -52,7 +53,7 @@ public enum AgendaBuilder {
                 if aAll != bAll { return aAll }
                 return CalendarQuery.displayOrder(a.occurrence, b.occurrence)
             }
-            guard !items.isEmpty || includeEmpty || day == today else { continue }
+            guard !items.isEmpty || includeEmpty || day == today || day == anchor else { continue }
             result.append(AgendaDay(date: day, heading: heading(day, today: today), isToday: day == today, items: items))
         }
         return result

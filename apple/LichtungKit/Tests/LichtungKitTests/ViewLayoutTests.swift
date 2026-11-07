@@ -49,6 +49,14 @@ struct AgendaTests {
         #expect(days[0].items.isEmpty)
     }
 
+    @Test func pastDaysAndEmptyAnchor() {
+        // Liste mit Vorlauf: gestern ist dabei, der leere ausgewählte Tag bleibt als Sprungziel.
+        let occ = [L.timed("Kino", 22, 20, to: 22), L.timed("Zahnarzt", 27, 14, to: 15)]
+        let days = AgendaBuilder.days(occ, from: L.day(20), days: 10, today: today, calendar: L.cal, anchor: L.day(25))
+        #expect(days.map(\.heading) == ["Gestern · Do 22.", "Heute · Fr 23.", "So 25. Okt.", "Di 27. Okt."])
+        #expect(days[2].items.isEmpty)
+    }
+
     @Test func multiDayTimedSplitsAcrossDays() {
         let shift = L.timed("Nachtschicht", 23, 22, to: 6, endDay: 24)
         let trip = L.timed("Reise", 23, 18, to: 12, endDay: 25)

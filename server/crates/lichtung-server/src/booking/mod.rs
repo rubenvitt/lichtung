@@ -3,6 +3,7 @@
 //!
 //! | Route | Purpose |
 //! |---|---|
+//! | `GET /` | home page: the templates marked `listed` (title, length, link); without any the plain text of [`crate::http`] |
 //! | `GET /o/{token}` | free times of the link, seven days per page (`?from=YYYY-MM-DD`), grouped by day in the guest's zone (`?tz=`) |
 //! | `GET /o/{token}?slot=<start>` | the booking form for one time |
 //! | `POST /o/{token}` | book: checks, then the event in the target calendar with the guest as attendee |
@@ -99,6 +100,7 @@ impl BookingState {
 
 pub fn routes<S>(state: BookingState) -> Router<S> {
     Router::new()
+        .route("/", get(home))
         .route("/o/{token}", get(show).post(book))
         .layer(DefaultBodyLimit::max(BODY_LIMIT))
         .with_state(state)
@@ -425,6 +427,34 @@ fn ctx_of(opening: &Opening, lang: Lang, tz: Tz) -> Ctx<'_> {
         tz,
         title: &opening.title,
         duration_minutes: opening.duration_minutes,
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct HomeQuery {
+    lang: Option<String>,
+}
+
+/// `GET /`: the listed templates, or (none listed) what runs here. Counts
+/// as a page view.
+async fn home(
+    State(state): State<BookingState>,
+    extensions: Extensions,
+    headers: HeaderMap,
+    query: Result<Query<HomeQuery>, QueryRejection>,
+) -> Response {
+    let q = query.map(|Query(q)| q).unwrap_or_default();
+    let visit = Visit::new(&extensions, &headers, q.lang.as_deref());
+    if let Some(r) = state.admit(&visit, Bucket::View, state.limits().views_per_source) {
+        return r;
+    }
+    match state.app.listed_openings().await {
+        Ok(list) if list.is_empty() => crate::http::index(),
+        Ok(list) => html::home_page(visit.lang, &list),
+        Err(e) => {
+            tracing::error!(error = %e, "home page lookup failed");
+            unavailable(visit.lang)
+        }
     }
 }
 

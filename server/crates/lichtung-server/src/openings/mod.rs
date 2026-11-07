@@ -8,6 +8,8 @@
 //! - **Template** (`template`): weekly windows in a zone, buffers before
 //!   and after, minimum notice, horizon, optional fixed video link.
 //!   Bookable again and again.
+//! - **Home page** (`listed`): a template can be shown on the public home
+//!   page `<public_url>/` (title, length, link); one-off links never are.
 //! - Links do not expire. The token has 256 random bits
 //!   ([`crate::auth::random_secret`]).
 //! - **Target calendar:** must exist, be writable for Lichtung and send
@@ -186,6 +188,9 @@ pub struct Opening {
     /// The link offers only its suggestions (one-off link created with
     /// suggestions), even once they are all past.
     pub suggestions_only: bool,
+    /// A template shown on the public home page (always `false` for
+    /// one-off links).
+    pub listed: bool,
     /// Suggestions that have not started yet, earliest first.
     pub suggestions: Vec<Suggestion>,
     pub booked_at: Option<String>,
@@ -225,6 +230,9 @@ pub struct NewOpening {
     pub video_url: Option<String>,
     #[serde(default)]
     pub suggestions: Option<Vec<SuggestionInput>>,
+    /// Show the template on the public home page (templates only).
+    #[serde(default)]
+    pub listed: Option<bool>,
 }
 
 /// A suggestion when creating a one-off link: RFC 3339 with offset; `end`
@@ -262,6 +270,8 @@ pub struct OpeningPatch {
     pub horizon_days: Option<i64>,
     #[serde(default, deserialize_with = "explicit_null")]
     pub video_url: Option<Option<String>>,
+    #[serde(default)]
+    pub listed: Option<bool>,
 }
 
 /// Missing field → `None`, `null` → `Some(None)`, value → `Some(Some(v))`.
@@ -548,6 +558,7 @@ pub(crate) fn view(
         horizon_days: row.horizon_days,
         video_url: row.video_url.clone(),
         suggestions_only: row.suggested,
+        listed: row.listed,
         suggestions: suggestions
             .iter()
             .filter(|s| s.start_utc > now)
@@ -592,6 +603,17 @@ fn rules_of(row: &OpeningRow, suggestions: &[SuggestionRow]) -> Option<Rules> {
         }),
         booked: row.booked_at.is_some(),
     })
+}
+
+/// Only templates go on the home page.
+fn check_listed(kind: OpeningKind, listed: bool) -> AppResult<bool> {
+    if listed && kind == OpeningKind::Once {
+        return Err(invalid(
+            "listed gibt es nur bei festen Links (kind template): Ein Einmal-Link steht nie auf \
+             der Startseite",
+        ));
+    }
+    Ok(listed)
 }
 
 /// Maps the outcome of a placeholder write that did not apply.
@@ -738,6 +760,7 @@ impl App {
             }
             _ => Vec::new(),
         };
+        let listed = check_listed(input.kind, input.listed.unwrap_or(false))?;
         let now_ms = now.timestamp_millis();
         let row = OpeningRow {
             id: new_id("opn"),
@@ -779,6 +802,7 @@ impl App {
                 None => None,
             },
             suggested: !suggestions.is_empty(),
+            listed,
             booked_at: None,
             booked_event_id: None,
             created_at: now_ms,
@@ -948,6 +972,10 @@ impl App {
                  ändern (die Platzhalter liegen fest). Den Link löschen und neu anlegen.",
             ));
         }
+        let listed = patch
+            .listed
+            .map(|l| check_listed(current.kind, l))
+            .transpose()?;
         if let Some(c) = calendar_id.filter(|_| calendar_changes) {
             self.check_target(c).await?;
         }
@@ -990,6 +1018,9 @@ impl App {
             if let Some(v) = video_url {
                 row.video_url = v;
             }
+            if let Some(v) = listed {
+                row.listed = v;
+            }
             if row != before {
                 row.updated_at = crate::app::now_ms();
                 store::save(tx, &row)?;
@@ -1022,6 +1053,19 @@ impl App {
     }
 
     // ----- booking page (LIC-33) ---------------------------------------------------------
+
+    /// The templates on the public home page, by title, without bookings.
+    pub async fn listed_openings(&self) -> AppResult<Vec<Opening>> {
+        let base = self.opening_base();
+        let now = Utc::now().timestamp_millis();
+        self.with_reader(move |conn| {
+            Ok(store::listed_openings(conn)?
+                .iter()
+                .map(|row| view(row, &[], &[], &base, now))
+                .collect())
+        })
+        .await
+    }
 
     /// The link behind a public token (`None` if unknown).
     pub async fn opening_by_token(&self, token: &str) -> AppResult<Option<Opening>> {

@@ -107,6 +107,9 @@ public struct Opening: Codable, Hashable, Sendable, Identifiable {
     public var videoUrl: String?
     /// Einmal-Link mit Vorschlägen: bietet nur diese an, auch wenn alle vorbei sind.
     public var suggestionsOnly: Bool
+    /// Fester Link auf der öffentlichen Startseite `<öffentliche URL>/`
+    /// (Einmal-Links nie; ältere Server: `false`).
+    public var listed: Bool
     /// Vorschläge, die noch nicht begonnen haben, frühester zuerst.
     public var suggestions: [Suggestion]
     public var bookedAt: Date?
@@ -121,7 +124,7 @@ public struct Opening: Codable, Hashable, Sendable, Identifiable {
         timeZone: String = "Europe/Berlin", windows: [Window] = Opening.defaultWindows,
         bufferBeforeMinutes: Int = 0, bufferAfterMinutes: Int = 0,
         minNoticeMinutes: Int = Opening.defaultMinNoticeMinutes, horizonDays: Int = Opening.defaultHorizonDays,
-        videoUrl: String? = nil, suggestionsOnly: Bool = false, suggestions: [Suggestion] = [],
+        videoUrl: String? = nil, suggestionsOnly: Bool = false, listed: Bool = false, suggestions: [Suggestion] = [],
         bookedAt: Date? = nil, bookedEventId: String? = nil, bookings: [Booking] = [],
         createdAt: Date? = nil, updatedAt: Date? = nil
     ) {
@@ -139,6 +142,7 @@ public struct Opening: Codable, Hashable, Sendable, Identifiable {
         self.horizonDays = horizonDays
         self.videoUrl = videoUrl
         self.suggestionsOnly = suggestionsOnly
+        self.listed = listed
         self.suggestions = suggestions
         self.bookedAt = bookedAt
         self.bookedEventId = bookedEventId
@@ -149,7 +153,7 @@ public struct Opening: Codable, Hashable, Sendable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, url, title, durationMinutes, calendarId, timeZone, windows, bufferBeforeMinutes, bufferAfterMinutes
-        case minNoticeMinutes, horizonDays, videoUrl, suggestionsOnly, suggestions, bookedAt, bookedEventId, bookings
+        case minNoticeMinutes, horizonDays, videoUrl, suggestionsOnly, listed, suggestions, bookedAt, bookedEventId, bookings
         case createdAt, updatedAt
     }
 
@@ -170,6 +174,7 @@ public struct Opening: Codable, Hashable, Sendable, Identifiable {
         videoUrl = try c.decodeIfPresent(String.self, forKey: .videoUrl)
         suggestions = try c.decodeIfPresent([Suggestion].self, forKey: .suggestions) ?? []
         suggestionsOnly = try c.decodeIfPresent(Bool.self, forKey: .suggestionsOnly) ?? !suggestions.isEmpty
+        listed = try c.decodeIfPresent(Bool.self, forKey: .listed) ?? false
         bookedAt = try c.decodeIfPresent(Date.self, forKey: .bookedAt)
         bookedEventId = try c.decodeIfPresent(String.self, forKey: .bookedEventId)
         bookings = try c.decodeIfPresent([Booking].self, forKey: .bookings) ?? []
@@ -225,11 +230,14 @@ public struct NewOpening: Encodable, Hashable, Sendable {
     public var horizonDays: Int?
     public var videoUrl: String?
     public var suggestions: [SuggestionInput]?
+    /// Nur feste Links: auf der öffentlichen Startseite zeigen.
+    public var listed: Bool?
 
     public init(
         kind: Opening.Kind, title: String? = nil, durationMinutes: Int, calendarId: String, timeZone: String? = nil,
         windows: [Opening.Window]? = nil, bufferBeforeMinutes: Int? = nil, bufferAfterMinutes: Int? = nil,
-        minNoticeMinutes: Int? = nil, horizonDays: Int? = nil, videoUrl: String? = nil, suggestions: [SuggestionInput]? = nil
+        minNoticeMinutes: Int? = nil, horizonDays: Int? = nil, videoUrl: String? = nil, suggestions: [SuggestionInput]? = nil,
+        listed: Bool? = nil
     ) {
         self.kind = kind
         self.title = title
@@ -243,6 +251,7 @@ public struct NewOpening: Encodable, Hashable, Sendable {
         self.horizonDays = horizonDays
         self.videoUrl = videoUrl
         self.suggestions = suggestions
+        self.listed = listed
     }
 }
 
@@ -260,11 +269,13 @@ public struct OpeningPatch: Encodable, Hashable, Sendable {
     public var minNoticeMinutes: Int?
     public var horizonDays: Int?
     public var videoUrl: Patch<String>?
+    /// Nur feste Links: auf der Startseite zeigen oder nicht.
+    public var listed: Bool?
 
     public init(
         title: String? = nil, durationMinutes: Int? = nil, calendarId: String? = nil, timeZone: String? = nil,
         windows: [Opening.Window]? = nil, bufferBeforeMinutes: Int? = nil, bufferAfterMinutes: Int? = nil,
-        minNoticeMinutes: Int? = nil, horizonDays: Int? = nil, videoUrl: Patch<String>? = nil
+        minNoticeMinutes: Int? = nil, horizonDays: Int? = nil, videoUrl: Patch<String>? = nil, listed: Bool? = nil
     ) {
         self.title = title
         self.durationMinutes = durationMinutes
@@ -276,13 +287,14 @@ public struct OpeningPatch: Encodable, Hashable, Sendable {
         self.minNoticeMinutes = minNoticeMinutes
         self.horizonDays = horizonDays
         self.videoUrl = videoUrl
+        self.listed = listed
     }
 
     /// Nichts zu ändern.
     public var isEmpty: Bool { self == OpeningPatch() }
 
     private enum CodingKeys: String, CodingKey {
-        case title, durationMinutes, calendarId, timeZone, windows, bufferBeforeMinutes, bufferAfterMinutes, minNoticeMinutes, horizonDays, videoUrl
+        case title, durationMinutes, calendarId, timeZone, windows, bufferBeforeMinutes, bufferAfterMinutes, minNoticeMinutes, horizonDays, videoUrl, listed
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -296,6 +308,7 @@ public struct OpeningPatch: Encodable, Hashable, Sendable {
         try c.encodeIfPresent(bufferAfterMinutes, forKey: .bufferAfterMinutes)
         try c.encodeIfPresent(minNoticeMinutes, forKey: .minNoticeMinutes)
         try c.encodeIfPresent(horizonDays, forKey: .horizonDays)
+        try c.encodeIfPresent(listed, forKey: .listed)
         switch videoUrl {
         case nil: break
         case .clear?: try c.encodeNil(forKey: .videoUrl)

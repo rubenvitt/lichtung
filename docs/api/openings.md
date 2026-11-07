@@ -1,6 +1,6 @@
 # Openings (Buchungslinks) in der API von lichtung-server
 
-- **Stand:** 2026-10-26 (LIC-31, LIC-32; öffentliche Buchungsseite LIC-33, LIC-34). Ergänzt die [Sync-API](sync-api.md); Grundlagen (Format, Zeitpunkte, Fehlerform, Anmeldung) gelten wie dort.
+- **Stand:** 2026-11-07 (LIC-31, LIC-32; öffentliche Buchungsseite LIC-33, LIC-34; öffentliche Startseite, Abschnitt 9). Ergänzt die [Sync-API](sync-api.md); Grundlagen (Format, Zeitpunkte, Fehlerform, Anmeldung) gelten wie dort.
 - Spec: [`docs/superpowers/specs/2026-10-23-lichtung-design.md`](../superpowers/specs/2026-10-23-lichtung-design.md), Abschnitt 6.
 
 Ein Opening ist ein Buchungslink. Gäste buchen über die öffentliche Seite `<öffentliche URL>/o/<token>` (Abschnitt 7) einen freien Termin im Zielkalender; der Anbieter verschickt die Einladung. Die App verwaltet die Links über `/api/openings`.
@@ -12,7 +12,8 @@ Ein Opening ist ein Buchungslink. Gäste buchen über die öffentliche Seite `<�
 | `once` | **Einmal-Link:** Dauer und Zielkalender, optional konkrete Vorschläge. | Nach einer Buchung verbraucht (`booked_at`). |
 | `template` | **Fester Link (Vorlage):** Titel, Dauer, Zielkalender, Wochenfenster, Puffer, Mindestvorlauf, Buchungshorizont, optional fester Videolink. | Beliebig oft buchbar. |
 
-- **Links laufen nicht ab.** Ein Link gilt, bis er gelöscht ist (ein Einmal-Link bietet nach der Buchung nur nichts mehr an).
+- **Links laufen nicht ab.** Ein Link gilt, bis er gelöscht ist (ein Einmal-Link bietet nach der Buchung nur nichts mehr an). Eine dauerhaft gültige Buchungsseite ist also ein fester Link (`template`).
+- **Startseite:** Feste Links mit `listed: true` stehen auf der öffentlichen Startseite `<öffentliche URL>/` (Abschnitt 9).
 - **Einmal-Link mit Vorschlägen** (`suggestions_only: true`): bietet genau seine Vorschläge an, die noch nicht begonnen haben und noch frei sind. Sind alle vorbei, bietet er nichts mehr an (kein Rückfall auf die Regeln).
 - **Einmal-Link ohne Vorschläge:** bietet freie Zeiten nach denselben Regeln wie eine Vorlage, mit den Standardwerten (Abschnitt 3), wenn nichts anderes angegeben ist.
 
@@ -35,6 +36,7 @@ Ein Opening ist ein Buchungslink. Gäste buchen über die öffentliche Seite `<�
   "horizon_days": 21,
   "video_url": "https://meet.example.org/kennenlernen",
   "suggestions_only": false,
+  "listed": true,
   "suggestions": [],
   "booked_at": null,
   "booked_event_id": null,
@@ -57,6 +59,7 @@ Ein Opening ist ein Buchungslink. Gäste buchen über die öffentliche Seite `<�
 | `min_notice_minutes` | Mindestvorlauf: früheste Buchung ab jetzt. Gilt nicht für Vorschläge. |
 | `horizon_days` | Buchungshorizont: Beginn spätestens so viele Tage ab jetzt. Gilt nicht für Vorschläge. |
 | `video_url` | Fester Videolink oder `null`. Die Buchungsseite übernimmt ihn in den Termin. |
+| `listed` | Nur bei `template`: Der Link steht auf der öffentlichen Startseite (Abschnitt 9). Bei `once` immer `false`. Standard `false`. |
 | `suggestions` | Nur bei `once`: Vorschläge, die noch nicht begonnen haben, frühester zuerst (siehe unten). Vergangene fehlen. |
 | `booked_at`, `booked_event_id` | Nur bei `once`: Zeitpunkt der Buchung und das angelegte Event; sonst `null`. |
 | `bookings` | *(LIC-33, LIC-35)* Buchungen über die Buchungsseite, neueste zuerst, höchstens 50: `event_id` (der angelegte Termin), `start`/`end` (gebuchte Zeit, UTC), `guest_name`, `guest_email`, `note` (oder `null`) wie vom Gast eingegeben (geprüft, Abschnitt 7), `created_at` (Zeitpunkt der Buchung). Ein Einmal-Link hat höchstens eine, eine Vorlage beliebig viele. Nur hier, nicht im Termin (Abschnitt 8). |
@@ -120,11 +123,11 @@ API-Tokens (`lt_…`) dürfen Links nur lesen (`403 forbidden`): Ein Link schrei
 ```
 
 - Pflicht: `kind`, `duration_minutes` (5 bis 720), `calendar_id`; bei `template` auch `title` (1 bis 200 Zeichen, ohne Steuerzeichen).
-- Optional: `title`, `time_zone` (IANA), `windows` (1 bis 50), `buffer_before_minutes`/`buffer_after_minutes` (0 bis 720), `min_notice_minutes` (0 bis 43200), `horizon_days` (1 bis 365), `video_url` (`http(s)`, höchstens 2000 Zeichen; leer = keiner).
+- Optional: `title`, `listed` (nur `template`, sonst `400 invalid_request`), `time_zone` (IANA), `windows` (1 bis 50), `buffer_before_minutes`/`buffer_after_minutes` (0 bis 720), `min_notice_minutes` (0 bis 43200), `horizon_days` (1 bis 365), `video_url` (`http(s)`, höchstens 2000 Zeichen; leer = keiner).
 - `suggestions` nur bei `once`: höchstens 20, `start` (RFC 3339 mit Offset) in der Zukunft und höchstens 365 Tage voraus, `end` optional und sonst `start` + Dauer; ein Vorschlag dauert genau `duration_minutes`, keiner doppelt. Sekundenbruchteile in `start` und `end` schneidet der Server ab (die Buchungsseite nennt Zeiten auf die Sekunde); das gilt auch für `create_opening_link` über MCP.
 - Unbekannte Felder, ungültige Werte: `400 invalid_request`.
 
-**Ändern** (`PATCH`): `title`, `duration_minutes`, `calendar_id`, `time_zone`, `windows` (ersetzt alle Fenster), Puffer, `min_notice_minutes`, `horizon_days`, `video_url` (`null` entfernt ihn). Nur genannte Felder ändern sich. `kind` und `suggestions` lassen sich nicht ändern (`400`). Bei einem Einmal-Link mit Vorschlägen bleiben auch `calendar_id` und `duration_minutes` fest (die Platzhalter liegen schon), sonst `400 invalid_request`. Ein neuer `calendar_id` wird geprüft wie beim Anlegen. Die `url` bleibt.
+**Ändern** (`PATCH`): `title`, `duration_minutes`, `calendar_id`, `time_zone`, `windows` (ersetzt alle Fenster), Puffer, `min_notice_minutes`, `horizon_days`, `video_url` (`null` entfernt ihn), `listed` (nur `template`, sonst `400 invalid_request`). Nur genannte Felder ändern sich. `kind` und `suggestions` lassen sich nicht ändern (`400`). Bei einem Einmal-Link mit Vorschlägen bleiben auch `calendar_id` und `duration_minutes` fest (die Platzhalter liegen schon), sonst `400 invalid_request`. Ein neuer `calendar_id` wird geprüft wie beim Anlegen. Die `url` bleibt.
 
 **Zielkalender:** muss existieren, für Lichtung beschreibbar sein und Einladungen verschicken können (`can_invite`, Abschnitt 3 der Sync-API). Sonst `400` mit
 
@@ -197,3 +200,13 @@ Der Anbieter verschickt den gebuchten Termin als iTIP-Einladung (RFC 6638) **von
 - Der Gast steht nur als `ATTENDEE` im Termin; sein Name als Parameter `CN` (für die Einladung nötig). Die Eingabeprüfung (Abschnitt 7, Schritt 4) lässt im Namen keine Links, `@`, `<>` und Steuerzeichen zu.
 - Name, E-Mail-Adresse und Notiz speichert der Server je Buchung in `opening_bookings` (Schema-Version 8) und zeigt sie nur in der Verwaltung (`bookings`, Abschnitt 2) und im Pull. Die App zeigt sie unter „Buchungen“ des Links.
 - **Aufbewahrung:** Buchungen gehen mit ihrem Link (Löschen des Links löscht sie). Die Aufräumrunde (alle 15 Minuten) löscht Buchungen, die vor mehr als 365 Tagen gebucht wurden und deren Termin mehr als 365 Tage vorbei ist; der Link erscheint dann neu im Pull. Der Termin im Kalender bleibt davon unberührt.
+
+## 9. Öffentliche Startseite
+
+`GET <öffentliche URL>/` (ohne Anmeldung) listet alle festen Links mit `listed: true`, nach Titel sortiert: je Titel, Dauer und ein Link auf die Buchungsseite (`o/<token>?lang=…`). Sonst nichts: kein Kalender, keine Fenster, kein Videolink, keine Einmal-Links.
+
+- Sprache wie bei der Buchungsseite (`?lang=de|en`, sonst `Accept-Language`, sonst Englisch), mit Umschalter.
+- Steht kein Link auf der Startseite, antwortet `/` wie bisher mit einem kurzen Hinweistext (`text/plain`), was hier läuft.
+- Header wie bei der Buchungsseite (Abschnitt 7), also auch `X-Robots-Tag: noindex, nofollow`. Aufrufe zählen gegen die Grenze der Seitenaufrufe pro Adresse (120 in 10 Minuten); wer zu viele unbekannte Kennungen probiert hat, wird auch hier gesperrt.
+- Wer einen Link auf die Startseite setzt, macht seine Kennung öffentlich. Wieder herunternehmen (`listed: false`) ändert die Kennung nicht; wer sie nicht mehr im Umlauf haben will, löscht den Link und legt einen neuen an.
+- Code: `home` in `server/crates/lichtung-server/src/booking/mod.rs`, `App::listed_openings` in `server/crates/lichtung-server/src/openings/mod.rs`; Schema-Version 10 (`openings.listed`).

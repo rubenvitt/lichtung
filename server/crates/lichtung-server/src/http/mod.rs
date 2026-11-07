@@ -2,7 +2,7 @@
 //!
 //! | Route | Auth |
 //! |---|---|
-//! | `GET /` | none (plain text) |
+//! | `GET /` | none: the public home page with the listed templates, else plain text ([`crate::booking`]) |
 //! | `GET /healthz` | none |
 //! | `/auth/login`, `/auth/callback`, `/auth/logout` | OIDC login ([`auth_routes`]) |
 //! | `/.well-known/oauth-*`, `/oauth/*` | built-in authorization server ([`crate::oauth::routes`]) |
@@ -55,7 +55,6 @@ pub fn router(app: App, oidc: Option<Arc<OidcClient>>) -> Router {
         .route_layer(middleware::from_fn_with_state(app.clone(), require_auth));
 
     Router::new()
-        .route("/", get(index))
         .route("/healthz", get(healthz))
         .nest("/api", api)
         .merge(crate::mcp::routes())
@@ -88,8 +87,9 @@ pub fn router(app: App, oidc: Option<Arc<OidcClient>>) -> Router {
         .layer(TraceLayer::new_for_http())
 }
 
-/// Lichtung has no web UI: `/` only says what runs here.
-async fn index() -> Response {
+/// Lichtung has no web UI: without listed templates `/` only says what
+/// runs here (with them it is the home page, [`crate::booking`]).
+pub(crate) fn index() -> Response {
     let body = format!(
         "Lichtung-Server {}\n\n\
          Hier läuft der Server der Kalender-App Lichtung. Eine Weboberfläche gibt es nicht;\n\

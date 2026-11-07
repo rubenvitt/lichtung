@@ -11,7 +11,7 @@ Wie `lichtung-server` läuft: Container, Konfiguration, Login, Tokens, Backups. 
 - **Stack-Dateien** in [`server/deploy/`](../server/deploy): `compose.yaml`, `.env.example` (Vorlage) und `generate-secrets.sh`. Auf dem Server unter `~/server/lichtung/`, betrieben mit `docker compose`.
 - **Domain** `lichtung.rubeen.dev` (öffentlich): claude.ai muss `/mcp` erreichen, Gäste die Buchungsseite `/o/…`.
 
-Ohne Anmeldung erreichbar sind nur `/`, `/healthz`, die Login-Strecke `/auth/*`, der OAuth-Autorisierungsserver (`/.well-known/oauth-*`, `/oauth/*`) und die Buchungsseite `/o/*`. Alles unter `/api/*` verlangt eine Sitzung, einen API-Token oder einen Geräte-Token.
+Ohne Anmeldung erreichbar sind nur `/` (die öffentliche Startseite mit den festen Links, die dort stehen sollen, sonst nur ein Hinweistext), `/healthz`, die Login-Strecke `/auth/*`, der OAuth-Autorisierungsserver (`/.well-known/oauth-*`, `/oauth/*`) und die Buchungsseite `/o/*`. Alles unter `/api/*` verlangt eine Sitzung, einen API-Token oder einen Geräte-Token.
 
 ## Umgebungsvariablen
 

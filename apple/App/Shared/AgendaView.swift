@@ -9,38 +9,60 @@ struct AgendaView: View {
     @Environment(AppModel.self) private var model
     /// Wie viele Tage die Liste ab dem ausgewählten Tag zeigt.
     var days = 60
+    /// Wie viele Tage vor dem ausgewählten Tag beim Hochscrollen zu sehen sind.
+    /// Die Liste öffnet trotzdem beim ausgewählten Tag.
+    var pastDays = 30
     var showsTicker = true
 
     var body: some View {
-        let start = model.selectedDay
-        let occurrences = model.occurrences(from: start, days: days)
-        let sections = AgendaBuilder.days(occurrences, from: start, days: days, today: model.today, calendar: model.calendar)
+        let selected = model.selectedDay
+        let start = selected.adding(days: -pastDays)
+        let count = pastDays + days
+        let occurrences = model.occurrences(from: start, days: count)
+        let sections = AgendaBuilder.days(
+            occurrences, from: start, days: count, today: model.today, calendar: model.calendar, anchor: selected
+        )
         VStack(spacing: 0) {
             if showsTicker {
                 DayTickerView()
                 Divider()
             }
-            List {
-                ForEach(sections) { section in
-                    Section {
-                        if section.items.isEmpty {
-                            Text("Keine Termine").foregroundStyle(.secondary)
+            ScrollViewReader { proxy in
+                List {
+                    ForEach(sections) { section in
+                        Section {
+                            if section.items.isEmpty {
+                                Text("Keine Termine").foregroundStyle(.secondary)
+                            }
+                            ForEach(section.items) { item in
+                                AgendaRow(item: item)
+                                    .contentShape(Rectangle())
+                                    .modifier(OccurrenceTap(occurrence: item.occurrence)) // LIC-24
+                                    .contextMenu { OccurrenceMenu(occurrence: item.occurrence) }
+                                    .listRowBackground(rowBackground(item.occurrence))
+                            }
+                        } header: {
+                            Text(section.heading)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(section.isToday ? Color.accentColor : Color.primary)
                         }
-                        ForEach(section.items) { item in
-                            AgendaRow(item: item)
-                                .contentShape(Rectangle())
-                                .modifier(OccurrenceTap(occurrence: item.occurrence)) // LIC-24
-                                .contextMenu { OccurrenceMenu(occurrence: item.occurrence) }
-                                .listRowBackground(rowBackground(item.occurrence))
-                        }
-                    } header: {
-                        Text(section.heading)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(section.isToday ? Color.accentColor : Color.primary)
+                        .id(section.date)
                     }
                 }
+                .listStyle(.plain)
+                // Oben steht der ausgewählte Tag, vergangene Tage liegen darüber.
+                .onAppear { scrollToSelected(proxy) }
+                .onChange(of: model.selectedDay) { scrollToSelected(proxy) }
+                .onChange(of: model.todayRequests) { scrollToSelected(proxy) }
             }
-            .listStyle(.plain)
+        }
+    }
+
+    /// Springt zum ausgewählten Tag, sobald die Liste mit dem neuen Ausschnitt steht.
+    private func scrollToSelected(_ proxy: ScrollViewProxy) {
+        let day = model.selectedDay
+        DispatchQueue.main.async {
+            proxy.scrollTo(day, anchor: .top)
         }
     }
 

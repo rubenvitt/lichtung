@@ -39,6 +39,10 @@ final class ReminderScheduler {
     @ObservationIgnored private let delegate = ReminderNotificationDelegate()
     @ObservationIgnored private var pending: Task<Void, Never>?
     @ObservationIgnored private var latest: CalendarQuery?
+    /// Zählt jede Anforderung mit. Ein älterer Durchlauf, der noch plant oder
+    /// auf die Erlaubnis wartet, darf einen neueren nicht überschreiben und
+    /// nach `removeAll()` nichts mehr einplanen.
+    @ObservationIgnored private var generation = 0
 
     private init() {}
 
@@ -56,6 +60,7 @@ final class ReminderScheduler {
     /// (erster Abgleich, SSE) zählt nur der letzte Stand.
     func update(_ query: CalendarQuery) {
         latest = query
+        generation += 1
         pending?.cancel()
         pending = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(600))
@@ -69,13 +74,16 @@ final class ReminderScheduler {
         pending?.cancel()
         pending = nil
         latest = nil
-        Task { await self.apply(wanted: []) }
+        generation += 1
+        let token = generation
+        Task { await self.apply(wanted: [], ifCurrent: token) }
     }
 
     private func reschedule() async {
         guard let query = latest else { return }
+        let token = generation
         guard Self.isEnabled else {
-            await apply(wanted: [])
+            await apply(wanted: [], ifCurrent: token)
             return
         }
         let now = Date()
@@ -87,13 +95,12 @@ final class ReminderScheduler {
             let allowed = await ensurePermission()
             guard allowed else { return }
         }
-        await apply(wanted: wanted)
+        await apply(wanted: wanted, ifCurrent: token)
     }
 
     /// Fragt beim ersten Mal nach der Erlaubnis.
     private func ensurePermission() async -> Bool {
-        let settings = await center.notificationSettings()
-        switch settings.authorizationStatus {
+        switch await Self.authorizationStatus() {
         case .notDetermined:
             let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
             permission = granted ? .allowed : .denied
@@ -109,16 +116,29 @@ final class ReminderScheduler {
 
     /// Aktualisiert `permission`, ohne zu fragen (Einstellungen).
     func refreshPermission() async {
-        let status = await center.notificationSettings().authorizationStatus
-        switch status {
+        switch await Self.authorizationStatus() {
         case .notDetermined: permission = .unknown
         case .denied: permission = .denied
         default: permission = .allowed
         }
     }
 
-    private func apply(wanted: [PlannedReminder]) async {
-        let scheduled = await center.pendingNotificationRequests().compactMap(Self.reminder(from:))
+    // Die Abfragen beim System laufen außerhalb des Main Actors und geben nur
+    // Sendable-Werte zurück (Swift 6, strikte Prüfung bleibt an).
+
+    private nonisolated static func authorizationStatus() async -> UNAuthorizationStatus {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }
+
+    private nonisolated static func scheduledReminders() async -> [PlannedReminder] {
+        await UNUserNotificationCenter.current().pendingNotificationRequests().compactMap(reminder(from:))
+    }
+
+    /// Gleicht die ausstehenden Benachrichtigungen ab, solange `token` noch
+    /// die letzte Anforderung ist.
+    private func apply(wanted: [PlannedReminder], ifCurrent token: Int) async {
+        let scheduled = await Self.scheduledReminders()
+        guard token == generation else { return }
         let (remove, add) = ReminderPlanner.diff(scheduled: scheduled, wanted: wanted)
         if !remove.isEmpty {
             center.removePendingNotificationRequests(withIdentifiers: remove.map { Self.prefix + $0 })

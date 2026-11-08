@@ -40,6 +40,9 @@ final class AppModel {
     /// Plant Erinnerungen als lokale Benachrichtigungen ein (LIC-68). Nur mit
     /// Server, der Demo-Modus erinnert nicht an erfundene Termine.
     @ObservationIgnored var schedulesReminders = false
+    /// Erst nach dem ersten Stand aus dem Engine einplanen; vorher ist `state`
+    /// leer und würde ausstehende Erinnerungen entfernen.
+    @ObservationIgnored private var hasSnapshot = false
 
     init(engine: SyncEngine, timeZone: TimeZone = .current) {
         self.engine = engine
@@ -52,6 +55,7 @@ final class AppModel {
     func observe() async {
         for await snapshot in await engine.updates() {
             state = snapshot
+            hasSnapshot = true
             refreshHighlight() // LIC-24
             scheduleReminders()
             openRequestedReminder()
@@ -63,6 +67,12 @@ final class AppModel {
     /// Erinnerungen nach dem aktuellen Stand neu einplanen (nur mit Server).
     func scheduleReminders() {
         guard schedulesReminders else { return }
+        guard ReminderScheduler.isEnabled else {
+            // Abschalten wirkt auch, bevor der erste Stand da ist.
+            ReminderScheduler.shared.removeAll()
+            return
+        }
+        guard hasSnapshot else { return }
         ReminderScheduler.shared.update(query)
     }
 

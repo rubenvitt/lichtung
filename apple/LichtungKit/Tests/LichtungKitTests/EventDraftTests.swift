@@ -729,3 +729,69 @@ struct EventDraftTextTests {
         #expect(RecurrenceRule(frequency: .daily, until: LocalDate(year: 2027, month: 1, day: 1), count: 3).count == nil)
     }
 }
+
+@Suite("Termin-Editor: Link und Verfügbarkeit (LIC-69)")
+struct EventDraftLinkAvailabilityTests {
+    typealias D = DraftFixtures
+
+    @Test func newEventSendsLinkWithSchemeAndFreeOnlyWhenChosen() {
+        var draft = EventDraft.new(on: D.day(3), now: SyncFixtures.now, calendarId: "cal_1", deviceTimeZone: D.tz)
+        guard case let .create(_, plain)? = draft.saveIntent() else { Issue.record("keine Absicht"); return }
+        #expect(plain.url == nil)
+        #expect(plain.availability == nil)
+
+        draft.url = "  example.org/raum "
+        draft.showsAsFree = true
+        guard case let .create(_, input)? = draft.saveIntent() else { Issue.record("keine Absicht"); return }
+        #expect(input.url == "https://example.org/raum")
+        #expect(input.availability == .free)
+    }
+
+    @Test func linkKeepsExistingSchemes() {
+        #expect(EventDraft.effectiveURL("https://example.org") == "https://example.org")
+        #expect(EventDraft.effectiveURL("mailto:team@example.org") == "mailto:team@example.org")
+        #expect(EventDraft.effectiveURL("   ") == nil)
+    }
+
+    @Test func readsAndChangesLinkAndAvailability() throws {
+        let (occ, e) = D.single { e in
+            e.details.url = "https://example.org/alt"
+            e.details.availability = .free
+        }
+        var draft = D.draft(occ, e)
+        #expect(draft.url == "https://example.org/alt")
+        #expect(draft.showsAsFree)
+        #expect(!draft.hasChanges)
+        #expect(draft.saveIntent() == nil)
+
+        draft.showsAsFree = false
+        draft.url = ""
+        let c = try #require(D.changes(draft.saveIntent()))
+        #expect(c.availability == .busy)
+        #expect(c.url == .clear)
+        #expect(c.title == nil)
+
+        draft.url = "example.org/neu"
+        let c2 = try #require(D.changes(draft.saveIntent()))
+        #expect(c2.url == .set("https://example.org/neu"))
+    }
+
+    @Test func addingSchemeOnlyIsNoChange() {
+        let (occ, e) = D.single { $0.details.url = "https://example.org" }
+        var draft = D.draft(occ, e)
+        draft.url = "https://example.org "
+        #expect(!draft.hasChanges)
+    }
+}
+
+@Suite("Termin-Editor: Länge des Links (LIC-69)")
+struct EventDraftLinkLengthTests {
+    @Test func tooLongLinkBlocksSaving() {
+        var draft = EventDraft.new(on: DraftFixtures.day(3), now: SyncFixtures.now, calendarId: "cal_1", deviceTimeZone: DraftFixtures.tz)
+        draft.url = "https://example.org/" + String(repeating: "a", count: EventDraft.maxURLLength)
+        #expect(!draft.canSave)
+        #expect(draft.validationMessage?.contains("zu lang") == true)
+        draft.url = "https://example.org/kurz"
+        #expect(draft.canSave)
+    }
+}

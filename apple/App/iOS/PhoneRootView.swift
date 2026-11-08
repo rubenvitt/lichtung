@@ -60,6 +60,7 @@ struct PhoneRootView: View {
                 }
                 .phoneSettingsButton() // Einstellungen (LIC-43)
                 .invitationsButton() // Terminanfragen (LIC-30)
+                .syncProblemsButton() // Konflikte, abgelehnte Änderungen (LIC-70)
                 .safeAreaInset(edge: .top, spacing: 0) {
                     if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
                         modeBar
@@ -132,14 +133,15 @@ struct PhoneRootView: View {
                 ? model.selectedDay.adding(days: -(model.selectedDay.weekday.rawValue - 1))
                 : model.selectedDay
             DayGridView(start: start, dayCount: days)
+                // Nur ein klar waagerechter Wisch blättert; senkrecht scrollt (LIC-65).
                 .gesture(DragGesture(minimumDistance: 40).onEnded { value in
-                    let step = value.translation.width < 0 ? days : -days
-                    model.selectedDay = model.selectedDay.adding(days: step)
+                    guard let step = SwipeStep.horizontal(dx: value.translation.width, dy: value.translation.height) else { return }
+                    model.selectedDay = model.selectedDay.adding(days: step * days)
                 })
         case .month:
             MonthView(year: model.selectedDay.year, month: model.selectedDay.month, visibleLanes: 2)
                 .gesture(DragGesture(minimumDistance: 40).onEnded { value in
-                    let step = value.translation.height < 0 ? 1 : -1
+                    guard let step = SwipeStep.vertical(dx: value.translation.width, dy: value.translation.height) else { return }
                     model.selectedDay = LocalDate(year: model.selectedDay.year, month: model.selectedDay.month, day: 1).adding(months: step)
                 })
         }
@@ -182,7 +184,7 @@ extension PhoneRootView {
             Button(model.undoHistory.redoTitle) { Task { await model.redo() } }
                 .disabled(!model.undoHistory.canRedo)
         } label: {
-            Image(systemName: "arrow.uturn.backward")
+            Label("Rückgängig", systemImage: "arrow.uturn.backward") // Text fürs ⋯-Menü (LIC-66)
         } primaryAction: {
             Task { await model.undo() }
         }
@@ -203,7 +205,7 @@ extension PhoneRootView {
                 Button(title, systemImage: "doc.on.clipboard") { paste() }
                 Button("Kopie verwerfen", systemImage: "xmark", role: .destructive) { model.clipboard = nil }
             } label: {
-                Image(systemName: "doc.on.clipboard")
+                Label(title, systemImage: "doc.on.clipboard") // Text fürs ⋯-Menü (LIC-66)
             } primaryAction: {
                 paste()
             }

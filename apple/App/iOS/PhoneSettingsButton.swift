@@ -18,9 +18,8 @@ private struct PhoneSettingsButton: ViewModifier {
                     Button {
                         showsSettings = true
                     } label: {
-                        Image(systemName: "gearshape")
+                        Label("Einstellungen", systemImage: "gearshape") // Text fürs ⋯-Menü (LIC-66)
                     }
-                    .accessibilityLabel("Einstellungen")
                 }
             }
             .sheet(isPresented: $showsSettings) {

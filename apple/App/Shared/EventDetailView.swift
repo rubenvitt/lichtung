@@ -31,6 +31,10 @@ struct EventDetailView: View {
                     if let travel = TravelTime.detailText(for: occurrence, calendar: model.calendar) {
                         Label(travel, systemImage: "car").foregroundStyle(.secondary)
                     }
+                    // LIC-69
+                    if d.availability == .free {
+                        Label("Als frei angezeigt", systemImage: "circle.dashed").foregroundStyle(.secondary)
+                    }
                 }
                 // Terminanfrage: Status und Antworten (LIC-30)
                 if InvitationActions.isInvitation(occurrence) {
@@ -56,6 +60,21 @@ struct EventDetailView: View {
                     Section("Ort") {
                         Label(location, systemImage: "mappin.and.ellipse")
                             .textSelection(.enabled)
+                    }
+                }
+                // Link am Termin (LIC-69)
+                // Ohne Schema (z. B. „example.org/raum“ aus einem anderen
+                // Programm) wie im Editor mit https:// davor; was sich nicht
+                // öffnen lässt, steht als Text da.
+                if let text = d.url?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                    Section("Link") {
+                        if let url = EventDraft.effectiveURL(text).flatMap(URL.init(string:)), url.scheme != nil {
+                            Link(destination: url) {
+                                Text(text).lineLimit(2).truncationMode(.middle)
+                            }
+                        } else {
+                            Text(text).textSelection(.enabled)
+                        }
                     }
                 }
                 if let notes = d.notes, !notes.isEmpty {

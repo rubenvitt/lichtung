@@ -237,6 +237,7 @@ final class AppSession {
         let api = SyncAPI(baseURL: url, tokens: tokens)
         syncAPI = api
         model = AppModel(engine: SyncEngine(api: api, store: FileCacheStore(url: Self.cacheURL)))
+        model.schedulesReminders = true // LIC-68
         management = ManagementAPI(sync: api)
         serverURL = url
         stage = .server
@@ -247,6 +248,7 @@ final class AppSession {
 
     private func enterDemo() {
         stopLive()
+        ReminderScheduler.shared.removeAll() // keine Erinnerungen an erfundene Termine
         model = AppModel.demo()
         syncAPI = nil
         management = nil
@@ -284,6 +286,7 @@ final class AppSession {
         }
         try? tokens.clear()
         try? FileCacheStore(url: Self.cacheURL).clear()
+        ReminderScheduler.shared.removeAll() // LIC-68
         defaults.removeObject(forKey: Key.cacheServer)
         defaults.removeObject(forKey: Key.mode)
         serverInput = serverURL.map(ServerAddress.displayName) ?? serverInput

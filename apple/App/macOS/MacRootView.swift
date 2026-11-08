@@ -62,6 +62,7 @@ struct MacRootView: View {
                 }
             }
             .invitationsButton() // Terminanfragen (LIC-30)
+            .syncProblemsButton() // Konflikte, abgelehnte Änderungen (LIC-70)
         }
         .sheet(item: $model.selectedOccurrence, onDismiss: { model.detailDismissed() }) { occ in
             EventDetailView(occurrence: occ).frame(minWidth: 360, minHeight: 420)

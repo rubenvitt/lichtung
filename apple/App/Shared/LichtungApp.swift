@@ -9,12 +9,14 @@ struct LichtungApp: App {
     /// Anmeldung, Demo oder Server (LIC-43). Hält das aktuelle `AppModel`.
     @State private var session = AppSession()
 
-    #if os(macOS)
     init() {
+        #if os(macOS)
         // Sparkle früh starten, damit er im Hintergrund nach Updates sucht.
         _ = AppUpdater.shared
+        #endif
+        // Vor dem ersten Tipp auf eine Erinnerung (LIC-68).
+        ReminderScheduler.shared.install()
     }
-    #endif
 
     var body: some Scene {
         WindowGroup {
@@ -49,12 +51,16 @@ struct SessionRootView: View {
     @State private var showsLogin = false
     /// IANA-ID der zweiten Zeitzone aus den Einstellungen, leer heißt keine.
     @AppStorage("secondaryTimeZone") private var secondaryZoneID = ""
+    /// Erinnerungen als Mitteilungen (LIC-68).
+    @AppStorage(ReminderScheduler.enabledKey) private var remindersEnabled = true
 
     var body: some View {
         content
             // SSE nur, solange die App offen ist (Vertrag §5).
             .onChange(of: scenePhase, initial: true) { _, phase in
                 session.setActive(phase != .background)
+                // Beim Öffnen neu einplanen: Die Zeit ist weitergelaufen (LIC-68).
+                if phase == .active { session.model.scheduleReminders() }
             }
     }
 
@@ -71,7 +77,7 @@ struct SessionRootView: View {
             LoginView()
         case .demo, .server:
             let model = session.model
-            RootView()
+            calendarWithBanner
                 .eventEditorSheet() // Termin-Editor (LIC-20)
                 .occurrenceDeleteDialog() // Serie löschen aus Menüs und Tastatur (LIC-24)
                 .environment(model)
@@ -83,7 +89,12 @@ struct SessionRootView: View {
                 .onChange(of: secondaryZoneID) { _, id in
                     model.secondaryTimeZone = TimeZoneCatalog.zone(fromStored: id)
                 }
-                .safeAreaInset(edge: .top, spacing: 0) { banner }
+                // Erinnerungen (LIC-68): Schalter in den Einstellungen, Tipp auf
+                // eine Benachrichtigung öffnet den Termin.
+                .onChange(of: remindersEnabled) { _, _ in model.scheduleReminders() }
+                .onChange(of: ReminderScheduler.shared.openRequest, initial: true) { _, _ in
+                    model.openRequestedReminder()
+                }
                 .sheet(isPresented: $showsLogin) {
                     LoginView(isReauthentication: true)
                         .environment(session)
@@ -93,6 +104,22 @@ struct SessionRootView: View {
                     if !needs { showsLogin = false }
                 }
         }
+    }
+
+    /// Kalender mit Banner darüber. iPhone: im Stapel statt als Einschub,
+    /// sonst liegt der Banner über der Navigationsleiste und verdeckt deren
+    /// Knöpfe (LIC-66).
+    @ViewBuilder
+    private var calendarWithBanner: some View {
+        #if os(iOS)
+        VStack(spacing: 0) {
+            banner
+            RootView()
+        }
+        #else
+        RootView()
+            .safeAreaInset(edge: .top, spacing: 0) { banner }
+        #endif
     }
 
     @ViewBuilder

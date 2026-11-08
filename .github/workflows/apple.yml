@@ -6,10 +6,8 @@ on:
     paths:
       - "apple/**"
       - ".github/workflows/apple.yml"
+  # PRs ohne Pfadfilter: die Jobs sind Pflicht-Checks im Ruleset für main.
   pull_request:
-    paths:
-      - "apple/**"
-      - ".github/workflows/apple.yml"
 
 jobs:
   # Der Kern (LichtungKit) ist reines Foundation und muss auch unter Linux bauen.

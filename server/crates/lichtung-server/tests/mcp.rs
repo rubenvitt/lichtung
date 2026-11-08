@@ -1075,6 +1075,88 @@ async fn series_need_a_scope() {
 }
 
 #[tokio::test]
+async fn split_keeps_only_the_following_extra_dates() {
+    // LIC-61: Mondays 2., 9. [EXDATE], 16., 23. [EXDATE] at 09:00, plus
+    // RDATEs on Thursday 5. and 19. Split at the 16th with a new rule and
+    // one hour later: the MCP sends the series' RDATE/EXDATE along, the new
+    // series keeps only those from the 16th on, moved by the hour.
+    let ics = vcal(
+        "BEGIN:VEVENT\r\nUID:jour-fixe@example.org\r\nDTSTAMP:20261020T070000Z\r\n\
+         DTSTART;TZID=Europe/Berlin:20261102T090000\r\n\
+         DTEND;TZID=Europe/Berlin:20261102T093000\r\n\
+         RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4\r\n\
+         RDATE;TZID=Europe/Berlin:20261105T090000,20261119T090000\r\n\
+         EXDATE;TZID=Europe/Berlin:20261109T090000,20261123T090000\r\n\
+         SUMMARY:Jour fixe\r\nEND:VEVENT\r\n",
+    );
+    let (t, token) = synced(|dav| dav.put("jour-fixe.ics", &ics)).await;
+    let id = t.event_by_uid("jour-fixe@example.org").await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    ok(
+        &t.s,
+        &token,
+        "update_event",
+        json!({"event_id": id, "scope": "this_and_following",
+               "occurrence": "2026-11-16T09:00:00+01:00",
+               "start": "2026-11-16T10:00:00+01:00",
+               "recurrence": "FREQ=WEEKLY;BYDAY=MO;COUNT=4"}),
+    )
+    .await;
+
+    let starts: Vec<String> = occurrence_titles(&t, &token)
+        .await
+        .into_iter()
+        .map(|(s, _)| s)
+        .collect();
+    assert_eq!(
+        starts,
+        [
+            "2026-11-02T09:00:00+01:00",
+            "2026-11-05T09:00:00+01:00",
+            "2026-11-16T10:00:00+01:00",
+            "2026-11-19T10:00:00+01:00",
+        ]
+    );
+
+    let (_, _, old) = t.dav.find_uid(CALENDAR, "jour-fixe@example.org").unwrap();
+    let old = unfold(&old);
+    assert!(
+        old.contains("RDATE;TZID=Europe/Berlin:20261105T090000\r\n"),
+        "{old}"
+    );
+    assert!(
+        old.contains("EXDATE;TZID=Europe/Berlin:20261109T090000\r\n"),
+        "{old}"
+    );
+    let uid = t
+        .uids()
+        .into_iter()
+        .find(|u| u.ends_with("@lichtung"))
+        .expect("a new series");
+    let (_, _, new) = t.dav.find_uid(CALENDAR, &uid).unwrap();
+    let new = unfold(&new);
+    assert!(new.contains("RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=2"), "{new}");
+    assert!(
+        new.contains("RDATE;TZID=Europe/Berlin:20261119T100000\r\n"),
+        "{new}"
+    );
+    assert!(
+        new.contains("EXDATE;TZID=Europe/Berlin:20261123T100000\r\n"),
+        "{new}"
+    );
+    assert!(
+        !new.contains("20261105"),
+        "no RDATE before the split: {new}"
+    );
+    assert!(
+        !new.contains("20261109"),
+        "no EXDATE before the split: {new}"
+    );
+}
+
+#[tokio::test]
 async fn invitations_are_listed_and_answered() {
     let (t, token) = synced(|dav| dav.put("sitzung.ics", &invitation("sitzung@example.org"))).await;
     let range = json!({"start": "2026-11-01", "end": "2026-11-30", "time_zone": BERLIN});

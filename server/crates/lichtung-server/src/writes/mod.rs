@@ -47,7 +47,7 @@ use chrono::Utc;
 use lichtung_caldav::{Client, Error as DavError, Precondition, PutResult};
 use lichtung_ical::{
     delete_event, edit_event, CalTime, CalendarObject, EditContext, EditOutcome, EditScope,
-    Error as IcalError, EventChanges,
+    Error as IcalError, EventChanges, RDate, ZoneResolver,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -62,8 +62,7 @@ use crate::events::store::{self as events_store, EventRow};
 use crate::events::{default_zone, derive, event_json, normalize_ics, EventContext};
 use input::{
     build_object, check_object, check_uid, describe, edit_changes, resolve, set_alarms,
-    set_attendees, set_recurrence_dates, DateInput, EventInput, Fields, InputError, Mutation,
-    ResponseStatus, Scope,
+    set_attendees, DateInput, EventInput, Fields, InputError, Mutation, ResponseStatus, Scope,
 };
 
 /// Wait suggested to the client when the provider gave none.
@@ -1438,7 +1437,9 @@ fn ics_for_put(object: &CalendarObject) -> String {
 /// Applies what `edit_event` does not know (attendees, alarms, RDATE and
 /// EXDATE) to the components the scope chose. The RRULE is not set again:
 /// `edit_event` has set it already, with the remaining `COUNT` after a split
-/// and a moved `UNTIL` (LIC-57).
+/// and a moved `UNTIL` (LIC-57). RDATE and EXDATE are only written when the
+/// sent lists differ from the series' own; a split keeps only those from the
+/// selected occurrence on (LIC-61).
 fn apply_extras(
     mut edit: EditOutcome,
     original: &CalendarObject,
@@ -1451,6 +1452,7 @@ fn apply_extras(
         return Ok(edit);
     }
     let recurring = original.master().is_some_and(|m| m.is_recurring());
+    let created = edit.created.is_some();
     let resolver = original.resolver(default_zone());
     // The object holding the changed events, and whether only one
     // occurrence (override) of it is meant.
@@ -1482,11 +1484,72 @@ fn apply_extras(
         }
     }
     if let (Some(Some(r)), None) = (&f.recurrence, &single) {
+        let split = scope == Scope::ThisAndFollowing && created;
+        let before = original.master();
+        let rdates_before: Vec<CalTime> = before
+            .as_ref()
+            .map(|m| m.rdates())
+            .transpose()
+            .map_err(ical_error)?
+            .unwrap_or_default()
+            .iter()
+            .map(|d| d.start().clone())
+            .collect();
+        let exdates_before = before
+            .as_ref()
+            .map(|m| m.exdates())
+            .transpose()
+            .map_err(ical_error)?
+            .unwrap_or_default();
         if let Some(mut master) = object.master_mut() {
-            set_recurrence_dates(&mut master, r);
+            let start = master.start().map_err(ical_error)?;
+            // The dates a sender wants: a split keeps only those from the
+            // new series' start on (LIC-61).
+            let wanted = |dates: &[CalTime]| -> Vec<CalTime> {
+                dates
+                    .iter()
+                    .filter(|t| !split || at_or_after(t, &start, &resolver))
+                    .cloned()
+                    .collect()
+            };
+            // Unchanged lists (the MCP sends the series' own along with a new
+            // rule) keep what `edit_event` made of them: cut at a split and
+            // moved with a new start.
+            if !same_dates(&r.rdates, &rdates_before, &resolver) {
+                let rdates: Vec<RDate> = wanted(&r.rdates).into_iter().map(RDate::Time).collect();
+                master.set_rdates(&rdates);
+            }
+            if !same_dates(&r.exdates, &exdates_before, &resolver) {
+                master.set_exdates(&wanted(&r.exdates));
+            }
         }
     }
     Ok(edit)
+}
+
+/// Whether two lists of RDATEs or EXDATEs name the same dates, whatever
+/// their order and notation (zone, UTC).
+fn same_dates(a: &[CalTime], b: &[CalTime], resolver: &ZoneResolver) -> bool {
+    let keys = |dates: &[CalTime]| {
+        let mut k: Vec<_> = dates
+            .iter()
+            .map(|t| (t.is_date(), resolver.to_utc(t)))
+            .collect();
+        k.sort();
+        k.dedup();
+        k
+    };
+    keys(a) == keys(b)
+}
+
+/// Whether `t` lies at or after `start`; with a date on either side, whole
+/// days count (as in `lichtung_ical`'s split).
+fn at_or_after(t: &CalTime, start: &CalTime, resolver: &ZoneResolver) -> bool {
+    if t.is_date() || start.is_date() {
+        t.date() >= start.date()
+    } else {
+        resolver.to_utc(t) >= resolver.to_utc(start)
+    }
 }
 
 /// Sets the own `PARTSTAT` (and `COMMENT`) in the whole object or in one

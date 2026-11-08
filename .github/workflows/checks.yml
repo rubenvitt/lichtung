@@ -1,0 +1,22 @@
+name: Checks
+
+# Einziger Pflicht-Check im Ruleset für main. Die übrigen Workflows laufen per
+# Pfadfilter nur bei passenden Änderungen; dieser Job wartet auf alle Checks,
+# die ein PR tatsächlich auslöst, und schlägt fehl, sobald einer fehlschlägt.
+on:
+  pull_request:
+
+permissions:
+  checks: read
+
+jobs:
+  all:
+    name: Alle Checks grün
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: poseidon/wait-for-status-checks@v0.7.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Den anderen Workflows Zeit geben, ihre Check Runs anzulegen.
+          delay: 30s
+          timeout: 5400s

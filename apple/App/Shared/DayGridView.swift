@@ -278,7 +278,9 @@ final class GridScroller {
 /// Laufender Zug in einer Tagesspalte. Punkte im sichtbaren Ausschnitt
 /// (`GridScroller.viewportSpace`), Strecken ohne das automatische Scrollen.
 enum GridDrag: Equatable {
-    case create(fromY: CGFloat, toY: CGFloat)
+    /// `dx`: seitliche Strecke des Fingers, nur für die Vorschau beim Halten
+    /// mit Kopie (iPhone, LIC-63).
+    case create(fromY: CGFloat, toY: CGFloat, dx: CGFloat = 0)
     case move(id: String, translation: CGSize)
     case resize(id: String, dy: CGFloat)
 
@@ -504,7 +506,7 @@ struct DayColumn: View {
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(GridScroller.viewportSpace)))
             .updating($drag) { value, state, _ in
                 if case .second(true, let d?) = value {
-                    state = .create(fromY: d.startLocation.y, toY: d.location.y)
+                    state = .create(fromY: d.startLocation.y, toY: d.location.y, dx: d.translation.width)
                 }
             }
             .onChanged { value in
@@ -749,6 +751,21 @@ struct DayColumn: View {
         model.clipboard?.matches(Pasteboard.string) == true
     }
 
+    /// Vorschau beim Halten mit Kopie (LIC-63): Solange Loslassen das Menü
+    /// „Hier einfügen“ öffnen würde, zeigt sie den eingefügten Termin in
+    /// Länge und Farbe der Kopie; wer zieht, sieht wieder das Anlegen.
+    /// Ganztägige Kopien behalten den Block des Anlegens.
+    private func slotPastePreview(fromY: CGFloat, toY: CGFloat, dx: CGFloat, height: CGFloat) -> PreviewTarget? {
+        guard let clip = model.clipboard, canPaste else { return nil }
+        let translation = (dx: Double(dx), dy: Double(toY - fromY + scroller.scrolled))
+        guard GridInteraction.slotHoldRelease(translation: translation, canPaste: true) == .menu else { return nil }
+        // Gleiche Stelle wie `openSlotMenu`, damit Vorschau und Menü dieselbe Uhrzeit nennen.
+        let start = GridInteraction.pasteStart(day: day, atY: Double(scroller.contentY(fromY)), columnHeight: Double(height), calendar: model.calendar)
+        guard let interval = clip.pastedInterval(at: start, deviceTimeZone: model.timeZone) else { return nil }
+        let calendarId = model.duplicateCalendarId(for: clip.occurrence) ?? clip.occurrence.calendarId
+        return PreviewTarget(interval: interval, columnOffset: 0, calendarId: calendarId)
+    }
+
     /// `y` im sichtbaren Ausschnitt. Der Finger stand still, also zählt der
     /// jetzige Versatz (nicht der vom Beginn eines Zugs).
     private func openSlotMenu(atViewportY y: CGFloat, height: CGFloat) {
@@ -799,8 +816,8 @@ struct DayColumn: View {
     private func previewTarget(width: CGFloat, height: CGFloat) -> PreviewTarget? {
         guard let drag else { return settling?.target }
         switch drag {
-        case let .create(fromY, toY):
-            return PreviewTarget(interval: creationInterval(fromY: fromY, toY: toY, height: height), columnOffset: 0, calendarId: nil)
+        case let .create(fromY, toY, dx):
+            return createPreview(fromY: fromY, toY: toY, dx: dx, height: height)
         case let .move(id, translation):
             guard let occ = blocks.first(where: { $0.occurrence.id == id })?.occurrence else { return nil }
             let target = movedInterval(occ, translation: translation, width: width, height: height)
@@ -809,6 +826,15 @@ struct DayColumn: View {
             guard let occ = blocks.first(where: { $0.occurrence.id == id })?.occurrence else { return nil }
             return PreviewTarget(interval: resizedInterval(occ, dy: dy, height: height), columnOffset: 0, calendarId: occ.calendarId)
         }
+    }
+
+    /// Zug auf leerer Fläche: der Zeitraum des Anlegens. Am iPhone mit Kopie
+    /// beim ruhigen Halten stattdessen der eingefügte Termin (LIC-63).
+    private func createPreview(fromY: CGFloat, toY: CGFloat, dx: CGFloat, height: CGFloat) -> PreviewTarget {
+        #if os(iOS)
+        if let paste = slotPastePreview(fromY: fromY, toY: toY, dx: dx, height: height) { return paste }
+        #endif
+        return PreviewTarget(interval: creationInterval(fromY: fromY, toY: toY, height: height), columnOffset: 0, calendarId: nil)
     }
 
     @ViewBuilder

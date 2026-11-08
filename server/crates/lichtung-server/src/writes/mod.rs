@@ -1437,9 +1437,9 @@ fn ics_for_put(object: &CalendarObject) -> String {
 /// Applies what `edit_event` does not know (attendees, alarms, RDATE and
 /// EXDATE) to the components the scope chose. The RRULE is not set again:
 /// `edit_event` has set it already, with the remaining `COUNT` after a split
-/// and a moved `UNTIL` (LIC-57). RDATE and EXDATE are only written when the
-/// sent lists differ from the series' own; a split keeps only those from the
-/// selected occurrence on (LIC-61).
+/// and a moved `UNTIL` (LIC-57). With an RRULE, RDATE and EXDATE are only
+/// written when the sent lists differ from the series' own; a split keeps
+/// only those from the selected occurrence on (LIC-61).
 fn apply_extras(
     mut edit: EditOutcome,
     original: &CalendarObject,
@@ -1514,12 +1514,16 @@ fn apply_extras(
             };
             // Unchanged lists (the MCP sends the series' own along with a new
             // rule) keep what `edit_event` made of them: cut at a split and
-            // moved with a new start.
-            if !same_dates(&r.rdates, &rdates_before, &resolver) {
+            // moved with a new start. Without an RRULE `edit_event` has
+            // dropped them, so the sent lists always go back in.
+            let keep = |sent: &[CalTime], before: &[CalTime]| {
+                r.rrule.is_some() && same_dates(sent, before, &resolver)
+            };
+            if !keep(&r.rdates, &rdates_before) {
                 let rdates: Vec<RDate> = wanted(&r.rdates).into_iter().map(RDate::Time).collect();
                 master.set_rdates(&rdates);
             }
-            if !same_dates(&r.exdates, &exdates_before, &resolver) {
+            if !keep(&r.exdates, &exdates_before) {
                 master.set_exdates(&wanted(&r.exdates));
             }
         }

@@ -206,7 +206,13 @@ fn event_fields(nullable: bool) -> Vec<(&'static str, Value)> {
                 nullable_string(
                     "Wiederholung als RRULE nach RFC 5545 (ohne „RRULE:“), z. B. \
                      FREQ=WEEKLY;BYDAY=MO;COUNT=10; ersetzt die Regel, Ausnahmen bleiben. null \
-                     beendet die Wiederholung. Nicht mit scope this.",
+                     beendet die Wiederholung. Nicht mit scope this. COUNT und UNTIL werden mit \
+                     der bisherigen Regel verglichen: Ein unverändertes COUNT zählt weiter die \
+                     ganze Serie, bei this_and_following bekommt die neue Serie die Restzahl \
+                     (die bisherige Gesamtzahl oder die Restzahl zu schicken ergibt dasselbe). \
+                     Ein geändertes COUNT gilt wie angegeben, bei this_and_following ab dem \
+                     gewählten Vorkommen. Ein unverändertes UNTIL wandert mit, wenn start die \
+                     Serie verschiebt; ein geändertes UNTIL gilt wie angegeben.",
                 )
             } else {
                 string(

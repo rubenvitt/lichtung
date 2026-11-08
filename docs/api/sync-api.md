@@ -326,6 +326,7 @@ Eigene Änderungen schickt der Client als Liste von Mutationen. Offline gesammel
 - `occurrence`: `recurrence_id` des Vorkommens (der **ursprüngliche** Beginn); Pflicht bei `this` und `this_and_following`.
 - `changes`: Teilmenge von EventInput. Nur genannte Felder ändern sich, `null` leert ein optionales Feld.
 - `calendar_id` in `changes` verschiebt das Event in einen anderen Kalender (nur mit `scope: all`).
+- *Ergänzung (LIC-57/LIC-62):* `recurrence.rrule` in `changes` (nur mit `scope` `all` oder `this_and_following`): `COUNT` und `UNTIL` vergleicht der Server mit der bisherigen Regel des Events. Ein unverändertes `COUNT` zählt weiter die ganze Serie; beim Teilen bekommt die neue Serie die Restzahl (Gesamtzahl oder Restzahl zu schicken ergibt dasselbe). Ein geändertes `COUNT` gilt wie angegeben, beim Teilen ab dem gewählten Vorkommen. Ein unverändertes `UNTIL` wandert mit, wenn `start` die Serie verschiebt; ein geändertes gilt wie angegeben. Dieselbe Deutung gilt für MCP ([`../mcp.md`](../mcp.md)).
 
 **`delete_event`**: `event_id`, `base_version`, `scope`, `occurrence` wie oben.
 
@@ -503,3 +504,4 @@ Zusätzliche `code`s in Mutations-Ergebnissen (`rejected`/`retry`): `calendar_re
 | 2026-10-26 | Ergänzungen aus LIC-46 und LIC-49 (keine bestehende Form geändert): Feld `is_work` am Kalender (Arbeitskalender, per `PATCH` setzbar, Kennzeichnen sperrt MCP); `GET /api/me` mit `server_name` und `server_version`; Felder von `GET /api/devices`; `PATCH /api/devices/{id}` zum Umbenennen; `client_id` je Server merken, Lebensdauer der Clients, Prüfung über `invalid_client` am Token-Endpunkt (Abschnitte 2, 3, 7) |
 | 2026-10-26 | Ergänzung aus LIC-55 (keine bestehende Form geändert): Clients der Apps bleiben 30 Tage nach dem Widerruf ihres letzten Geräts bestehen (Abschnitt 2) |
 | 2026-10-27 | Ergänzung aus LIC-33 und LIC-35 (keine bestehende Form geändert): Feld `bookings` am Objekt `opening` (Buchungen mit Name, E-Mail-Adresse und Notiz des Gastes, neueste 50), ID-Präfix `bkg_`; eine Buchung einer Vorlage und das Löschen alter Buchungen erscheinen als `upsert` des Links im Pull ([`openings.md`](openings.md), Abschnitte 2, 6, 8) |
+| 2026-11-08 | Ergänzung aus LIC-62 (keine bestehende Form geändert, Verhalten seit LIC-57): Deutung von `COUNT` und `UNTIL` in `recurrence.rrule` bei `update_event` mit `scope` `all` oder `this_and_following` (Abschnitt 6) |

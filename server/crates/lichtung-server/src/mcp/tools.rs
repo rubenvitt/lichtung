@@ -1146,6 +1146,7 @@ async fn create_opening_link(app: &App, args: &Args) -> ToolResult {
             horizon_days: None,
             video_url: None,
             suggestions: Some(suggestions),
+            listed: None,
         })
         .await
         .map_err(opening_error)?;

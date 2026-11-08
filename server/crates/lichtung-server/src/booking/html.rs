@@ -15,7 +15,7 @@ use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use chrono_tz::Tz;
 use sha2::{Digest, Sha256};
 
-use crate::openings::Slot;
+use crate::openings::{Opening, Slot, PUBLIC_PATH};
 
 /// Language of the page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +118,8 @@ pub struct Texts {
     pub resend: &'static str,
     pub expired: &'static str,
     pub other_language: &'static str,
+    pub home_title: &'static str,
+    pub home_intro: &'static str,
     pub weekdays: [&'static str; 7],
     pub months: [&'static str; 12],
 }
@@ -161,6 +163,8 @@ pub static DE: Texts = Texts {
     resend: "Bitte prüf deine Angaben und sende das Formular noch einmal.",
     expired: "Das Formular ist abgelaufen. Bitte sende es noch einmal.",
     other_language: "English",
+    home_title: "Termin buchen",
+    home_intro: "Wähle, worum es gehen soll. Danach siehst du die freien Zeiten.",
     weekdays: [
         "Montag",
         "Dienstag",
@@ -224,6 +228,8 @@ pub static EN: Texts = Texts {
     resend: "Please check your details and send the form again.",
     expired: "The form has expired. Please send it again.",
     other_language: "Deutsch",
+    home_title: "Book a time",
+    home_intro: "Pick what it is about. Then you will see the free times.",
     weekdays: [
         "Monday",
         "Tuesday",
@@ -319,6 +325,10 @@ textarea{min-height:6rem}\
 button{font:inherit;padding:.5rem 1.25rem;border-radius:6px;border:1px solid #2f7d4f;cursor:pointer;background:#2f7d4f;color:#fff;margin-top:1rem}\
 button.plain{background:transparent;color:inherit;border-color:#888;margin:0;padding:.25rem .75rem}\
 .when{font-size:1.1rem;font-weight:600}\
+.links{list-style:none;padding:0;margin:1rem 0;display:grid;gap:.75rem}\
+a.card{display:block;padding:.85rem 1rem;border:1px solid #2f7d4f;border-radius:10px;text-decoration:none;color:inherit}\
+a.card:hover,a.card:focus{background:rgba(47,125,79,.08)}\
+a.card strong{display:block;color:#2f7d4f;font-size:1.05rem}\
 .hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}\
 ";
 
@@ -477,6 +487,41 @@ pub struct Nav {
     pub from: NaiveDate,
     pub earlier: Option<NaiveDate>,
     pub later: Option<NaiveDate>,
+}
+
+/// The home page: the listed templates with title and length, each a
+/// link to its booking page. Nothing else about a link (calendar, windows,
+/// video link) is shown.
+pub fn home_page(lang: Lang, openings: &[Opening]) -> Response {
+    let t = lang.texts();
+    let other = lang.other();
+    let mut body = format!(
+        "<div class=\"top\"><span></span><a href=\"{}\" hreflang=\"{code}\" lang=\"{code}\">{}</a></div>\
+         <h1>{}</h1><p>{}</p><ul class=\"links\">",
+        escape(&query(&[("lang", other.code())])),
+        t.other_language,
+        escape(t.home_title),
+        escape(t.home_intro),
+        code = other.code(),
+    );
+    for o in openings {
+        let href = format!(
+            "{PUBLIC_PATH}/{}{}",
+            o.token,
+            query(&[("lang", lang.code())])
+        );
+        let _ = write!(
+            body,
+            "<li><a class=\"card\" href=\"{}\"><strong>{}</strong>\
+             <span class=\"muted\">{} {}</span></a></li>",
+            escape(&href),
+            escape(&o.title),
+            o.duration_minutes,
+            t.minutes,
+        );
+    }
+    body.push_str("</ul>");
+    page(lang, StatusCode::OK, t.home_title, &body, false)
 }
 
 /// The list of free times, grouped by day in the guest's zone.

@@ -55,6 +55,8 @@ pub struct OpeningRow {
     pub horizon_days: i64,
     pub video_url: Option<String>,
     pub suggested: bool,
+    /// A template shown on the public home page (schema version 10).
+    pub listed: bool,
     pub booked_at: Option<i64>,
     pub booked_event_id: Option<String>,
     pub created_at: i64,
@@ -64,7 +66,7 @@ pub struct OpeningRow {
 
 const OPENING_COLUMNS: &str = "id, kind, token, title, duration_minutes, calendar_id, time_zone, \
      windows, buffer_before_minutes, buffer_after_minutes, min_notice_minutes, horizon_days, \
-     video_url, suggested, booked_at, booked_event_id, created_at, updated_at, seq";
+     video_url, suggested, booked_at, booked_event_id, created_at, updated_at, seq, listed";
 
 fn row_to_opening(row: &Row<'_>) -> rusqlite::Result<OpeningRow> {
     let kind: String = row.get(1)?;
@@ -94,6 +96,7 @@ fn row_to_opening(row: &Row<'_>) -> rusqlite::Result<OpeningRow> {
         created_at: row.get(16)?,
         updated_at: row.get(17)?,
         seq: row.get(18)?,
+        listed: row.get(19)?,
     })
 }
 
@@ -104,8 +107,9 @@ pub fn save(conn: &Connection, o: &OpeningRow) -> rusqlite::Result<i64> {
         "INSERT INTO openings (id, kind, token, title, duration_minutes, calendar_id, time_zone,
              windows, buffer_before_minutes, buffer_after_minutes, min_notice_minutes,
              horizon_days, video_url, suggested, booked_at, booked_event_id, created_at,
-             updated_at, seq)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+             updated_at, seq, listed)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
+             ?20)
          ON CONFLICT (id) DO UPDATE SET title = excluded.title,
              duration_minutes = excluded.duration_minutes, calendar_id = excluded.calendar_id,
              time_zone = excluded.time_zone, windows = excluded.windows,
@@ -114,7 +118,7 @@ pub fn save(conn: &Connection, o: &OpeningRow) -> rusqlite::Result<i64> {
              min_notice_minutes = excluded.min_notice_minutes,
              horizon_days = excluded.horizon_days, video_url = excluded.video_url,
              booked_at = excluded.booked_at, booked_event_id = excluded.booked_event_id,
-             updated_at = excluded.updated_at, seq = excluded.seq",
+             listed = excluded.listed, updated_at = excluded.updated_at, seq = excluded.seq",
         params![
             o.id,
             o.kind.as_str(),
@@ -134,7 +138,8 @@ pub fn save(conn: &Connection, o: &OpeningRow) -> rusqlite::Result<i64> {
             o.booked_event_id,
             o.created_at,
             o.updated_at,
-            seq
+            seq,
+            o.listed
         ],
     )?;
     Ok(seq)
@@ -172,6 +177,16 @@ pub fn opening_by_token(conn: &Connection, token: &str) -> rusqlite::Result<Opti
 pub fn openings(conn: &Connection) -> rusqlite::Result<Vec<OpeningRow>> {
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT {OPENING_COLUMNS} FROM openings ORDER BY created_at DESC, id DESC"
+    ))?;
+    let rows = stmt.query_map([], row_to_opening)?;
+    rows.collect()
+}
+
+/// The templates on the public home page, by title.
+pub fn listed_openings(conn: &Connection) -> rusqlite::Result<Vec<OpeningRow>> {
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT {OPENING_COLUMNS} FROM openings WHERE listed = 1 AND kind = 'template'
+         ORDER BY title COLLATE NOCASE, created_at, id"
     ))?;
     let rows = stmt.query_map([], row_to_opening)?;
     rows.collect()

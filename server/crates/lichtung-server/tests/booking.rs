@@ -788,3 +788,96 @@ async fn page_views_are_rate_limited() {
         StatusCode::TOO_MANY_REQUESTS
     );
 }
+
+#[tokio::test]
+async fn the_home_page_lists_only_templates_marked_listed() {
+    let (t, device) = prepared().await;
+    // Nothing listed: `/` only says what runs here.
+    let r = get_page(&t.s, "/").await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.header("content-type").unwrap().starts_with("text/plain"));
+
+    let hidden = t.template(&device).await;
+    assert_eq!(hidden["listed"], false);
+    let once = t.once(&device).await;
+    assert_eq!(once["listed"], false);
+    let listed = t
+        .create_opening(
+            &device,
+            json!({"kind": "template", "title": "Beratung <offen>", "duration_minutes": 45,
+                   "calendar_id": t.calendar_id, "listed": true,
+                   "video_url": "https://meet.example.org/geheimer-raum"}),
+        )
+        .await;
+    assert_eq!(listed["listed"], true);
+
+    let r = get_page(&t.s, "/?lang=de").await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.header("content-type").unwrap().starts_with("text/html"));
+    assert_eq!(r.header("x-robots-tag"), Some("noindex, nofollow"));
+    let html = r.text();
+    assert!(html.contains("Termin buchen"), "{html}");
+    assert!(html.contains("Beratung &lt;offen&gt;"), "{html}");
+    assert!(html.contains("45 Minuten"), "{html}");
+    assert!(
+        html.contains(&format!("o/{}?lang=de", token_of(&listed))),
+        "{html}"
+    );
+    // Unlisted templates and one-off links stay invisible, and so does
+    // everything but title and length.
+    assert!(!html.contains(token_of(&hidden)), "{html}");
+    assert!(!html.contains(token_of(&once)), "{html}");
+    assert!(!html.contains("Kennenlernen"), "{html}");
+    assert!(!html.contains("geheimer-raum"), "{html}");
+    assert!(!html.contains(t.calendar_id.as_str()), "{html}");
+
+    // Taking it off the home page again.
+    let id = listed["id"].as_str().unwrap();
+    let r =
+        t.s.request(
+            Method::PATCH,
+            &format!("/api/openings/{id}"),
+            Auth::Bearer(&device),
+            Some(json!({"listed": false})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.json()["listed"], false);
+    let r = get_page(&t.s, "/").await;
+    assert!(r.header("content-type").unwrap().starts_with("text/plain"));
+
+    // One-off links never go on the home page.
+    let r =
+        t.s.request(
+            Method::PATCH,
+            &format!("/api/openings/{}", once["id"].as_str().unwrap()),
+            Auth::Bearer(&device),
+            Some(json!({"listed": true})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text());
+    let r =
+        t.s.request(
+            Method::POST,
+            "/api/openings",
+            Auth::Bearer(&device),
+            Some(
+                json!({"kind": "once", "duration_minutes": 30, "calendar_id": t.calendar_id,
+                        "listed": true}),
+            ),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text());
+}
+
+#[tokio::test]
+async fn home_page_views_count_against_the_page_limit() {
+    let s = TestServer::with_config(|c| c.booking_limits.views_per_source = 2).await;
+    for _ in 0..2 {
+        assert_eq!(get_page(&s, "/").await.status, StatusCode::OK);
+    }
+    assert_eq!(
+        get_page(&s, "/").await.status,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}

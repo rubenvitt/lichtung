@@ -170,6 +170,13 @@ public enum OpeningText {
     public static func shareText(_ opening: Opening) -> String {
         opening.url
     }
+
+    /// Öffentliche Startseite mit den festen Links, die dort stehen: die
+    /// Adresse eines Links ohne `o/<token>`; `nil` bei einer fremden Form.
+    public static func homepageURL(of opening: Opening) -> String? {
+        guard let range = opening.url.range(of: "/o/", options: .backwards) else { return nil }
+        return String(opening.url[..<range.lowerBound]) + "/"
+    }
 }
 
 extension Opening {
@@ -185,6 +192,7 @@ extension Opening {
             parts.append("freie Zeiten")
         case .template, .unknown:
             parts.append(OpeningText.windows(windows))
+            if listed { parts.append("auf der Startseite") }
         }
         return parts.joined(separator: " · ")
     }
@@ -410,6 +418,8 @@ public struct OpeningTemplateDraft: Hashable, Sendable {
     public var minNoticeMinutes: Int
     public var horizonDays: Int
     public var videoURL: String
+    /// Auf der öffentlichen Startseite zeigen.
+    public var listed: Bool
 
     /// Neue Vorlage mit den Standardwerten des Vertrags.
     public init(calendarId: String?, timeZone: TimeZone) {
@@ -424,6 +434,7 @@ public struct OpeningTemplateDraft: Hashable, Sendable {
         minNoticeMinutes = Opening.defaultMinNoticeMinutes
         horizonDays = Opening.defaultHorizonDays
         videoURL = ""
+        listed = false
     }
 
     /// Bestehenden Link bearbeiten.
@@ -439,6 +450,7 @@ public struct OpeningTemplateDraft: Hashable, Sendable {
         minNoticeMinutes = opening.minNoticeMinutes
         horizonDays = opening.horizonDays
         videoURL = opening.videoUrl ?? ""
+        listed = opening.listed
     }
 
     static func drafts(_ windows: [Opening.Window]) -> [WindowDraft] {
@@ -505,7 +517,8 @@ public struct OpeningTemplateDraft: Hashable, Sendable {
             calendarId: calendarId, timeZone: timeZone, windows: sortedWindows,
             bufferBeforeMinutes: bufferBeforeMinutes, bufferAfterMinutes: bufferAfterMinutes,
             minNoticeMinutes: minNoticeMinutes, horizonDays: horizonDays,
-            videoUrl: trimmedVideoURL.isEmpty ? nil : trimmedVideoURL
+            videoUrl: trimmedVideoURL.isEmpty ? nil : trimmedVideoURL,
+            listed: listed ? true : nil
         )
     }
 
@@ -532,6 +545,7 @@ public struct OpeningTemplateDraft: Hashable, Sendable {
         if horizonDays != o.horizonDays { p.horizonDays = horizonDays }
         let video = trimmedVideoURL
         if video != (o.videoUrl ?? "") { p.videoUrl = video.isEmpty ? .clear : .set(video) }
+        if listed != o.listed { p.listed = listed }
         return p
     }
 }

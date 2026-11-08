@@ -529,6 +529,12 @@ private struct OpeningTemplateEditor: View {
                     Text("Optional. Die Buchung übernimmt ihn in den Termin.")
                 }
 
+                Section {
+                    Toggle("Auf der Startseite zeigen", isOn: $draft.listed)
+                } footer: {
+                    Text(homepageHint)
+                }
+
                 if let original = draft.original {
                     Section("Link") {
                         Text(original.url)
@@ -594,6 +600,13 @@ private struct OpeningTemplateEditor: View {
             }
         }
         .settingsSheetFrame()
+    }
+
+    /// Wo die Startseite liegt und was sie zeigt.
+    private var homepageHint: String {
+        let anyLink = draft.original ?? session.settings.openingList.templates.first ?? session.settings.openingList.open.first
+        let address = anyLink.flatMap(OpeningText.homepageURL(of:)).map { " (\($0))" } ?? ""
+        return "Die öffentliche Startseite\(address) listet alle festen Links, bei denen das an ist, nur mit Titel und Dauer."
     }
 
     /// Zielkalender zur Auswahl, dazu der bisherige, falls er nicht mehr taugt

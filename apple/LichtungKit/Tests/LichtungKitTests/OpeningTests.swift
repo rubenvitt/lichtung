@@ -412,4 +412,28 @@ struct OpeningTests {
         #expect(p.title == "Abstimmung Projekt")
         #expect(p.durationMinutes == nil)
     }
+
+    // MARK: Startseite
+
+    @Test func templatesCanGoOnTheHomePage() throws {
+        let t = try F.decode(F.templateJSON)
+        #expect(!t.listed, "older servers: not listed")
+        let listed = try F.decode(F.templateJSON.replacingOccurrences(of: #""suggestions_only": false"#, with: #""suggestions_only": false, "listed": true"#))
+        #expect(listed.listed)
+        #expect(listed.summary(calendars: F.calendars).hasSuffix("auf der Startseite"))
+        #expect(!t.summary(calendars: F.calendars).contains("Startseite"))
+        #expect(OpeningText.homepageURL(of: t) == "https://lichtung.example.org/")
+
+        var d = OpeningTemplateDraft(editing: t)
+        d.listed = true
+        #expect(try #require(d.patch(calendars: F.calendars)) == OpeningPatch(listed: true))
+        let text = String(decoding: try APICoding.encoder.encode(OpeningPatch(listed: false)), as: UTF8.self)
+        #expect(text == #"{"listed":false}"#)
+
+        var n = OpeningTemplateDraft(calendarId: "cal_privat", timeZone: F.tz)
+        n.title = "Sprechstunde"
+        #expect(jsonObject(try APICoding.encoder.encode(try #require(n.newOpening(calendars: F.calendars))))["listed"] == nil)
+        n.listed = true
+        #expect(jsonObject(try APICoding.encoder.encode(try #require(n.newOpening(calendars: F.calendars))))["listed"] as? Bool == true)
+    }
 }

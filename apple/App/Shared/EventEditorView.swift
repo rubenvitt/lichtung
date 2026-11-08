@@ -66,6 +66,13 @@ struct EventEditorView: View {
             TextField("Titel", text: $draft.title)
                 .font(.title3)
             TextField("Ort", text: $draft.location)
+            // Link am Termin (LIC-69); ohne Schema wird https:// ergänzt.
+            TextField("Link", text: $draft.url)
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                #endif
             if draft.isSeriesOccurrence {
                 Label("Teil einer Serie", systemImage: "repeat")
                     .foregroundStyle(.secondary)
@@ -211,6 +218,8 @@ struct EventEditorView: View {
                     Text(cal.name).tag(cal.id)
                 }
             }
+            // TRANSP bzw. showAs (LIC-69): frei zählt nicht für Buchungslinks und freie Zeiten.
+            Toggle("Als frei anzeigen", isOn: $draft.showsAsFree)
             TextField("Notiz", text: $draft.notes, axis: .vertical)
                 .lineLimit(3...10)
         }

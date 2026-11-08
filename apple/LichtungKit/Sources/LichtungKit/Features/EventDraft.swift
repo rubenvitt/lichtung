@@ -88,6 +88,10 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
         public var endTimeZoneID: String?
         public var location: String
         public var notes: String
+        /// Link am Termin (URL), leer = keiner (LIC-69).
+        public var url: String
+        /// Belegt oder frei (TRANSP bzw. showAs, LIC-69).
+        public var availability: Availability
         public var alarms: [Int]
         public var repetition: Repetition
         public var calendarId: String
@@ -117,6 +121,9 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
     public private(set) var endTimeZoneID: String?
     public var location: String
     public var notes: String
+    /// Link am Termin; ohne Schema gespeichert als `https://…` (siehe `effectiveURL`).
+    public var url: String
+    public var availability: Availability
     /// Erinnerungen als Vorlauf in Minuten vor Beginn (negativ = danach), sortiert.
     public private(set) var alarms: [Int]
     /// Erinnerungen zu festen Zeitpunkten. Der Editor zeigt sie nur an und
@@ -157,7 +164,7 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
             fields: Fields(
                 title: "", isAllDay: false, start: start, end: start.addingSeconds(max(1, minutes) * 60),
                 timeZoneID: tz.identifier, endTimeZoneID: tz.identifier, location: "", notes: "",
-                alarms: [], repetition: .none, calendarId: calendarId ?? ""
+                url: "", availability: .busy, alarms: [], repetition: .none, calendarId: calendarId ?? ""
             ),
             fixedAlarms: []
         )
@@ -207,6 +214,7 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
         let fields = Fields(
             title: d.title, isAllDay: d.start.isAllDay, start: start, end: end,
             timeZoneID: zone, endTimeZoneID: endZone, location: d.location ?? "", notes: d.notes ?? "",
+            url: d.url ?? "", availability: d.availability,
             alarms: Array(Set(minutes)).sorted(), repetition: repetition, calendarId: occ.calendarId
         )
         let original = Original(
@@ -230,6 +238,8 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
         endTimeZoneID = f.endTimeZoneID
         location = f.location
         notes = f.notes
+        url = f.url
+        availability = f.availability
         alarms = f.alarms
         repetition = f.repetition
         calendarId = f.calendarId
@@ -261,7 +271,8 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
     public var fields: Fields {
         Fields(
             title: title, isAllDay: isAllDay, start: start, end: end, timeZoneID: timeZoneID,
-            endTimeZoneID: endTimeZoneID, location: location, notes: notes, alarms: alarms,
+            endTimeZoneID: endTimeZoneID, location: location, notes: notes, url: url,
+            availability: availability, alarms: alarms,
             repetition: repetition, calendarId: calendarId
         )
     }
@@ -298,7 +309,28 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
         a.title.trimmed != b.title.trimmed
             || startValue(a) != startValue(b) || endValue(a) != endValue(b)
             || a.location.trimmed != b.location.trimmed || a.notes != b.notes
+            || effectiveURL(a.url) != effectiveURL(b.url) || a.availability != b.availability
             || a.alarms != b.alarms || a.repetition != b.repetition || a.calendarId != b.calendarId
+    }
+
+    // MARK: - Link und Verfügbarkeit (LIC-69)
+
+    /// Link, wie er gespeichert wird: getrimmt, leer = keiner, ohne Schema mit
+    /// `https://` davor („example.org/raum“ → „https://example.org/raum“).
+    public var effectiveURL: String? { Self.effectiveURL(url) }
+
+    static func effectiveURL(_ text: String) -> String? {
+        let t = text.trimmed
+        guard !t.isEmpty else { return nil }
+        if t.contains("://") || t.lowercased().hasPrefix("mailto:") || t.lowercased().hasPrefix("tel:") { return t }
+        return "https://" + t
+    }
+
+    /// Schalter „Als frei anzeigen“: Der Termin blockiert weder Buchungslinks
+    /// noch freie Zeiten für Claude.
+    public var showsAsFree: Bool {
+        get { availability == .free }
+        set { availability = newValue ? .free : .busy }
     }
 
     // MARK: - Beginn, Ende, ganztägig
@@ -557,6 +589,7 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
     /// Was das Sichern verhindert, als Satz für die Oberfläche; `nil` = in Ordnung.
     public var validationMessage: String? {
         if calendarId.isEmpty { return "Kein beschreibbarer Kalender ausgewählt." }
+        if let link = effectiveURL, URL(string: link)?.scheme == nil { return "Der Link ist keine gültige Adresse." }
         if isAllDay {
             if end.date < start.date { return "Das Ende liegt vor dem Beginn." }
         } else if endInstant <= startInstant {
@@ -604,7 +637,8 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
         guard let original else {
             let input = EventInput(
                 title: effectiveTitle, location: location.trimmed.nilIfEmpty, notes: notes.trimmed.isEmpty ? nil : notes,
-                start: startValue, end: endValue, recurrence: recurrenceValue(base: nil),
+                url: effectiveURL, start: startValue, end: endValue,
+                availability: availability == .free ? .free : nil, recurrence: recurrenceValue(base: nil),
                 alarms: alarmValues.isEmpty ? nil : alarmValues
             )
             return .create(calendarId: calendarId, event: input)
@@ -618,6 +652,8 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
             c.location = location.trimmed.isEmpty ? .clear : .set(location.trimmed)
         }
         if notes != before.notes { c.notes = notes.trimmed.isEmpty ? .clear : .set(notes) }
+        if effectiveURL != Self.effectiveURL(before.url) { c.url = effectiveURL.map { .set($0) } ?? .clear }
+        if availability != before.availability { c.availability = availability }
         if startValue != Self.startValue(before) || endValue != Self.endValue(before) {
             if scope == .all, isSeriesOccurrence, let seriesStart = original.seriesStart {
                 // „Alle“: Die Serie wandert um so viele Tage wie dieses

@@ -35,6 +35,10 @@ struct EventDetailView: View {
                     if let travel = TravelTime.detailText(for: occurrence, calendar: model.calendar) {
                         Label(travel, systemImage: "car").foregroundStyle(.secondary)
                     }
+                    // LIC-69
+                    if d.availability == .free {
+                        Label("Als frei angezeigt", systemImage: "circle.dashed").foregroundStyle(.secondary)
+                    }
                 }
                 // Terminanfrage: Status und Antworten (LIC-30)
                 if InvitationActions.isInvitation(occurrence) {
@@ -58,6 +62,14 @@ struct EventDetailView: View {
                 }
                 if let location = d.location, !location.isEmpty {
                     Section("Ort") { Text(location) }
+                }
+                // Link am Termin (LIC-69)
+                if let text = d.url, let url = URL(string: text), url.scheme != nil {
+                    Section("Link") {
+                        Link(destination: url) {
+                            Text(text).lineLimit(2).truncationMode(.middle)
+                        }
+                    }
                 }
                 if let notes = d.notes, !notes.isEmpty {
                     Section("Notiz") { Text(notes).textSelection(.enabled) }

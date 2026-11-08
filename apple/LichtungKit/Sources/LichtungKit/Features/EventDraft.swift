@@ -593,7 +593,8 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
     public var validationMessage: String? {
         if calendarId.isEmpty { return "Kein beschreibbarer Kalender ausgewählt." }
         if let link = effectiveURL {
-            if link.count > Self.maxURLLength { return "Der Link ist zu lang (höchstens \(Self.maxURLLength) Zeichen)." }
+            // Der Server zählt Unicode-Scalars (Rust `chars()`), nicht Grapheme.
+            if link.unicodeScalars.count > Self.maxURLLength { return "Der Link ist zu lang (höchstens \(Self.maxURLLength) Zeichen)." }
             if URL(string: link)?.scheme == nil { return "Der Link ist keine gültige Adresse." }
         }
         if isAllDay {

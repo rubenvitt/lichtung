@@ -9,7 +9,7 @@ use lichtung_server::writes::{Origin, WriteOutcome};
 use serde_json::{json, Value};
 
 use common::dav::{
-    invitation, setup, setup_with, single, FakeDav, Setup, CALENDAR, HOLIDAYS, USER, WORK,
+    invitation, setup, setup_with, single, vcal, FakeDav, Setup, CALENDAR, HOLIDAYS, USER, WORK,
 };
 
 fn app_origin() -> Origin {
@@ -326,6 +326,35 @@ async fn split_with_new_rule_keeps_the_remaining_count() {
             "{sent}: {r}"
         );
     }
+}
+
+#[tokio::test]
+async fn rdate_only_series_keeps_its_dates_on_edit() {
+    // A series of RDATEs alone: without an RRULE `edit_event` drops the
+    // dates, so the sent ones go back in even when unchanged (LIC-61).
+    let ics = vcal(
+        "BEGIN:VEVENT\r\nUID:kurs@example.org\r\nDTSTAMP:20261020T070000Z\r\n\
+         DTSTART;TZID=Europe/Berlin:20261103T180000\r\n\
+         DTEND;TZID=Europe/Berlin:20261103T190000\r\n\
+         RDATE;TZID=Europe/Berlin:20261110T180000,20261124T180000\r\n\
+         SUMMARY:Kurs\r\nEND:VEVENT\r\n",
+    );
+    let t = setup_with(|dav| dav.put("kurs.ics", &ics)).await;
+    t.sync().await;
+    let ev = t.event_by_uid("kurs@example.org").await;
+    let r = t
+        .mutate(json!({
+            "id": "m-rdates", "op": "update_event", "event_id": ev["id"],
+            "base_version": ev["version"], "scope": "all",
+            "changes": {"title": "Kurs neu", "recurrence": ev["recurrence"]}
+        }))
+        .await;
+    assert_eq!(r["status"], "applied", "{r}");
+    let (_, _, data) = t.dav.find_uid(CALENDAR, "kurs@example.org").unwrap();
+    let data = unfold(&data);
+    assert!(data.contains("SUMMARY:Kurs neu"), "{data}");
+    assert!(data.contains("20261110T180000"), "{data}");
+    assert!(data.contains("20261124T180000"), "{data}");
 }
 
 #[tokio::test]

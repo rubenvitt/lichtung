@@ -20,6 +20,7 @@ struct LichtungApp: App {
         WindowGroup {
             SessionRootView()
                 .environment(session)
+                .tint(Theme.accent)
         }
         #if os(macOS)
         .commands {
@@ -35,6 +36,7 @@ struct LichtungApp: App {
             SettingsView()
                 .environment(session)
                 .environment(session.model)
+                .tint(Theme.accent)
         }
         #endif
     }
@@ -60,7 +62,11 @@ struct SessionRootView: View {
     private var content: some View {
         switch session.stage {
         case .starting:
-            ProgressView()
+            VStack(spacing: 16) {
+                LichtungMark(size: 64)
+                ProgressView().controlSize(.small)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .signedOut:
             LoginView()
         case .demo, .server:
@@ -95,13 +101,15 @@ struct SessionRootView: View {
             SessionBanner(
                 systemImage: "person.crop.circle.badge.exclamationmark",
                 text: "Nicht mehr angemeldet. Änderungen bleiben auf dem Gerät.",
-                action: "Neu anmelden"
+                action: "Neu anmelden",
+                tint: Theme.now
             ) { showsLogin = true }
         } else if session.stage == .demo {
             SessionBanner(
                 systemImage: "theatermasks",
                 text: "Demo mit erfundenen Terminen.",
-                action: "Mit Server verbinden"
+                action: "Mit Server verbinden",
+                tint: Theme.sun
             ) { session.leaveDemo() }
         }
     }
@@ -112,22 +120,34 @@ struct SessionBanner: View {
     let systemImage: String
     let text: String
     let action: String
+    var tint: Color = Theme.accent
     let perform: @MainActor () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(tint)
             Text(text)
                 .lineLimit(2)
             Spacer(minLength: 8)
             Button(action) { perform() }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .tint(tint)
                 .controlSize(.small)
         }
         .font(.callout)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(.bar)
+        .background {
+            ZStack {
+                Rectangle().fill(.bar)
+                Rectangle().fill(tint.opacity(0.12))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(tint.opacity(0.3)).frame(height: 0.5)
+        }
     }
 }
 

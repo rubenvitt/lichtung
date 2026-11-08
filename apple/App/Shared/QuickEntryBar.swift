@@ -22,40 +22,106 @@ struct QuickEntryBar: View {
         QuickEntryParser(timeZone: model.timeZone, defaultDurationMinutes: newEventMinutes, calendars: choices).parse(text, now: now)
     }
 
+    private var isEmpty: Bool { text.trimmingCharacters(in: .whitespaces).isEmpty }
+
     var body: some View {
         let now = Date()
         let entry = parse(now: now)
         let preview = QuickEntryPreview(entry, now: now, timeZone: model.timeZone, calendars: choices)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             if !text.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(preview.title).font(.headline)
-                    Label(preview.when, systemImage: "clock")
-                    if let r = preview.recurrence { Label(r, systemImage: "repeat") }
-                    if let l = preview.location { Label(l, systemImage: "mappin.and.ellipse") }
-                    Label(preview.calendarName ?? model.writableCalendars.first?.name ?? "Kein Kalender", systemImage: "calendar")
-                }
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .transition(.opacity)
+                previewCard(preview, calendarId: entry.calendarID ?? model.defaultCalendarId)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            HStack {
-                TextField("Zahnarzt Di 14 Uhr …", text: $text)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focused)
-                    .onSubmit(submit)
-                    .accessibilityLabel("Neuer Termin als Satz")
-                Button(action: submit) {
-                    Image(systemName: "plus.circle.fill").font(.title2)
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(focused ? Theme.accent : Color.secondary)
+                        .accessibilityHidden(true)
+                    TextField("Zahnarzt Di 14 Uhr …", text: $text)
+                        .textFieldStyle(.plain)
+                        .focused($focused)
+                        .onSubmit(submit)
+                        .accessibilityLabel("Neuer Termin als Satz")
+                    if !text.isEmpty {
+                        Button {
+                            text = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Eingabe leeren")
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background {
+                    Capsule().fill(.background.secondary)
+                }
+                .overlay {
+                    Capsule().strokeBorder(focused ? Theme.accent.opacity(0.7) : Theme.hairline, lineWidth: focused ? 1.5 : 1)
+                }
+                // Leer: Editor öffnen. Mit Text: den Satz als Termin anlegen.
+                Button(action: primaryAction) {
+                    Image(systemName: isEmpty ? "plus" : "arrow.up")
+                        .font(.body.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(Theme.accent))
+                        .shadow(color: Theme.accent.opacity(0.35), radius: 6, y: 3)
+                        .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(.plain)
-                .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
                 .keyboardShortcut(.return, modifiers: .command)
-                .accessibilityLabel("Termin anlegen")
+                .help(isEmpty ? "Neuer Termin" : "Termin anlegen (⌘↩)")
+                .accessibilityLabel(isEmpty ? "Neuer Termin" : "Termin anlegen")
             }
         }
-        .padding(10)
-        .animation(.default, value: text.isEmpty)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .animation(.snappy(duration: 0.25), value: text.isEmpty)
+    }
+
+    /// Vorschau des Satzes: Titel groß, darunter Zeit, Wiederholung, Ort, Kalender.
+    private func previewCard(_ preview: QuickEntryPreview, calendarId: String?) -> some View {
+        let fallbackName: String? = calendarId.flatMap { model.state.calendars[$0]?.name }
+        let calendarName: String = preview.calendarName ?? fallbackName ?? "Kein Kalender"
+        let color: Color = calendarId.map { model.color(for: $0) } ?? Theme.accent
+        return HStack(alignment: .top, spacing: 10) {
+            CalendarBar(color: color)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(preview.title.isEmpty ? "Neuer Termin" : preview.title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Label(preview.when, systemImage: "clock")
+                if let r = preview.recurrence { Label(r, systemImage: "repeat") }
+                if let l = preview.location { Label(l, systemImage: "mappin.and.ellipse") }
+                Label(calendarName, systemImage: "calendar")
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .fill(.background.secondary)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .strokeBorder(Theme.hairline, lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func primaryAction() {
+        if isEmpty {
+            model.newEvent()
+        } else {
+            submit()
+        }
     }
 
     private func submit() {

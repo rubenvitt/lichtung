@@ -149,7 +149,7 @@ struct EventEditorView: View {
                     Text(QuickEntryPreview.weekdayShort[day.rawValue - 1])
                         .frame(maxWidth: .infinity, minHeight: 28)
                         .background(
-                            selected ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.1),
+                            selected ? Theme.accent.opacity(0.25) : Color.secondary.opacity(0.1),
                             in: RoundedRectangle(cornerRadius: 6)
                         )
                 }

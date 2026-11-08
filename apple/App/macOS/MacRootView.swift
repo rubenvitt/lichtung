@@ -35,6 +35,7 @@ struct MacRootView: View {
                 QuickEntryBar()
             }
             .navigationTitle(title)
+            .navigationSubtitle(subtitle)
             .toolbar {
                 // ⌘← und ⌘→ liegen im Menü „Darstellung“ (LIC-50): Als Kürzel
                 // der Toolbar fingen sie in Textfeldern den Sprung an
@@ -74,6 +75,11 @@ struct MacRootView: View {
     private var title: String {
         let d = model.selectedDay
         return model.viewMode == .year ? "\(d.year)" : MonthGrid.title(year: d.year, month: d.month)
+    }
+
+    /// „KW 45“ unter dem Monat; im Jahr nichts.
+    private var subtitle: String {
+        model.viewMode == .year ? "" : "KW \(MonthGrid.isoWeek(model.selectedDay))"
     }
 
     private var weekStart: LocalDate {
@@ -182,20 +188,34 @@ struct SidebarView: View {
 
     var body: some View {
         @Bindable var model = model
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             MiniMonthView(year: model.selectedDay.year, month: model.selectedDay.month)
+                .padding(12)
+                .background {
+                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                        .fill(.background.secondary)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                        .strokeBorder(Theme.hairline, lineWidth: 1)
+                }
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
-            Picker("Kalender", selection: $model.calendarSelection) {
-                Text("Alle Kalender").tag(CalendarQuery.Selection.visible)
-                ForEach(model.state.calendarSets.values.sorted { $0.position < $1.position }) { set in
-                    Text(set.name).tag(CalendarQuery.Selection.set(set.id))
+            VStack(alignment: .leading, spacing: 4) {
+                SectionLabel(text: "Kalender")
+                Picker("Kalender", selection: $model.calendarSelection) {
+                    Text("Alle Kalender").tag(CalendarQuery.Selection.visible)
+                    ForEach(model.state.calendarSets.values.sorted { $0.position < $1.position }) { set in
+                        Text(set.name).tag(CalendarQuery.Selection.set(set.id))
+                    }
                 }
+                .labelsHidden()
             }
-            .labelsHidden()
-            .padding(.horizontal, 10)
-            Divider()
+            .padding(.horizontal, 14)
             if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                SectionLabel(text: "Als Nächstes")
+                    .padding(.horizontal, 14)
+                    .padding(.top, 4)
                 // Ansicht A in der Seitenleiste: die nächsten Termine.
                 AgendaView(days: 14, showsTicker: false)
             } else {
@@ -217,6 +237,15 @@ struct YearView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 24)], spacing: 24) {
                 ForEach(1...12, id: \.self) { month in
                     MiniMonthView(year: year, month: month)
+                        .padding(12)
+                        .background {
+                            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                                .fill(.background.secondary)
+                        }
+                        .overlay {
+                            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                                .strokeBorder(Theme.hairline, lineWidth: 1)
+                        }
                 }
             }
             .padding(20)

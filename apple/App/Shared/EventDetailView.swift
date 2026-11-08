@@ -182,12 +182,35 @@ private struct EventDetailHeader: View {
                     Text(AgendaBuilder.timeText(occurrence, calendar: model.calendar))
                         .font(Theme.number(.subheadline))
                         .foregroundStyle(.secondary)
+                    // Mehrtägig: auch das Ende nennen, sonst fehlt es im Kopf.
+                    if let until = untilText {
+                        Text(until)
+                            .font(Theme.number(.subheadline))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             Spacer(minLength: 0)
         }
         .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
+    }
+}
+
+extension EventDetailHeader {
+    /// „bis Mo 26. Okt. 10:00“ (ganztägig ohne Uhrzeit), wenn der Termin an
+    /// einem späteren Tag endet; sonst `nil`.
+    fileprivate var untilText: String? {
+        let cal = model.calendar
+        let startDay = LocalDate(occurrence.start, calendar: cal)
+        // Ganztägig ist das Ende exklusiv (Mitternacht danach).
+        let lastMoment: Date = occurrence.isAllDay ? occurrence.end.addingTimeInterval(-1) : occurrence.end
+        let endDay = LocalDate(lastMoment, calendar: cal)
+        guard endDay > startDay else { return nil }
+        let heading = AgendaBuilder.heading(endDay, today: model.today)
+        if occurrence.isAllDay { return "bis \(heading)" }
+        let c = cal.dateComponents([.hour, .minute], from: occurrence.end)
+        return "bis \(heading), " + String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
     }
 }
 
@@ -205,9 +228,16 @@ private struct AttendeeRow: View {
                 .background(Circle().fill(Theme.accent.opacity(0.14)))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
-                Text(name).lineLimit(1)
+                // Lange Namen und Adressen umbrechen statt abschneiden.
+                Text(name)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
                 if let detail {
-                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
                 }
             }
         }

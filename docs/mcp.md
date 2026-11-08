@@ -72,10 +72,10 @@ Die genauen Schemas samt Beschreibungen liefert `tools/list`; sie sind in [`serv
 **Regel ändern** (`recurrence` bei `update_event`, nur mit `scope` `all` oder `this_and_following`): `COUNT` und `UNTIL` vergleicht der Server mit der bisherigen Regel der Serie (LIC-57).
 - **`COUNT` unverändert** zählt weiter die ganze Serie. Bei `this_and_following` endet die alte Serie vor dem gewählten Vorkommen, die neue bekommt die Restzahl. Wer die bisherige Gesamtzahl oder die Restzahl schickt, bekommt dasselbe Ergebnis; nichts wird doppelt abgezogen.
 - **`COUNT` geändert** gilt wie angegeben, bei `this_and_following` ab dem gewählten Vorkommen.
-- **`UNTIL` unverändert** wandert mit, wenn `start` die Serie verschiebt (um dieselbe Differenz). Bei `this_and_following` behält die neue Serie das bisherige Ende.
+- **`UNTIL` unverändert** gilt weiter für die Serie, bei `this_and_following` für die neue. Verschiebt `start` die Serie, wandert es um dieselbe Differenz mit (z. B. Beginn 09:00 → 11:00: `UNTIL` zwei Stunden später, damit das letzte Vorkommen nicht wegfällt). Nur ohne Verschiebung bleibt der Wert gleich.
 - **`UNTIL` geändert** gilt wie angegeben.
 
-Beispiel: Serie `FREQ=WEEKLY;COUNT=10`, Teilen ab dem 4. Vorkommen mit `FREQ=WEEKLY;BYDAY=TU;COUNT=10` ergibt alte Serie mit 3 und neue mit 7 Terminen; mit `COUNT=5` hat die neue Serie 5 Termine.
+Beispiel: Serie `FREQ=WEEKLY;COUNT=10`, Teilen ab dem 4. Vorkommen mit `FREQ=WEEKLY;INTERVAL=2;COUNT=10` ergibt alte Serie mit 3 und neue mit 7 Terminen; mit `COUNT=5` hat die neue Serie 5 Termine.
 
 **Freie Zeiten** nach den Regeln der Openings (Spec Abschnitt 6): Es zählen die gewählten Kalender, ohne Auswahl alle mit `openings_busy`. Abgesagte Termine, Termine mit `availability: free` und eigene abgelehnte Einladungen blockieren nicht; ganztägige Termine nur in Kalendern mit `all_day_blocks`. Platzhalter von Einmal-Links („Reserviert: …“, siehe [`api/openings.md`](api/openings.md)) zählen immer als belegt, auch außerhalb der gewählten Kalender. `buffer_minutes` hält vor und nach jedem Termin frei. Liegen zu viele Termine im Zeitraum, kommt `too_many_events` statt eines unsicheren Ergebnisses.
 

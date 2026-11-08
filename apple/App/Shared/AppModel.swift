@@ -37,6 +37,9 @@ final class AppModel {
     var pendingDelete: Occurrence?
     /// Zuletzt kopierter Termin (⌘C, Kontextmenü „Kopieren“).
     var clipboard: EventClipboard?
+    /// Plant Erinnerungen als lokale Benachrichtigungen ein (LIC-68). Nur mit
+    /// Server, der Demo-Modus erinnert nicht an erfundene Termine.
+    @ObservationIgnored var schedulesReminders = false
 
     init(engine: SyncEngine, timeZone: TimeZone = .current) {
         self.engine = engine
@@ -50,7 +53,30 @@ final class AppModel {
         for await snapshot in await engine.updates() {
             state = snapshot
             refreshHighlight() // LIC-24
+            scheduleReminders()
+            openRequestedReminder()
         }
+    }
+
+    // MARK: Erinnerungen (LIC-68)
+
+    /// Erinnerungen nach dem aktuellen Stand neu einplanen (nur mit Server).
+    func scheduleReminders() {
+        guard schedulesReminders else { return }
+        ReminderScheduler.shared.update(query)
+    }
+
+    /// Öffnet den Termin einer getippten Erinnerung. Bleibt offen, bis der
+    /// Stand den Termin kennt (Kaltstart über die Benachrichtigung).
+    func openRequestedReminder() {
+        guard let request = ReminderScheduler.shared.openRequest else { return }
+        let window = DateInterval(start: request.start.addingTimeInterval(-40 * 24 * 3600),
+                                  end: request.start.addingTimeInterval(40 * 24 * 3600))
+        let candidates = query.occurrences(in: window, selection: .visible)
+        guard let occ = candidates.first(where: { $0.id == request.occurrenceId })
+            ?? candidates.first(where: { $0.eventId == request.eventId && $0.end > request.start }) else { return }
+        ReminderScheduler.shared.openRequest = nil
+        show(occ)
     }
 
     /// App ohne Server: erfundene Termine, Änderungen bleiben lokal in der Outbox.

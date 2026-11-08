@@ -9,12 +9,14 @@ struct LichtungApp: App {
     /// Anmeldung, Demo oder Server (LIC-43). Hält das aktuelle `AppModel`.
     @State private var session = AppSession()
 
-    #if os(macOS)
     init() {
+        #if os(macOS)
         // Sparkle früh starten, damit er im Hintergrund nach Updates sucht.
         _ = AppUpdater.shared
+        #endif
+        // Vor dem ersten Tipp auf eine Erinnerung (LIC-68).
+        ReminderScheduler.shared.install()
     }
-    #endif
 
     var body: some Scene {
         WindowGroup {
@@ -47,12 +49,16 @@ struct SessionRootView: View {
     @State private var showsLogin = false
     /// IANA-ID der zweiten Zeitzone aus den Einstellungen, leer heißt keine.
     @AppStorage("secondaryTimeZone") private var secondaryZoneID = ""
+    /// Erinnerungen als Mitteilungen (LIC-68).
+    @AppStorage(ReminderScheduler.enabledKey) private var remindersEnabled = true
 
     var body: some View {
         content
             // SSE nur, solange die App offen ist (Vertrag §5).
             .onChange(of: scenePhase, initial: true) { _, phase in
                 session.setActive(phase != .background)
+                // Beim Öffnen neu einplanen: Die Zeit ist weitergelaufen (LIC-68).
+                if phase == .active { session.model.scheduleReminders() }
             }
     }
 
@@ -76,6 +82,12 @@ struct SessionRootView: View {
                 // sie beim Entstehen selbst, hier folgen nur Änderungen.
                 .onChange(of: secondaryZoneID) { _, id in
                     model.secondaryTimeZone = TimeZoneCatalog.zone(fromStored: id)
+                }
+                // Erinnerungen (LIC-68): Schalter in den Einstellungen, Tipp auf
+                // eine Benachrichtigung öffnet den Termin.
+                .onChange(of: remindersEnabled) { _, _ in model.scheduleReminders() }
+                .onChange(of: ReminderScheduler.shared.openRequest, initial: true) { _, _ in
+                    model.openRequestedReminder()
                 }
                 .safeAreaInset(edge: .top, spacing: 0) { banner }
                 .sheet(isPresented: $showsLogin) {

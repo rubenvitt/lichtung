@@ -17,6 +17,8 @@ struct GeneralSettingsView: View {
     /// Dauer neuer Termine in Minuten, 0 = Standard (LIC-53). `AppModel.newEventMinutes`
     /// und die Schnelleingabe lesen sie über `NewEventDuration.minutes(stored:)`.
     @AppStorage(NewEventDuration.storageKey) private var newEventMinutes = 0
+    /// Erinnerungen als Mitteilungen (LIC-68), liest `ReminderScheduler`.
+    @AppStorage(ReminderScheduler.enabledKey) private var remindersEnabled = true
     @State private var choosingZone = false
     @State private var confirmsSignOut = false
 
@@ -62,6 +64,8 @@ struct GeneralSettingsView: View {
 
             newEventsSection
 
+            remindersSection
+
             if session.stage == .server {
                 Section {
                     Button("Abmelden …", role: .destructive) { confirmsSignOut = true }
@@ -84,6 +88,22 @@ struct GeneralSettingsView: View {
         } message: {
             Text(signOutMessage)
         }
+    }
+
+    /// Erinnerungen der Termine als lokale Mitteilungen (LIC-68).
+    private var remindersSection: some View {
+        Section {
+            Toggle("Erinnerungen als Mitteilungen", isOn: $remindersEnabled)
+            if remindersEnabled, ReminderScheduler.shared.permission == .denied {
+                Label("Mitteilungen sind für Lichtung in den Systemeinstellungen ausgeschaltet.", systemImage: "bell.slash")
+                    .foregroundStyle(.orange)
+            }
+        } header: {
+            Text("Erinnerungen")
+        } footer: {
+            Text("Lichtung erinnert an die nächsten sieben Tage, mit den Erinnerungen, die am Termin stehen. Termine, die Claude anlegt, erinnern, sobald die App sie einmal geladen hat.")
+        }
+        .task { await ReminderScheduler.shared.refreshPermission() }
     }
 
     /// Standardkalender (LIC-47) und Standarddauer (LIC-53) für neue Termine.

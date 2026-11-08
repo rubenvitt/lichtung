@@ -699,18 +699,11 @@ pub fn build_object(
     CalendarObject::from_component(calendar).expect("VCALENDAR")
 }
 
-/// Writes RRULE, RDATE and EXDATE of a series master (replacing them).
+/// Writes RRULE, RDATE and EXDATE of a new series master (replacing them).
+/// On an edit, `lichtung_ical::edit_event` sets the RRULE (LIC-57) and
+/// `apply_extras` the dates (LIC-61).
 pub fn set_recurrence<C: std::borrow::BorrowMut<Component>>(ev: &mut Event<C>, r: &Recurrence) {
     ev.set_rrule(r.rrule.as_ref());
-    set_recurrence_dates(ev, r);
-}
-
-/// Writes RDATE and EXDATE of a series master (replacing them), not the
-/// RRULE: on an edit, `lichtung_ical::edit_event` sets that (LIC-57).
-pub fn set_recurrence_dates<C: std::borrow::BorrowMut<Component>>(
-    ev: &mut Event<C>,
-    r: &Recurrence,
-) {
     let rdates: Vec<RDate> = r.rdates.iter().cloned().map(RDate::Time).collect();
     ev.set_rdates(&rdates);
     ev.set_exdates(&r.exdates);

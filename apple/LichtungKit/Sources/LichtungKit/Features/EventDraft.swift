@@ -319,7 +319,10 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
     /// `https://` davor („example.org/raum“ → „https://example.org/raum“).
     public var effectiveURL: String? { Self.effectiveURL(url) }
 
-    static func effectiveURL(_ text: String) -> String? {
+    /// Höchstlänge eines Links, wie der Server sie annimmt (`MAX_URL_CHARS`).
+    public static let maxURLLength = 2_000
+
+    public static func effectiveURL(_ text: String) -> String? {
         let t = text.trimmed
         guard !t.isEmpty else { return nil }
         if t.contains("://") || t.lowercased().hasPrefix("mailto:") || t.lowercased().hasPrefix("tel:") { return t }
@@ -589,7 +592,10 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
     /// Was das Sichern verhindert, als Satz für die Oberfläche; `nil` = in Ordnung.
     public var validationMessage: String? {
         if calendarId.isEmpty { return "Kein beschreibbarer Kalender ausgewählt." }
-        if let link = effectiveURL, URL(string: link)?.scheme == nil { return "Der Link ist keine gültige Adresse." }
+        if let link = effectiveURL {
+            if link.count > Self.maxURLLength { return "Der Link ist zu lang (höchstens \(Self.maxURLLength) Zeichen)." }
+            if URL(string: link)?.scheme == nil { return "Der Link ist keine gültige Adresse." }
+        }
         if isAllDay {
             if end.date < start.date { return "Das Ende liegt vor dem Beginn." }
         } else if endInstant <= startInstant {

@@ -783,3 +783,15 @@ struct EventDraftLinkAvailabilityTests {
         #expect(!draft.hasChanges)
     }
 }
+
+@Suite("Termin-Editor: Länge des Links (LIC-69)")
+struct EventDraftLinkLengthTests {
+    @Test func tooLongLinkBlocksSaving() {
+        var draft = EventDraft.new(on: DraftFixtures.day(3), now: SyncFixtures.now, calendarId: "cal_1", deviceTimeZone: DraftFixtures.tz)
+        draft.url = "https://example.org/" + String(repeating: "a", count: EventDraft.maxURLLength)
+        #expect(!draft.canSave)
+        #expect(draft.validationMessage?.contains("zu lang") == true)
+        draft.url = "https://example.org/kurz"
+        #expect(draft.canSave)
+    }
+}

@@ -64,10 +64,17 @@ struct EventDetailView: View {
                     Section("Ort") { Text(location) }
                 }
                 // Link am Termin (LIC-69)
-                if let text = d.url, let url = URL(string: text), url.scheme != nil {
+                // Ohne Schema (z. B. „example.org/raum“ aus einem anderen
+                // Programm) wie im Editor mit https:// davor; was sich nicht
+                // öffnen lässt, steht als Text da.
+                if let text = d.url?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
                     Section("Link") {
-                        Link(destination: url) {
-                            Text(text).lineLimit(2).truncationMode(.middle)
+                        if let url = EventDraft.effectiveURL(text).flatMap(URL.init(string:)), url.scheme != nil {
+                            Link(destination: url) {
+                                Text(text).lineLimit(2).truncationMode(.middle)
+                            }
+                        } else {
+                            Text(text).textSelection(.enabled)
                         }
                     }
                 }

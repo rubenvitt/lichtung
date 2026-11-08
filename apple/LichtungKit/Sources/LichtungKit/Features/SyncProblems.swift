@@ -95,6 +95,6 @@ extension SyncState {
 
     static func timestamp(_ d: Date, _ cal: Calendar) -> String {
         let c = cal.dateComponents([.day, .month, .hour, .minute], from: d)
-        return "\(c.day!).\(c.month!)., \(c.hour!):" + String(format: "%02d", c.minute!)
+        return "\(c.day ?? 0).\(c.month ?? 0)., \(c.hour ?? 0):" + String(format: "%02d", c.minute ?? 0)
     }
 }

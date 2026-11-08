@@ -794,4 +794,13 @@ struct EventDraftLinkLengthTests {
         draft.url = "https://example.org/kurz"
         #expect(draft.canSave)
     }
+
+    @Test func lengthCountsUnicodeScalarsLikeTheServer() {
+        var draft = EventDraft.new(on: DraftFixtures.day(3), now: SyncFixtures.now, calendarId: "cal_1", deviceTimeZone: DraftFixtures.tz)
+        // „e“ plus kombinierender Akut: ein Graphem, zwei Scalars.
+        let combining = String(repeating: "e\u{0301}", count: 1_000)
+        draft.url = "https://example.org/" + combining
+        #expect(draft.effectiveURL!.count < EventDraft.maxURLLength)
+        #expect(!draft.canSave)
+    }
 }

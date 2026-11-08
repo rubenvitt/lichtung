@@ -30,10 +30,10 @@ struct DayGridView: View {
     @Environment(AppModel.self) private var model
     let start: LocalDate
     let dayCount: Int
-    var hourHeight: CGFloat = 48
+    var hourHeight: CGFloat = 56
     var visibleAllDayLanes = 3
 
-    private let gutter: CGFloat = 44
+    private let gutter: CGFloat = 48
     /// Breite der Spalte für die zweite Zeitzone (LIC-42).
     private let zoneGutter: CGFloat = 36
     /// Sichtbarer Ausschnitt und automatisches Scrollen beim Ziehen (LIC-47).
@@ -112,24 +112,30 @@ struct DayGridView: View {
                     .minimumScaleFactor(0.6)
                     .frame(width: zoneGutter)
             }
-            Text("KW \(MonthGrid.isoWeek(start))")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .frame(width: gutter)
+            VStack(spacing: 0) {
+                Text("KW")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                Text(verbatim: "\(MonthGrid.isoWeek(start))")
+                    .font(Theme.number(.caption, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: gutter)
+            .accessibilityElement(children: .combine)
             ForEach(days, id: \.self) { day in
-                let isToday = day == model.today
-                VStack(spacing: 0) {
-                    Text(QuickEntryPreview.weekdayShort[day.weekday.rawValue - 1]).font(.caption)
-                    Text("\(day.day)").font(.headline)
-                }
-                .foregroundStyle(isToday ? Color.accentColor : Color.primary)
-                .frame(maxWidth: .infinity)
-                .background { selectedDayMarker(day) }
-                .contentShape(Rectangle())
-                .onTapGesture { model.selectedDay = day }
+                DayHeaderCell(
+                    day: day,
+                    isToday: day == model.today,
+                    isSelected: day == model.selectedDay,
+                    isWeekend: day.weekday.rawValue >= 6
+                )
+                    .frame(maxWidth: .infinity)
+                    .background { selectedDayMarker(day) }
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.selectedDay = day }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 
     /// Mac: gewählter Tag der Woche (Ziel für Einfügen und „Neuer Termin“, LIC-24).
@@ -137,7 +143,8 @@ struct DayGridView: View {
     private func selectedDayMarker(_ day: LocalDate) -> some View {
         #if os(macOS)
         if dayCount > 1 && day == model.selectedDay {
-            RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.12))
+            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.accent.opacity(0.10))
+                .padding(.horizontal, 2)
         }
         #endif
     }
@@ -147,12 +154,15 @@ struct DayGridView: View {
     private var hourLabels: some View {
         VStack(spacing: 0) {
             ForEach(0..<24, id: \.self) { hour in
-                Text(String(format: "%02d", hour))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: gutter, height: hourHeight, alignment: .topTrailing)
-                    .padding(.trailing, 4)
-                    .offset(y: -6)
+                // 0 Uhr oben am Rand bliebe abgeschnitten.
+                Text(hour == 0 ? "" : String(format: "%02d:00", hour))
+                    .font(Theme.number(.caption2, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(width: gutter - 6, height: hourHeight, alignment: .topTrailing)
+                    .padding(.trailing, 6)
+                    .offset(y: -7)
                     .id(hour)
             }
         }
@@ -315,8 +325,9 @@ struct DayColumn: View {
             let width = geo.size.width
             let height = geo.size.height
             ZStack(alignment: .topLeading) {
-                // Leere Fläche: hier beginnt das Anlegen per Ziehen.
-                Color.clear
+                // Leere Fläche: hier beginnt das Anlegen per Ziehen. Wochenende
+                // und heute (in mehrtägigen Ansichten) leicht getönt.
+                columnFill
                     .frame(width: width, height: height)
                     .contentShape(Rectangle())
                     .gesture(createGesture(height: height))
@@ -325,9 +336,14 @@ struct DayColumn: View {
                     })
                 ForEach(0..<24, id: \.self) { hour in
                     Rectangle()
-                        .fill(Color.secondary.opacity(0.15))
+                        .fill(Theme.hairline)
                         .frame(width: width, height: 0.5)
                         .offset(y: CGFloat(hour) * hourHeight)
+                        .allowsHitTesting(false)
+                    Rectangle()
+                        .fill(Theme.hairlineFaint)
+                        .frame(width: width, height: 0.5)
+                        .offset(y: (CGFloat(hour) + 0.5) * hourHeight)
                         .allowsHitTesting(false)
                 }
                 if let zoneLabels {
@@ -355,10 +371,9 @@ struct DayColumn: View {
                 slotMenuAnchor(width: width, height: height)
                 #endif
                 if let line = TimelineLayout.nowLine(Date(), day: day, calendar: model.calendar) {
-                    Rectangle()
-                        .fill(Color.red)
-                        .frame(width: width, height: 1.5)
-                        .offset(y: height * line)
+                    let lineY: CGFloat = height * CGFloat(line) - NowLine.knob / 2
+                    NowLine(width: width)
+                        .offset(y: lineY)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
@@ -366,7 +381,7 @@ struct DayColumn: View {
             .frame(width: width, height: height, alignment: .topLeading)
         }
         .overlay(alignment: .leading) {
-            Rectangle().fill(Color.secondary.opacity(0.15)).frame(width: 0.5)
+            Rectangle().fill(Theme.hairline).frame(width: 0.5)
         }
         // Beim Ziehen in einen Nachbartag liegt die Vorschau über den anderen Spalten.
         .zIndex(drag == nil && settling == nil ? 0 : 1)
@@ -412,6 +427,14 @@ struct DayColumn: View {
         } message: { pending in
             Text("„\(pending.occurrence.title)“ gehört zu einer Serie. Welche Termine sollen sich ändern?")
         }
+    }
+
+    /// Grund der Spalte: Wochenende gedämpft, heute zart grün (nur mit
+    /// mehreren Tagen; in der Tagesansicht bliebe es eine Fläche ohne Aussage).
+    private var columnFill: Color {
+        if dayCount > 1 && day == model.today { return Theme.accent.opacity(0.05) }
+        if day.weekday.rawValue >= 6 { return Theme.wash }
+        return Color.clear
     }
 
     // MARK: Blöcke
@@ -792,12 +815,14 @@ struct DayColumn: View {
     private func preview(width: CGFloat, height: CGFloat) -> some View {
         if let target = previewTarget(width: width, height: height),
            let frame = GridInteraction.frame(of: target.interval, day: day.adding(days: target.columnOffset), calendar: model.calendar) {
-            let color = target.calendarId.map { model.color(for: $0) } ?? Color.accentColor
-            RoundedRectangle(cornerRadius: 4)
+            let color = target.calendarId.map { model.color(for: $0) } ?? Theme.accent
+            RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous)
                 .fill(color.opacity(0.3))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 4).strokeBorder(color, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous)
+                        .strokeBorder(color, style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
                 }
+                .shadow(color: color.opacity(0.3), radius: 8, y: 4)
                 .overlay(alignment: .topLeading) {
                     Text(GridInteraction.timeText(target.interval, calendar: model.calendar))
                         .font(.caption2.monospacedDigit().weight(.semibold))
@@ -822,8 +847,8 @@ private struct ResizeHandle: View {
             .contentShape(Rectangle())
             .overlay {
                 Capsule()
-                    .fill(Color.secondary.opacity(0.5))
-                    .frame(width: 16, height: 3)
+                    .fill(Color.primary.opacity(0.25))
+                    .frame(width: 18, height: 3)
             }
             #if os(macOS)
             .onHover { inside in
@@ -914,7 +939,7 @@ private struct TravelBlockView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 4).fill(color.opacity(0.08))
+                RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous).fill(color.opacity(0.08))
                 Canvas { context, size in
                     var path = Path()
                     var x = -size.height
@@ -934,7 +959,7 @@ private struct TravelBlockView: View {
                         .padding(.vertical, 1)
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous))
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Reisezeit \(TravelTime.label(minutes: minutes))")
@@ -946,27 +971,49 @@ struct EventBlockView: View {
     let occurrence: Occurrence
 
     var body: some View {
+        // Jede Minute neu: Vergangene Termine treten auch bei offenem Raster zurück.
+        TimelineView(.everyMinute) { context in
+            block(past: occurrence.isPast(now: context.date))
+        }
+    }
+
+    private func block(past: Bool) -> some View {
         let color = model.color(for: occurrence.calendarId)
         let isHighlighted: Bool = model.highlightedOccurrence?.id == occurrence.id
-        HStack(alignment: .top, spacing: 0) {
-            Rectangle().fill(color).frame(width: 3)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(occurrence.title).font(.caption.weight(.semibold)).lineLimit(2)
-                if let location = occurrence.details.location, !location.isEmpty {
-                    Text(location).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
+        let shape = RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous)
+        return HStack(alignment: .top, spacing: 0) {
+            Rectangle().fill(color).frame(width: 3.5)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(occurrence.title)
+                    .font(.caption.weight(.semibold))
+                    .strikethrough(occurrence.details.status == .cancelled)
+                    .lineLimit(2)
+                Text(subtitle)
+                    .font(Theme.number(.caption2))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
             Spacer(minLength: 0)
             JoinButton(occurrence: occurrence, iconOnly: true) // Beitreten (LIC-42)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(color.opacity(0.18))
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .background { shape.fill(Theme.eventFill(color, past: past)) }
+        .overlay { shape.strokeBorder(color.opacity(past ? 0.15 : 0.3), lineWidth: 0.5) }
+        .clipShape(shape)
+        .opacity(past ? 0.75 : 1)
         .modifier(HighlightBorder(isOn: isHighlighted))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isHighlighted ? .isSelected : [])
+    }
+
+    /// „09:30 · Raum 2“: Beginn und Ort in einer Zeile.
+    private var subtitle: String {
+        let c = model.calendar.dateComponents([.hour, .minute], from: occurrence.start)
+        let time = String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+        guard let location = occurrence.details.location, !location.isEmpty else { return time }
+        return "\(time) · \(location)"
     }
 }
 
@@ -977,9 +1024,59 @@ struct HighlightBorder: ViewModifier {
     func body(content: Content) -> some View {
         content.overlay {
             if isOn {
-                RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: 2)
+                RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous)
+                    .strokeBorder(Theme.accent, lineWidth: 2)
             }
         }
+    }
+}
+
+/// Jetzt-Linie: Punkt am linken Rand, Linie über die Spalte.
+struct NowLine: View {
+    static let knob: CGFloat = 8
+    let width: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Rectangle()
+                .fill(Theme.now)
+                .frame(width: width, height: 2)
+            Circle()
+                .fill(Theme.now)
+                .frame(width: Self.knob, height: Self.knob)
+                .offset(x: -Self.knob / 2)
+        }
+        .frame(width: width, height: Self.knob, alignment: .leading)
+    }
+}
+
+/// Kopf einer Tagesspalte: Wochentag klein, Tageszahl groß; heute im grünen Kreis.
+struct DayHeaderCell: View {
+    let day: LocalDate
+    let isToday: Bool
+    /// Gewählter Tag (Ziel für Einfügen und „Neuer Termin“), nur für VoiceOver;
+    /// gezeichnet wird er von `selectedDayMarker`.
+    let isSelected: Bool
+    let isWeekend: Bool
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(QuickEntryPreview.weekdayShort[day.weekday.rawValue - 1].uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.4)
+                .foregroundStyle(isToday ? Theme.accent : (isWeekend ? Color.secondary.opacity(0.7) : Color.secondary))
+            Text(verbatim: "\(day.day)")
+                .font(Theme.number(.title3, weight: isToday ? .bold : .medium))
+                .foregroundStyle(isToday ? Theme.onAccent : (isWeekend ? Color.secondary : Color.primary))
+                .frame(minWidth: 30, minHeight: 30)
+                .background {
+                    if isToday { Circle().fill(Theme.accent) }
+                }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(isToday ? "Heute" : "")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -1009,9 +1106,10 @@ struct AllDayRow: View {
                     Text(bar.occurrence.title)
                         .font(.caption2.weight(.semibold))
                         .lineLimit(1)
-                        .padding(.horizontal, 4)
+                        .padding(.leading, 6)
+                        .padding(.trailing, 4)
                         .frame(width: width, height: laneHeight - 2, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(color.opacity(0.3)))
+                        .background { AllDayBarShape(color: color) }
                         .modifier(HighlightBorder(isOn: isHighlighted))
                         .offset(x: x, y: y)
                         .modifier(OccurrenceTap(occurrence: bar.occurrence)) // LIC-24
@@ -1020,7 +1118,7 @@ struct AllDayRow: View {
                 ForEach(0..<columns, id: \.self) { column in
                     if hidden[column] > 0 {
                         Text("+\(hidden[column])")
-                            .font(.caption2)
+                            .font(Theme.number(.caption2, weight: .semibold))
                             .foregroundStyle(.secondary)
                             .offset(x: leadingInset + columnWidth * CGFloat(column) + 4, y: CGFloat(lanes) * laneHeight)
                     }
@@ -1028,5 +1126,20 @@ struct AllDayRow: View {
             }
         }
         .frame(height: CGFloat(lanes) * laneHeight + (hidden.contains { $0 > 0 } ? 14 : 0) + 4)
+    }
+}
+
+/// Hintergrund eines Balkens: getönt, links ein Streifen in Kalenderfarbe.
+private struct AllDayBarShape: View {
+    let color: Color
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
+        shape
+            .fill(color.opacity(0.22))
+            .overlay(alignment: .leading) {
+                Rectangle().fill(color).frame(width: 3)
+            }
+            .clipShape(shape)
     }
 }

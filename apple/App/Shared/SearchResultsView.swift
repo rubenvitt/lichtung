@@ -43,10 +43,12 @@ struct SearchResultRow: View {
     let occurrence: Occurrence
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            CalendarDot(color: model.color(for: occurrence.calendarId))
+        HStack(alignment: .center, spacing: 12) {
+            CalendarBar(color: model.color(for: occurrence.calendarId))
+                .frame(height: 34)
             VStack(alignment: .leading, spacing: 2) {
                 Text(occurrence.title)
+                    .font(.body.weight(.medium))
                     .strikethrough(occurrence.details.status == .cancelled)
                 if let date = hit.dateText(today: model.today, calendar: model.calendar) {
                     Text(date)
@@ -62,7 +64,7 @@ struct SearchResultRow: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
         // Vergangene Treffer treten zurück.
         .opacity(occurrence.end <= Date() ? 0.6 : 1)
         .frame(maxWidth: .infinity, alignment: .leading)

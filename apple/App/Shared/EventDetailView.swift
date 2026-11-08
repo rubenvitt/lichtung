@@ -17,12 +17,8 @@ struct EventDetailView: View {
         NavigationStack {
             Form {
                 Section {
-                    HStack {
-                        CalendarDot(color: model.color(for: occurrence.calendarId), size: 10)
-                        Text(d.title).font(.title3.weight(.semibold))
-                    }
-                    Text(AgendaBuilder.heading(LocalDate(occurrence.start, calendar: model.calendar), today: model.today))
-                    Text(AgendaBuilder.timeText(occurrence, calendar: model.calendar)).foregroundStyle(.secondary)
+                    EventDetailHeader(occurrence: occurrence)
+                        .listRowBackground(model.color(for: occurrence.calendarId).opacity(0.12))
                     if occurrence.recurrenceId != nil {
                         Label("Teil einer Serie", systemImage: "repeat").foregroundStyle(.secondary)
                     }
@@ -61,7 +57,10 @@ struct EventDetailView: View {
                     }
                 }
                 if let location = d.location, !location.isEmpty {
-                    Section("Ort") { Text(location) }
+                    Section("Ort") {
+                        Label(location, systemImage: "mappin.and.ellipse")
+                            .textSelection(.enabled)
+                    }
                 }
                 // Link am Termin (LIC-69)
                 // Ohne Schema (z. B. „example.org/raum“ aus einem anderen
@@ -82,9 +81,9 @@ struct EventDetailView: View {
                     Section("Notiz") { Text(notes).textSelection(.enabled) }
                 }
                 if !d.attendees.isEmpty {
-                    Section("Teilnehmende") {
+                    Section("Teilnehmende (\(d.attendees.count))") {
                         ForEach(d.attendees, id: \.email) { a in
-                            Text(a.name ?? a.email)
+                            AttendeeRow(name: a.name ?? a.email, detail: a.name == nil ? nil : a.email)
                         }
                     }
                 }
@@ -98,25 +97,31 @@ struct EventDetailView: View {
                     }
                 }
                 Section {
-                    Button("Duplizieren") {
+                    Button {
                         Task { await model.duplicate(occurrence) }
                         dismiss()
+                    } label: {
+                        Label("Duplizieren", systemImage: "plus.square.on.square")
                     }
                     // Einfügen danach am Tag: ⌘V bzw. Kontextmenü (Mac),
                     // Toolbar oder Monatstag (iPhone, LIC-50).
-                    Button("Kopieren") {
+                    Button {
                         Pasteboard.write(model.copy(occurrence))
                         dismiss()
+                    } label: {
+                        Label("Kopieren", systemImage: "doc.on.doc")
                     }
                     // Wie ⌫ und Kontextmenü (LIC-50): Einzeltermine sofort
                     // (Rückgängig geht), bei Serien erst nach der Frage.
-                    Button(deleteTitle, role: .destructive) {
+                    Button(role: .destructive) {
                         if OccurrenceActions.deleteScopes(occurrence).isEmpty {
                             Task { await model.delete(occurrence, scope: .all) }
                             dismiss()
                         } else {
                             confirmsSeriesDelete = true
                         }
+                    } label: {
+                        Label(deleteTitle, systemImage: "trash")
                     }
                     .disabled(!model.canEdit(occurrence))
                 }
@@ -140,6 +145,108 @@ struct EventDetailView: View {
                 }
             }
         }
+    }
+}
+
+/// Kopf der Detailansicht: Kalender, Titel groß, Tag und Uhrzeit.
+private struct EventDetailHeader: View {
+    @Environment(AppModel.self) private var model
+    let occurrence: Occurrence
+
+    var body: some View {
+        let color = model.color(for: occurrence.calendarId)
+        let day = LocalDate(occurrence.start, calendar: model.calendar)
+        let calendarName: String = model.state.calendars[occurrence.calendarId]?.name ?? "Kalender"
+        HStack(alignment: .top, spacing: 12) {
+            CalendarBar(color: color, width: 5)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    CalendarDot(color: color, size: 7)
+                    Text(calendarName.uppercased())
+                        .font(.caption2.weight(.bold))
+                        .tracking(0.6)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    TimelineView(.everyMinute) { context in
+                        if occurrence.isRunning(now: context.date) { NowBadge() }
+                    }
+                }
+                Text(occurrence.title)
+                    .font(Theme.display(.title2))
+                    .strikethrough(occurrence.details.status == .cancelled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(AgendaBuilder.heading(day, today: model.today))
+                        .font(.subheadline.weight(.semibold))
+                    Text(AgendaBuilder.timeText(occurrence, calendar: model.calendar))
+                        .font(Theme.number(.subheadline))
+                        .foregroundStyle(.secondary)
+                    // Mehrtägig: auch das Ende nennen, sonst fehlt es im Kopf.
+                    if let until = untilText {
+                        Text(until)
+                            .font(Theme.number(.subheadline))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension EventDetailHeader {
+    /// „bis Mo 26. Okt. 10:00“ (ganztägig ohne Uhrzeit), wenn der Termin an
+    /// einem späteren Tag endet; sonst `nil`.
+    fileprivate var untilText: String? {
+        let cal = model.calendar
+        let startDay = LocalDate(occurrence.start, calendar: cal)
+        // Ganztägig ist das Ende exklusiv (Mitternacht danach).
+        let lastMoment: Date = occurrence.isAllDay ? occurrence.end.addingTimeInterval(-1) : occurrence.end
+        let endDay = LocalDate(lastMoment, calendar: cal)
+        guard endDay > startDay else { return nil }
+        let heading = AgendaBuilder.heading(endDay, today: model.today)
+        if occurrence.isAllDay { return "bis \(heading)" }
+        let c = cal.dateComponents([.hour, .minute], from: occurrence.end)
+        return "bis \(heading), " + String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+    }
+}
+
+/// Teilnehmende mit Initialen-Kreis.
+private struct AttendeeRow: View {
+    let name: String
+    let detail: String?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(initials)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Theme.accent.opacity(0.14)))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                // Lange Namen und Adressen umbrechen statt abschneiden.
+                Text(name)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private var initials: String {
+        let parts = name.split(whereSeparator: { $0 == " " || $0 == "." || $0 == "@" })
+        let letters = parts.prefix(2).compactMap { $0.first }.map { String($0) }
+        return letters.joined().uppercased()
     }
 }
 

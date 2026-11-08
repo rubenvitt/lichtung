@@ -29,12 +29,11 @@ struct LoginView: View {
         @Bindable var session = session
         ScrollView {
             VStack(spacing: 24) {
-                VStack(spacing: 8) {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 44))
-                        .foregroundStyle(.tint)
+                VStack(spacing: 12) {
+                    LichtungMark(size: 88)
+                        .padding(.bottom, 4)
                     Text("Lichtung")
-                        .font(.largeTitle.weight(.semibold))
+                        .font(Theme.display(.largeTitle))
                     Text(isReauthentication
                         ? "Dieses Gerät ist nicht mehr angemeldet. Termine und noch nicht gesendete Änderungen bleiben erhalten."
                         : "Melde dich an deinem eigenen Lichtung-Server an.")
@@ -43,7 +42,7 @@ struct LoginView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Server").font(.headline)
+                    SectionLabel(text: "Server")
                     TextField("Server-Adresse", text: $session.serverInput, prompt: Text("lichtung.example.org"))
                         .plainTextInput()
                         #if os(iOS)
@@ -56,7 +55,7 @@ struct LoginView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                    Text("Gerätename").font(.headline).padding(.top, 6)
+                    SectionLabel(text: "Gerätename").padding(.top, 8)
                     TextField("Gerätename", text: $session.deviceName)
                         .disabled(busy)
                     Text("So erscheint dieses Gerät in der Geräteliste.")
@@ -64,7 +63,16 @@ struct LoginView: View {
                         .foregroundStyle(.secondary)
                 }
                 .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 380)
+                .padding(20)
+                .background {
+                    RoundedRectangle(cornerRadius: Theme.cardRadius + 4, style: .continuous)
+                        .fill(.background.secondary)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: Theme.cardRadius + 4, style: .continuous)
+                        .strokeBorder(Theme.hairline, lineWidth: 1)
+                }
+                .frame(maxWidth: 420)
 
                 VStack(spacing: 12) {
                     Button {
@@ -72,9 +80,9 @@ struct LoginView: View {
                     } label: {
                         HStack(spacing: 8) {
                             if busy { ProgressView().controlSize(.small) }
-                            Text("Anmelden")
+                            Text("Anmelden").fontWeight(.semibold)
                         }
-                        .frame(minWidth: 180)
+                        .frame(minWidth: 220)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
@@ -106,6 +114,7 @@ struct LoginView: View {
             .padding(32)
             .frame(maxWidth: .infinity)
         }
+        .background { LoginBackdrop() }
         #if os(macOS)
         .frame(minWidth: 460, minHeight: 520)
         #endif
@@ -125,6 +134,43 @@ struct LoginView: View {
                 )
             }
         }
+    }
+}
+
+/// Marke: Lichtung im Wald – Sonne über einer hellen Fläche, grüner Verlauf.
+struct LichtungMark: View {
+    var size: CGFloat = 64
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [Theme.accent, Theme.accentDeep],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay {
+                Image(systemName: "sun.horizon.fill")
+                    .font(.system(size: size * 0.46, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Theme.sun, Color.white)
+            }
+            .frame(width: size, height: size)
+            .shadow(color: Theme.accent.opacity(0.35), radius: size * 0.18, y: size * 0.08)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Zarter grüner Schein oben, wie Licht, das auf eine Lichtung fällt.
+private struct LoginBackdrop: View {
+    var body: some View {
+        LinearGradient(
+            colors: [Theme.accent.opacity(0.18), Theme.sun.opacity(0.05), Color.clear],
+            startPoint: .top,
+            endPoint: .center
+        )
+        .ignoresSafeArea()
     }
 }
 

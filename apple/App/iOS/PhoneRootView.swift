@@ -11,13 +11,35 @@ struct PhoneRootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
 
+    /// Ansichten im Umschalter oben. Raster-Varianten sind eigene Einträge,
+    /// damit jede Ansicht einen Tipp entfernt ist.
     enum Mode: String, CaseIterable, Identifiable {
-        case list = "Liste", grid = "Raster", month = "Monat"
+        case list, day, threeDays, week, month
         var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .list: "Liste"
+            case .day: "Tag"
+            case .threeDays: "3 Tage"
+            case .week: "Woche"
+            case .month: "Monat"
+            }
+        }
+
+        /// Tage im Raster; `nil` für Liste und Monat.
+        var gridDays: Int? {
+            switch self {
+            case .day: 1
+            case .threeDays: 3
+            case .week: 7
+            case .list, .month: nil
+            }
+        }
     }
 
-    @State private var mode: Mode = .list
-    @State private var gridDays = 1
+    /// Zuletzt gewählte Ansicht, bleibt über Neustarts erhalten.
+    @AppStorage("phoneViewMode") private var mode: Mode = .list
     // Suche und Rückgängig (LIC-42)
     @State private var searchText = ""
     @State private var showsUndoAlert = false
@@ -29,40 +51,22 @@ struct PhoneRootView: View {
                 .navigationTitle(MonthGrid.title(year: model.selectedDay.year, month: model.selectedDay.month))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Heute") { model.goToToday() }
+                    ToolbarItem(placement: .principal) {
+                        MonthTitle(year: model.selectedDay.year, month: model.selectedDay.month, style: .headline)
                     }
                     // Erst nach „Kopieren“ zu sehen (LIC-50).
                     ToolbarItem(placement: .topBarLeading) { pasteMenu }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Picker("Ansicht", selection: $mode) {
-                                ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
-                            }
-                            if mode == .grid {
-                                Picker("Tage", selection: $gridDays) {
-                                    Text("Tag").tag(1)
-                                    Text("3 Tage").tag(3)
-                                    Text("Woche").tag(7)
-                                }
-                            }
-                        } label: {
-                            // Mit Text: Rutscht der Knopf ins ⋯-Menü, braucht er einen Titel (LIC-66).
-                            Label("Ansicht wählen", systemImage: "calendar")
-                        }
-                    }
-                    // MARK: Editor (LIC-20)
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { model.newEvent() } label: { Label("Neuer Termin", systemImage: "plus") }
-                    }
-                }
-                .toolbar {
                     ToolbarItem(placement: .topBarTrailing) { undoMenu }
                 }
                 .phoneSettingsButton() // Einstellungen (LIC-43)
                 .invitationsButton() // Terminanfragen (LIC-30)
                 .syncProblemsButton() // Konflikte, abgelehnte Änderungen (LIC-70)
-                .safeAreaInset(edge: .bottom) {
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                        modeBar
+                    }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
                     QuickEntryBar().background(.bar)
                 }
         }
@@ -86,21 +90,53 @@ struct PhoneRootView: View {
         .alert(undoAlertTitle, isPresented: $showsUndoAlert) { undoAlertActions }
     }
 
+    /// Umschalter der Ansicht und „Heute“, direkt unter der Navigationsleiste.
+    private var modeBar: some View {
+        HStack(spacing: 10) {
+            Picker("Ansicht", selection: $mode.animation(.snappy)) {
+                ForEach(Mode.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Button {
+                model.goToToday()
+            } label: {
+                Text("Heute")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Theme.accent.opacity(isShowingToday ? 0.08 : 0.16)))
+                    .foregroundStyle(Theme.accent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Springt zum heutigen Tag")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.hairline).frame(height: 0.5)
+        }
+    }
+
+    /// Heute ist schon ausgewählt: „Heute“ tritt etwas zurück.
+    private var isShowingToday: Bool { model.selectedDay == model.today }
+
     @ViewBuilder
     private var content: some View {
         switch mode {
         case .list:
             AgendaView()
                 .refreshable { await model.refresh() }
-        case .grid:
-            let start = gridDays == 7
+        case .day, .threeDays, .week:
+            let days = mode.gridDays ?? 1
+            let start = days == 7
                 ? model.selectedDay.adding(days: -(model.selectedDay.weekday.rawValue - 1))
                 : model.selectedDay
-            DayGridView(start: start, dayCount: gridDays)
+            DayGridView(start: start, dayCount: days)
                 // Nur ein klar waagerechter Wisch blättert; senkrecht scrollt (LIC-65).
                 .gesture(DragGesture(minimumDistance: 40).onEnded { value in
                     guard let step = SwipeStep.horizontal(dx: value.translation.width, dy: value.translation.height) else { return }
-                    model.selectedDay = model.selectedDay.adding(days: step * gridDays)
+                    model.selectedDay = model.selectedDay.adding(days: step * days)
                 })
         case .month:
             MonthView(year: model.selectedDay.year, month: model.selectedDay.month, visibleLanes: 2)
@@ -134,7 +170,14 @@ extension PhoneRootView {
 
     /// Antippen: Rückgängig. Lange drücken: Rückgängig oder Wiederholen mit
     /// Beschriftung der Aktion.
+    @ViewBuilder
     var undoMenu: some View {
+        if model.undoHistory.canUndo || model.undoHistory.canRedo {
+            undoMenuButton
+        }
+    }
+
+    private var undoMenuButton: some View {
         Menu {
             Button(model.undoHistory.undoTitle) { Task { await model.undo() } }
                 .disabled(!model.undoHistory.canUndo)

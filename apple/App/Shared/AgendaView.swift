@@ -112,11 +112,18 @@ struct AgendaRow: View {
     let item: AgendaItem
 
     var body: some View {
+        // Jede Minute neu, damit „Jetzt“ und das Dämpfen vergangener Termine
+        // auch bei offener Liste mitgehen.
+        TimelineView(.everyMinute) { context in
+            row(now: context.date)
+        }
+    }
+
+    private func row(now: Date) -> some View {
         let occ = item.occurrence
         let color = model.color(for: occ.calendarId)
-        let now = Date()
         let running = occ.isRunning(now: now)
-        HStack(alignment: .center, spacing: 12) {
+        return HStack(alignment: .center, spacing: 12) {
             timeColumn
                 .frame(width: 52, alignment: .trailing)
             CalendarBar(color: color)

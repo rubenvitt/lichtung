@@ -123,7 +123,12 @@ struct DayGridView: View {
             .frame(width: gutter)
             .accessibilityElement(children: .combine)
             ForEach(days, id: \.self) { day in
-                DayHeaderCell(day: day, isToday: day == model.today, isWeekend: day.weekday.rawValue >= 6)
+                DayHeaderCell(
+                    day: day,
+                    isToday: day == model.today,
+                    isSelected: day == model.selectedDay,
+                    isWeekend: day.weekday.rawValue >= 6
+                )
                     .frame(maxWidth: .infinity)
                     .background { selectedDayMarker(day) }
                     .contentShape(Rectangle())
@@ -966,11 +971,17 @@ struct EventBlockView: View {
     let occurrence: Occurrence
 
     var body: some View {
+        // Jede Minute neu: Vergangene Termine treten auch bei offenem Raster zurück.
+        TimelineView(.everyMinute) { context in
+            block(past: occurrence.isPast(now: context.date))
+        }
+    }
+
+    private func block(past: Bool) -> some View {
         let color = model.color(for: occurrence.calendarId)
         let isHighlighted: Bool = model.highlightedOccurrence?.id == occurrence.id
-        let past = occurrence.isPast(now: Date())
         let shape = RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous)
-        HStack(alignment: .top, spacing: 0) {
+        return HStack(alignment: .top, spacing: 0) {
             Rectangle().fill(color).frame(width: 3.5)
             VStack(alignment: .leading, spacing: 1) {
                 Text(occurrence.title)
@@ -1043,6 +1054,9 @@ struct NowLine: View {
 struct DayHeaderCell: View {
     let day: LocalDate
     let isToday: Bool
+    /// Gewählter Tag (Ziel für Einfügen und „Neuer Termin“), nur für VoiceOver;
+    /// gezeichnet wird er von `selectedDayMarker`.
+    let isSelected: Bool
     let isWeekend: Bool
 
     var body: some View {
@@ -1061,7 +1075,8 @@ struct DayHeaderCell: View {
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(isToday ? .isSelected : [])
+        .accessibilityValue(isToday ? "Heute" : "")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

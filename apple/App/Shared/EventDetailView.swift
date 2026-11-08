@@ -148,7 +148,9 @@ private struct EventDetailHeader: View {
                         .tracking(0.6)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    if occurrence.isRunning(now: Date()) { NowBadge() }
+                    TimelineView(.everyMinute) { context in
+                        if occurrence.isRunning(now: context.date) { NowBadge() }
+                    }
                 }
                 Text(occurrence.title)
                     .font(Theme.display(.title2))

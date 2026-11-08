@@ -70,6 +70,18 @@ extension EventClipboard {
         return .create(calendarId: calendarId, event: EventDuplicate.input(from: occurrence, movedTo: newStart, deviceTimeZone: tz))
     }
 
+    /// Zeitraum, den Einfügen mit Beginn `start` belegen würde (Vorschau beim
+    /// Halten auf leerer Fläche, LIC-63): dieselbe Rechnung wie
+    /// `intent(pastingAt:)`, also mit der Länge der Kopie. `nil` bei
+    /// ganztägigen Kopien, die nicht ins Raster gehören.
+    public func pastedInterval(at start: Date, deviceTimeZone tz: TimeZone) -> DateInterval? {
+        guard !occurrence.details.start.isAllDay,
+              case let .create(_, input) = intent(pastingAt: start, calendarId: occurrence.calendarId, deviceTimeZone: tz)
+        else { return nil }
+        let s = input.start.instant(deviceTimeZone: tz)
+        return DateInterval(start: s, end: max(s, input.end.instant(deviceTimeZone: tz)))
+    }
+
     /// Kopfzeile des Menüs beim Einfügen an `start`, z. B.
     /// „„Team-Sync“ einfügen um 14:30“; ganztägig wie `pasteTitle(on:)`.
     public func pasteTitle(at start: Date, calendar: Calendar) -> String {

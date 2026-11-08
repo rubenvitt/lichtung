@@ -311,22 +311,6 @@ struct DaySlotMenu: View {
     }
 }
 
-extension AppModel {
-    /// Einfügen mit Beginn `start` (iPhone-Raster, „Hier einfügen“, LIC-58),
-    /// sonst wie `paste(on:pasteboardText:)`: Hält die Zwischenablage etwas
-    /// anderes, gilt die Kopie nicht mehr.
-    func paste(at start: Date, pasteboardText: String?) async {
-        guard let clip = clipboard else { return }
-        guard clip.matches(pasteboardText) else {
-            clipboard = nil
-            return
-        }
-        guard let calendarId = duplicateCalendarId(for: clip.occurrence) else { return }
-        let intent = clip.intent(pastingAt: start, calendarId: calendarId, deviceTimeZone: timeZone)
-        await engine.perform(intent, label: "Termin einfügen")
-    }
-}
-
 /// Zwischenablage des Systems (nur Text).
 @MainActor
 enum Pasteboard {

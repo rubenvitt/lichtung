@@ -74,6 +74,40 @@ struct PhoneGridPasteTests {
         #expect(input.end.normalized == .dateTime(LocalDateTime(date: L.day(27), hour: 16, minute: 0), timeZone: "America/New_York"))
     }
 
+    @Test func holdPreviewHasLengthOfCopy() {
+        // LIC-63: Beim Halten mit Kopie zeigt die Vorschau den Termin, der
+        // beim Einfügen entstünde, nicht den 15-Minuten-Block des Anlegens.
+        let clip = EventClipboard(L.timed("Team-Sync", 23, 9, to: 10, 30), calendar: L.cal)
+        let start = L.day(27).date(hour: 14, minute: 30, in: L.cal)
+        let interval = clip.pastedInterval(at: start, deviceTimeZone: L.tz)
+        #expect(interval == DateInterval(start: start, duration: 90 * 60))
+        #expect(interval.map { G.timeText($0, calendar: L.cal) } == "14:30–16:00")
+        // Spät am Abend reicht sie über Mitternacht wie der eingefügte Termin.
+        let late = L.day(27).date(hour: 23, minute: 45, in: L.cal)
+        #expect(clip.pastedInterval(at: late, deviceTimeZone: L.tz)?.end == L.day(28).date(hour: 1, minute: 15, in: L.cal))
+    }
+
+    @Test func holdPreviewMatchesPastedEvent() {
+        // Gleiche Rechnung wie das Einfügen, auch bei anderer Zeitzone.
+        var occ = L.timed("Call", 23, 9, to: 10)
+        occ.details.start = .dateTime(LocalDateTime(date: L.day(23), hour: 9, minute: 0), timeZone: "America/New_York")
+        occ.details.end = .dateTime(LocalDateTime(date: L.day(23), hour: 10, minute: 0), timeZone: "America/New_York")
+        let clip = EventClipboard(occ, calendar: L.cal)
+        let start = L.day(27).date(hour: 20, minute: 0, in: L.cal)
+        guard case let .create(_, input) = clip.intent(pastingAt: start, calendarId: "cal_1", deviceTimeZone: L.tz) else {
+            Issue.record("keine Anlage")
+            return
+        }
+        #expect(clip.pastedInterval(at: start, deviceTimeZone: L.tz) == DateInterval(
+            start: input.start.instant(deviceTimeZone: L.tz), end: input.end.instant(deviceTimeZone: L.tz)
+        ))
+    }
+
+    @Test func holdPreviewWithAllDayCopyStaysCreation() {
+        let clip = EventClipboard(L.allDay("Urlaub", 23), calendar: L.cal)
+        #expect(clip.pastedInterval(at: L.day(27).date(hour: 10, minute: 0, in: L.cal), deviceTimeZone: L.tz) == nil)
+    }
+
     @Test func pasteAllDayAtTimeStaysAllDay() {
         let clip = EventClipboard(L.allDay("Urlaub", 23, through: 24), calendar: L.cal)
         let start = L.day(2, month: 11).date(hour: 10, minute: 0, in: L.cal)

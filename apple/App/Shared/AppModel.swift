@@ -511,6 +511,20 @@ extension AppModel {
         await engine.perform(intent, label: "Termin einfügen")
     }
 
+    /// Einfügen mit Beginn `start` (iPhone-Raster, „Hier einfügen“, LIC-58),
+    /// sonst wie `paste(on:pasteboardText:)`: Hält die Zwischenablage etwas
+    /// anderes, gilt die Kopie nicht mehr.
+    func paste(at start: Date, pasteboardText: String?) async {
+        guard let clip = clipboard else { return }
+        guard clip.matches(pasteboardText) else {
+            clipboard = nil
+            return
+        }
+        guard let calendarId = duplicateCalendarId(for: clip.occurrence) else { return }
+        let intent = clip.intent(pastingAt: start, calendarId: calendarId, deviceTimeZone: timeZone)
+        await engine.perform(intent, label: "Termin einfügen")
+    }
+
     /// Kopie verwerfen, wenn die Zwischenablage inzwischen etwas anderes
     /// hält, z. B. beim Aktivwerden der App (iPhone, LIC-54). So zeigt die
     /// Toolbar „Einfügen“ nur, solange es noch geht.

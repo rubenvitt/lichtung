@@ -102,7 +102,7 @@ final class ReminderScheduler {
     private func ensurePermission() async -> Bool {
         switch await Self.authorizationStatus() {
         case .notDetermined:
-            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            let granted = await Self.requestAuthorization()
             permission = granted ? .allowed : .denied
             return granted
         case .denied:
@@ -130,6 +130,30 @@ final class ReminderScheduler {
         await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
     }
 
+    private nonisolated static func requestAuthorization() async -> Bool {
+        (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+    }
+
+    /// Plant eine Erinnerung als Benachrichtigung ein; die Anfrage entsteht
+    /// erst hier, damit nur `PlannedReminder` (Sendable) die Grenze kreuzt.
+    private nonisolated static func schedule(_ reminder: PlannedReminder) async {
+        let interval = reminder.fireDate.timeIntervalSinceNow
+        guard interval >= 1 else { return }
+        let content = UNMutableNotificationContent()
+        content.title = reminder.title
+        content.body = reminder.body
+        content.sound = .default
+        content.threadIdentifier = reminder.eventId
+        content.userInfo = [
+            "eventId": reminder.eventId,
+            "occurrenceId": reminder.occurrenceId,
+            "fire": reminder.fireDate.timeIntervalSince1970,
+        ]
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+        let request = UNNotificationRequest(identifier: prefix + reminder.id, content: content, trigger: trigger)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
     private nonisolated static func scheduledReminders() async -> [PlannedReminder] {
         await UNUserNotificationCenter.current().pendingNotificationRequests().compactMap(reminder(from:))
     }
@@ -144,21 +168,7 @@ final class ReminderScheduler {
             center.removePendingNotificationRequests(withIdentifiers: remove.map { Self.prefix + $0 })
         }
         for reminder in add {
-            let interval = reminder.fireDate.timeIntervalSinceNow
-            guard interval >= 1 else { continue }
-            let content = UNMutableNotificationContent()
-            content.title = reminder.title
-            content.body = reminder.body
-            content.sound = .default
-            content.threadIdentifier = reminder.eventId
-            content.userInfo = [
-                "eventId": reminder.eventId,
-                "occurrenceId": reminder.occurrenceId,
-                "fire": reminder.fireDate.timeIntervalSince1970,
-            ]
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
-            let request = UNNotificationRequest(identifier: Self.prefix + reminder.id, content: content, trigger: trigger)
-            try? await center.add(request)
+            await Self.schedule(reminder)
         }
     }
 

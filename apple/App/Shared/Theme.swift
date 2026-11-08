@@ -19,10 +19,15 @@ enum Theme {
 
     /// Waldgrün: Auswahl, heute, Hauptknöpfe.
     static let accent = Color(light: 0x2E7D5B, dark: 0x5FD39A)
+    /// Schrift und Symbole auf `accent`: hell weiß (5:1), dunkel fast
+    /// schwarz, weil das helle Grün weiße Schrift nicht trägt (8,8:1).
+    static let onAccent = Color(light: 0xFFFFFF, dark: 0x0B2419)
     /// Dunkleres Grün für Verläufe (Anmeldung, Marke).
     static let accentDeep = Color(light: 0x1B4D3A, dark: 0x2E7D5B)
     /// Warmes Licht: Jetzt-Linie, „Jetzt“-Marke.
-    static let now = Color(light: 0xE4572E, dark: 0xFF7A50)
+    static let now = Color(light: 0xC2410C, dark: 0xFF7A50)
+    /// Schrift auf `now`: hell weiß (5,2:1), dunkel fast schwarz (7:1).
+    static let onNow = Color(light: 0xFFFFFF, dark: 0x2A0E05)
     /// Sonnengelb für Hinweise (Demo-Modus).
     static let sun = Color(light: 0xD99A1E, dark: 0xF2B84B)
     /// Feine Linien im Raster und im Monat.
@@ -133,7 +138,7 @@ struct NowBadge: View {
         Text("JETZT")
             .font(.system(size: 9, weight: .heavy, design: .rounded))
             .tracking(0.6)
-            .foregroundStyle(.white)
+            .foregroundStyle(Theme.onNow)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(Capsule().fill(Theme.now))

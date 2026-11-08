@@ -1053,7 +1053,7 @@ struct DayHeaderCell: View {
                 .foregroundStyle(isToday ? Theme.accent : (isWeekend ? Color.secondary.opacity(0.7) : Color.secondary))
             Text(verbatim: "\(day.day)")
                 .font(Theme.number(.title3, weight: isToday ? .bold : .medium))
-                .foregroundStyle(isToday ? Color.white : (isWeekend ? Color.secondary : Color.primary))
+                .foregroundStyle(isToday ? Theme.onAccent : (isWeekend ? Color.secondary : Color.primary))
                 .frame(minWidth: 30, minHeight: 30)
                 .background {
                     if isToday { Circle().fill(Theme.accent) }

@@ -279,23 +279,23 @@ struct TickerCell: View {
 
     var body: some View {
         let isSelected = day.date == model.selectedDay
-        let numberColor: Color = isSelected ? .white : (day.isToday ? Theme.accent : (day.isWeekend ? .secondary : .primary))
+        let numberColor: Color = isSelected ? Theme.onAccent : (day.isToday ? Theme.accent : (day.isWeekend ? .secondary : .primary))
         VStack(spacing: 3) {
             Text(day.weekdayShort.uppercased())
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(0.4)
-                .foregroundStyle(isSelected ? Color.white.opacity(0.85) : (day.isToday ? Theme.accent : Color.secondary))
+                .foregroundStyle(isSelected ? Theme.onAccent.opacity(0.85) : (day.isToday ? Theme.accent : Color.secondary))
             Text(verbatim: "\(day.dayNumber)")
                 .font(Theme.number(.title3, weight: day.isToday || isSelected ? .bold : .medium))
                 .foregroundStyle(numberColor)
             HStack(spacing: 2) {
                 ForEach(day.calendarIds.prefix(4), id: \.self) { id in
-                    CalendarDot(color: isSelected ? .white : model.color(for: id), size: 5)
+                    CalendarDot(color: isSelected ? Theme.onAccent : model.color(for: id), size: 5)
                 }
             }
             .frame(height: 5)
             Capsule()
-                .fill(isSelected ? Color.white.opacity(0.7) : Theme.accent.opacity(0.45))
+                .fill(isSelected ? Theme.onAccent.opacity(0.7) : Theme.accent.opacity(0.45))
                 .frame(width: 26 * max(0.1, day.busyFraction), height: 2)
                 .opacity(day.busyFraction > 0 ? 1 : 0)
         }

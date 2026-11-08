@@ -83,7 +83,7 @@ struct MonthWeekRow: View {
     }
 
     private func numberColor(_ day: LocalDate, isToday: Bool) -> Color {
-        if isToday { return Color.white }
+        if isToday { return Theme.onAccent }
         if day.month != month { return Color.secondary.opacity(0.6) }
         if day.weekday.rawValue >= 6 { return Color.secondary }
         return Color.primary
@@ -170,7 +170,7 @@ struct MiniDayCell: View {
         VStack(spacing: 1) {
             Text(verbatim: "\(day.day)")
                 .font(Theme.number(.caption2, weight: isToday || selected ? .bold : .regular))
-                .foregroundStyle(selected ? Color.white : (inMonth ? (isToday ? Theme.accent : Color.primary) : Color.secondary.opacity(0.5)))
+                .foregroundStyle(selected ? Theme.onAccent : (inMonth ? (isToday ? Theme.accent : Color.primary) : Color.secondary.opacity(0.5)))
                 .frame(width: 22, height: 20)
                 .background(Circle().fill(selected ? Theme.accent : Color.clear))
                 .overlay {

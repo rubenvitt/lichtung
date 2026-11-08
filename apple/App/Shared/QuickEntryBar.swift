@@ -67,7 +67,7 @@ struct QuickEntryBar: View {
                 Button(action: primaryAction) {
                     Image(systemName: isEmpty ? "plus" : "arrow.up")
                         .font(.body.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.onAccent)
                         .frame(width: 38, height: 38)
                         .background(Circle().fill(Theme.accent))
                         .shadow(color: Theme.accent.opacity(0.35), radius: 6, y: 3)

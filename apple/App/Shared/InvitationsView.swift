@@ -90,8 +90,11 @@ private struct InvitationsToolbarButton: ViewModifier {
         content
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showsList = true } label: { InvitationsIcon(count: count) }
-                        .accessibilityLabel(Self.title(count))
+                    // Label mit Titel, damit der Eintrag im ⋯-Menü Text hat (LIC-66).
+                    Button { showsList = true } label: {
+                        Label { Text(Self.title(count)) } icon: { InvitationsIcon(count: count) }
+                    }
+                    .accessibilityLabel(Self.title(count))
                 }
             }
             .sheet(isPresented: $showsList, onDismiss: { showPending() }) {

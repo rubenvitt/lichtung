@@ -71,7 +71,7 @@ struct SessionRootView: View {
             LoginView()
         case .demo, .server:
             let model = session.model
-            RootView()
+            calendarWithBanner
                 .eventEditorSheet() // Termin-Editor (LIC-20)
                 .occurrenceDeleteDialog() // Serie löschen aus Menüs und Tastatur (LIC-24)
                 .environment(model)
@@ -89,7 +89,6 @@ struct SessionRootView: View {
                 .onChange(of: ReminderScheduler.shared.openRequest, initial: true) { _, _ in
                     model.openRequestedReminder()
                 }
-                .safeAreaInset(edge: .top, spacing: 0) { banner }
                 .sheet(isPresented: $showsLogin) {
                     LoginView(isReauthentication: true)
                         .environment(session)
@@ -99,6 +98,22 @@ struct SessionRootView: View {
                     if !needs { showsLogin = false }
                 }
         }
+    }
+
+    /// Kalender mit Banner darüber. iPhone: im Stapel statt als Einschub,
+    /// sonst liegt der Banner über der Navigationsleiste und verdeckt deren
+    /// Knöpfe (LIC-66).
+    @ViewBuilder
+    private var calendarWithBanner: some View {
+        #if os(iOS)
+        VStack(spacing: 0) {
+            banner
+            RootView()
+        }
+        #else
+        RootView()
+            .safeAreaInset(edge: .top, spacing: 0) { banner }
+        #endif
     }
 
     @ViewBuilder

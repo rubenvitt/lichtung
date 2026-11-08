@@ -20,3 +20,5 @@ jobs:
           # Den anderen Workflows Zeit geben, ihre Check Runs anzulegen.
           delay: 30s
           timeout: 5400s
+          # CodeRabbit ist kein Pflicht-Check. Wer `ignore` setzt, muss den eigenen Job selbst nennen.
+          ignore: Alle Checks grün,CodeRabbit

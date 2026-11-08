@@ -43,6 +43,10 @@ final class ReminderScheduler {
     /// auf die Erlaubnis wartet, darf einen neueren nicht überschreiben und
     /// nach `removeAll()` nichts mehr einplanen.
     @ObservationIgnored private var generation = 0
+    /// Letzter Abgleich mit dem System. Abgleiche laufen nacheinander: Ein
+    /// neuer (auch das Leeren bei `removeAll()`) beginnt erst, wenn der
+    /// vorige fertig ist oder wegen eines neueren Zählers aufgehört hat.
+    @ObservationIgnored private var applying: Task<Void, Never>?
 
     private init() {}
 
@@ -161,6 +165,17 @@ final class ReminderScheduler {
     /// Gleicht die ausstehenden Benachrichtigungen ab, solange `token` noch
     /// die letzte Anforderung ist.
     private func apply(wanted: [PlannedReminder], ifCurrent token: Int) async {
+        let previous = applying
+        let task = Task { [weak self] in
+            await previous?.value
+            await self?.reconcile(wanted: wanted, ifCurrent: token)
+        }
+        applying = task
+        await task.value
+    }
+
+    private func reconcile(wanted: [PlannedReminder], ifCurrent token: Int) async {
+        guard token == generation else { return }
         let scheduled = await Self.scheduledReminders()
         guard token == generation else { return }
         let (remove, add) = ReminderPlanner.diff(scheduled: scheduled, wanted: wanted)
@@ -168,6 +183,9 @@ final class ReminderScheduler {
             center.removePendingNotificationRequests(withIdentifiers: remove.map { Self.prefix + $0 })
         }
         for reminder in add {
+            // Kam inzwischen eine neuere Anforderung (oder `removeAll()`),
+            // hört dieser Abgleich hier auf; der nächste räumt danach auf.
+            guard token == generation else { return }
             await Self.schedule(reminder)
         }
     }

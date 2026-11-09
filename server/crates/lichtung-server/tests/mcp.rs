@@ -1120,14 +1120,24 @@ async fn split_keeps_only_the_following_extra_dates() {
         ]
     );
 
+    // The RDATE and EXDATE lines of an object (not DTSTAMP, which holds
+    // today's date and may match one of the dates).
+    let extra_dates = |ics: &str| -> Vec<String> {
+        let mut lines: Vec<String> = unfold(ics)
+            .lines()
+            .filter(|l| l.starts_with("RDATE") || l.starts_with("EXDATE"))
+            .map(str::to_owned)
+            .collect();
+        lines.sort();
+        lines
+    };
     let (_, _, old) = t.dav.find_uid(CALENDAR, "jour-fixe@example.org").unwrap();
-    let old = unfold(&old);
-    assert!(
-        old.contains("RDATE;TZID=Europe/Berlin:20261105T090000\r\n"),
-        "{old}"
-    );
-    assert!(
-        old.contains("EXDATE;TZID=Europe/Berlin:20261109T090000\r\n"),
+    assert_eq!(
+        extra_dates(&old),
+        [
+            "EXDATE;TZID=Europe/Berlin:20261109T090000",
+            "RDATE;TZID=Europe/Berlin:20261105T090000",
+        ],
         "{old}"
     );
     let uid = t
@@ -1138,21 +1148,14 @@ async fn split_keeps_only_the_following_extra_dates() {
     let (_, _, new) = t.dav.find_uid(CALENDAR, &uid).unwrap();
     let new = unfold(&new);
     assert!(new.contains("RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=2"), "{new}");
-    assert!(
-        new.contains("RDATE;TZID=Europe/Berlin:20261119T100000\r\n"),
+    // Only the dates from the split on, moved by the hour.
+    assert_eq!(
+        extra_dates(&new),
+        [
+            "EXDATE;TZID=Europe/Berlin:20261123T100000",
+            "RDATE;TZID=Europe/Berlin:20261119T100000",
+        ],
         "{new}"
-    );
-    assert!(
-        new.contains("EXDATE;TZID=Europe/Berlin:20261123T100000\r\n"),
-        "{new}"
-    );
-    assert!(
-        !new.contains("20261105"),
-        "no RDATE before the split: {new}"
-    );
-    assert!(
-        !new.contains("20261109"),
-        "no EXDATE before the split: {new}"
     );
 }
 

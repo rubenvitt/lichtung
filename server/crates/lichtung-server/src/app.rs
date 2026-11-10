@@ -106,6 +106,10 @@ struct Inner {
     booking_lock: Arc<tokio::sync::Mutex<()>>,
     /// Serializes the removal of placeholders (LIC-32).
     placeholder_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Serializes the blocker reconciliation (LIC-75).
+    blocker_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Wakes the blocker reconciliation (rules changed).
+    blocker_wakeup: tokio::sync::Notify,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -178,6 +182,8 @@ impl App {
                 sync_retry_after: Mutex::new(HashMap::new()),
                 booking_lock: Arc::new(tokio::sync::Mutex::new(())),
                 placeholder_lock: Arc::new(tokio::sync::Mutex::new(())),
+                blocker_lock: Arc::new(tokio::sync::Mutex::new(())),
+                blocker_wakeup: tokio::sync::Notify::new(),
                 config,
             }),
         })
@@ -337,6 +343,21 @@ impl App {
     /// Held while placeholders are removed (see `Inner::placeholder_lock`).
     pub(crate) async fn placeholder_guard(&self) -> tokio::sync::OwnedMutexGuard<()> {
         self.inner.placeholder_lock.clone().lock_owned().await
+    }
+
+    /// Held while blockers are reconciled (see `Inner::blocker_lock`).
+    pub(crate) async fn blocker_guard(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.inner.blocker_lock.clone().lock_owned().await
+    }
+
+    /// Asks the blocker reconciliation to run now.
+    pub(crate) fn wake_blockers(&self) {
+        self.inner.blocker_wakeup.notify_one();
+    }
+
+    /// Resolves when [`App::wake_blockers`] was called.
+    pub(crate) async fn blocker_wakeup(&self) {
+        self.inner.blocker_wakeup.notified().await;
     }
 
     /// Runs `f` with the reader connection on the blocking pool.

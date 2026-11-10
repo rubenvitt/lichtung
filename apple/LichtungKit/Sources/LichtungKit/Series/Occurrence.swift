@@ -14,10 +14,13 @@ public struct Occurrence: Hashable, Sendable, Identifiable {
     public var end: Date
     /// Das Vorkommen wurde gegenüber der Serie geändert.
     public var isModified: Bool
+    /// Blocker, den der Server angelegt hat (LIC-75): ID des Termins, für den
+    /// er blockt (`Event.blockerOf`).
+    public var blockerOf: String?
 
     public init(
         eventId: String, calendarId: String, recurrenceId: DateValue?, details: EventDetails,
-        start: Date, end: Date, isModified: Bool
+        start: Date, end: Date, isModified: Bool, blockerOf: String? = nil
     ) {
         self.eventId = eventId
         self.calendarId = calendarId
@@ -26,6 +29,7 @@ public struct Occurrence: Hashable, Sendable, Identifiable {
         self.start = start
         self.end = end
         self.isModified = isModified
+        self.blockerOf = blockerOf
     }
 
     /// Stabil über Neuberechnungen: Event plus ursprünglicher Beginn.

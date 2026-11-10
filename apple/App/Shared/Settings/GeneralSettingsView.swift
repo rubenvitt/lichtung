@@ -130,7 +130,7 @@ struct GeneralSettingsView: View {
         } header: {
             Text("Zusammenfassen")
         } footer: {
-            Text("Ein Blocker wird nur ausgeblendet, wenn er zeitgleich mit einem anderen Termin liegt. Am Termin steht, in welchen Kalendern er noch eingetragen ist.")
+            Text("Ein Blocker wird nur ausgeblendet, wenn er zeitgleich mit einem anderen Termin liegt. Blocker, die Lichtung selbst anlegt (Einstellungen › Blocker), erkennt die App an ihrem Termin, die übrigen am Titel. Am Termin steht, in welchen Kalendern er noch eingetragen ist.")
         }
     }
 

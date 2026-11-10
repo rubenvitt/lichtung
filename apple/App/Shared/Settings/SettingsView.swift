@@ -25,6 +25,8 @@ struct SettingsView: View {
                 .tabItem { Label("Sets", systemImage: "square.stack") }
             OpeningsSettingsView()
                 .tabItem { Label("Buchungslinks", systemImage: "link") }
+            BlockersSettingsView()
+                .tabItem { Label("Blocker", systemImage: "rectangle.on.rectangle") }
             AccessSettingsView()
                 .tabItem { Label("Geräte und Tokens", systemImage: "key") }
             GeneralSettingsView()
@@ -55,6 +57,11 @@ struct SettingsView: View {
                         OpeningsSettingsView()
                     } label: {
                         Label("Buchungslinks", systemImage: "link")
+                    }
+                    NavigationLink {
+                        BlockersSettingsView()
+                    } label: {
+                        Label("Blocker", systemImage: "rectangle.on.rectangle")
                     }
                     NavigationLink {
                         AccessSettingsView()

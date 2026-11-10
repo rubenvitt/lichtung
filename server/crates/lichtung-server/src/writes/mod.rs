@@ -42,6 +42,9 @@
 //! ([`App::write_guard`]).
 
 pub mod input;
+mod server;
+
+pub(crate) use server::ServerWrite;
 
 use chrono::Utc;
 use lichtung_caldav::{Client, Error as DavError, Precondition, PutResult};

@@ -12,14 +12,15 @@ private enum M {
 
     static func occ(
         _ id: String, _ title: String, in calendar: String, from sh: Int = 9, to eh: Int = 10,
-        selfStatus: ParticipationStatus? = nil
+        selfStatus: ParticipationStatus? = nil, blockerOf: String? = nil
     ) -> Occurrence {
         func value(_ h: Int) -> DateValue {
             .dateTime(LocalDateTime(date: LocalDate(year: 2026, month: 11, day: 10), hour: h, minute: 0), timeZone: "Europe/Berlin")
         }
         let details = EventDetails(title: title, start: value(sh), end: value(eh), selfStatus: selfStatus)
         return Occurrence(eventId: id, calendarId: calendar, recurrenceId: nil, details: details,
-                          start: value(sh).instant(deviceTimeZone: tz), end: value(eh).instant(deviceTimeZone: tz), isModified: false)
+                          start: value(sh).instant(deviceTimeZone: tz), end: value(eh).instant(deviceTimeZone: tz), isModified: false,
+                          blockerOf: blockerOf)
     }
 
     static func merge(_ occ: [Occurrence], _ rules: MergeRules = .default) -> [MergedOccurrence] {
@@ -78,6 +79,31 @@ struct OccurrenceMergeTests {
         #expect(r.count == 1)
         #expect(r[0].shown.calendarId == "work")
         #expect(r[0].alsoInCalendarIds == ["private"])
+    }
+
+    @Test func linkedBlockerHidesBehindItsSourceWhateverItsTitle() {
+        // LIC-75: Der Server-Blocker heißt „Belegt“, nicht „Blockiert“, und
+        // liegt zeitgleich mit zwei Terminen; er gehört zu „Dienst“.
+        let r = M.merge([
+            M.occ("a", "Sport", in: "private"), M.occ("b", "Dienst", in: "drk"),
+            M.occ("c", "Belegt", in: "work", blockerOf: "b"),
+        ])
+        #expect(r.count == 2)
+        let dienst = r.first { $0.shown.eventId == "b" }
+        #expect(dienst?.alsoInCalendarIds == ["work"])
+        #expect(r.first { $0.shown.eventId == "a" }?.others.isEmpty == true)
+    }
+
+    @Test func linkedBlockerWithoutItsSourceStays() {
+        // Sein Termin ist nicht zu sehen (z. B. Kalender ausgeblendet).
+        let r = M.merge([M.occ("a", "Sport", in: "private"), M.occ("c", "Blockiert", in: "work", blockerOf: "x")])
+        #expect(r.count == 2)
+    }
+
+    @Test func linkedBlockerStaysWhenBlockersAreShown() {
+        let rules = MergeRules(mergeIdentical: true, hideBlockers: false)
+        let r = M.merge([M.occ("b", "Dienst", in: "drk"), M.occ("c", "Belegt", in: "work", blockerOf: "b")], rules)
+        #expect(r.count == 2)
     }
 
     @Test func pendingBlockerIsNotHidden() {

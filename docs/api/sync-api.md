@@ -183,6 +183,7 @@ Ein Event ist **ein iCalendar-Objekt** (eine UID in einem Kalender): ein Einzelt
 | `self_status` | eigene Antwort, wenn ich eingeladen bin (nicht Organisator), sonst `null`. `needs_action` = **offene Terminanfrage**. |
 | `alarms` | `[{"minutes_before": 10}]` relativ zum Beginn (negativ = nach Beginn) oder `[{"at": "2026-11-02T07:45:00Z"}]` absolut |
 | `travel_time_minutes` | Reisezeit (X-APPLE-TRAVEL-DURATION), sonst `null` |
+| *(LIC-75)* `blocker_of` | nur an Blockern, die der Server angelegt hat: ID des Events, für das der Blocker blockt (`X-LICHTUNG-BLOCKER-OF`). Fehlt sonst. Siehe [`blockers.md`](blockers.md). |
 
 Das iCalendar-Original hält der Server; Felder, die Lichtung nicht modelliert, bleiben beim Bearbeiten erhalten.
 
@@ -404,6 +405,7 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 | *Ergänzung (LIC-7):* `GET /api/calendars`, `GET /api/calendar-sets` | Komfort: alle Kalender bzw. Sets wie im Pull (nach `position` sortiert) |
 | `GET /api/tokens`, `POST /api/tokens`, `DELETE /api/tokens/{id}` | API-Tokens (`lt_…`) für MCP-Clients; das Token steht nur in der Antwort auf `POST` |
 | *Ergänzung (LIC-31):* `GET`/`POST /api/openings`, `GET`/`PATCH`/`DELETE /api/openings/{id}` | Buchungslinks (Einmal-Links und Vorlagen), siehe [`openings.md`](openings.md) |
+| *Ergänzung (LIC-75):* `GET`/`POST /api/blocker-rules`, `GET`/`PATCH`/`DELETE /api/blocker-rules/{id}` | Blocker-Regeln, siehe [`blockers.md`](blockers.md) |
 
 *Ergänzungen (LIC-46) zu `me` und Geräten:*
 
@@ -505,3 +507,4 @@ Zusätzliche `code`s in Mutations-Ergebnissen (`rejected`/`retry`): `calendar_re
 | 2026-10-26 | Ergänzung aus LIC-55 (keine bestehende Form geändert): Clients der Apps bleiben 30 Tage nach dem Widerruf ihres letzten Geräts bestehen (Abschnitt 2) |
 | 2026-10-27 | Ergänzung aus LIC-33 und LIC-35 (keine bestehende Form geändert): Feld `bookings` am Objekt `opening` (Buchungen mit Name, E-Mail-Adresse und Notiz des Gastes, neueste 50), ID-Präfix `bkg_`; eine Buchung einer Vorlage und das Löschen alter Buchungen erscheinen als `upsert` des Links im Pull ([`openings.md`](openings.md), Abschnitte 2, 6, 8) |
 | 2026-11-08 | Ergänzung aus LIC-62 (keine bestehende Form geändert, Verhalten seit LIC-57): Deutung von `COUNT` und `UNTIL` in `recurrence.rrule` bei `update_event` mit `scope` `all` oder `this_and_following` (Abschnitt 6) |
+| 2026-11-10 | Ergänzung aus LIC-75 (keine bestehende Form geändert): Blocker-Regeln mit eigenem Vertrag [`blockers.md`](blockers.md); `GET`/`POST /api/blocker-rules`, `GET`/`PATCH`/`DELETE /api/blocker-rules/{id}`, ID-Präfix `blr_`; Feld `blocker_of` am Event (nur an Blockern des Servers) (Abschnitte 3, 7) |

@@ -820,3 +820,33 @@ fn all_can_change_and_remove_rule() {
         ["2026-10-05 09:00 Europe/Berlin [07:00Z] 30min | Team-Sync"]
     );
 }
+
+#[test]
+fn unchanged_utc_until_moves_in_wall_clock_time_across_dst() {
+    // LIC-73, documented in docs/mcp.md: Berlin, daily 09:00, last
+    // occurrence 28.03.2026 09:00 CET (= 08:00Z). Moving the start by one
+    // day crosses the switch to summer time on 29.03.; UNTIL keeps 09:00
+    // local time and so moves by 23 hours in UTC, not 24.
+    let ics = "BEGIN:VEVENT
+    UID:dst@example.org
+    DTSTAMP:20260301T080000Z
+    DTSTART;TZID=Europe/Berlin:20260307T090000
+    DTEND;TZID=Europe/Berlin:20260307T093000
+    RRULE:FREQ=DAILY;UNTIL=20260328T080000Z
+    SUMMARY:Morgenrunde
+    END:VEVENT";
+    let obj = CalendarObject::parse(&cal(ics)).unwrap();
+    let out = edit_event(
+        &obj,
+        None,
+        EditScope::All,
+        &EventChanges {
+            start: Some(berlin_at("2026-03-08", (9, 0))),
+            ..Default::default()
+        },
+        &ctx(),
+    )
+    .unwrap();
+    let rule = updated(&out).master().unwrap().rrule().unwrap().unwrap();
+    assert_eq!(rule.to_string(), "FREQ=DAILY;UNTIL=20260329T070000Z");
+}

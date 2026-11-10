@@ -804,3 +804,33 @@ struct EventDraftLinkLengthTests {
         #expect(!draft.canSave)
     }
 }
+
+@Suite("Termin-Editor: unveränderter überlanger Link (LIC-72)")
+struct EventDraftUnchangedLongLinkTests {
+    typealias D = DraftFixtures
+    static let longLink = "https://example.org/" + String(repeating: "a", count: EventDraft.maxURLLength)
+
+    @Test func unchangedTooLongLinkDoesNotBlockOtherEdits() throws {
+        let (occ, e) = D.single { $0.details.url = Self.longLink }
+        var draft = D.draft(occ, e)
+        draft.title = "Neuer Titel"
+        #expect(draft.canSave)
+        let c = try #require(D.changes(draft.saveIntent()))
+        #expect(c.title == "Neuer Titel")
+        #expect(c.url == nil)
+    }
+
+    @Test func changedLinkThatIsStillTooLongBlocksSaving() {
+        let (occ, e) = D.single { $0.details.url = Self.longLink }
+        var draft = D.draft(occ, e)
+        draft.url = Self.longLink + "b"
+        #expect(!draft.canSave)
+        #expect(draft.validationMessage?.contains("zu lang") == true)
+    }
+
+    @Test func newEventWithTooLongLinkStaysBlocked() {
+        var draft = EventDraft.new(on: D.day(3), now: SyncFixtures.now, calendarId: "cal_1", deviceTimeZone: D.tz)
+        draft.url = Self.longLink
+        #expect(!draft.canSave)
+    }
+}

@@ -592,7 +592,9 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
     /// Was das Sichern verhindert, als Satz für die Oberfläche; `nil` = in Ordnung.
     public var validationMessage: String? {
         if calendarId.isEmpty { return "Kein beschreibbarer Kalender ausgewählt." }
-        if let link = effectiveURL {
+        // Einen unveränderten Link vom Anbieter schickt `saveIntent` nicht mit,
+        // er darf das Bearbeiten der übrigen Felder also nicht blockieren.
+        if let link = effectiveURL, linkChanged {
             // Der Server zählt Unicode-Scalars (Rust `chars()`), nicht Grapheme.
             if link.unicodeScalars.count > Self.maxURLLength { return "Der Link ist zu lang (höchstens \(Self.maxURLLength) Zeichen)." }
             if URL(string: link)?.scheme == nil { return "Der Link ist keine gültige Adresse." }
@@ -615,6 +617,13 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
     }
 
     public var canSave: Bool { validationMessage == nil }
+
+    /// Neuer Termin oder ein Link, der sich vom Original unterscheidet
+    /// (derselbe Vergleich wie in `saveIntent`).
+    var linkChanged: Bool {
+        guard let original else { return true }
+        return effectiveURL != Self.effectiveURL(original.fields.url)
+    }
 
     // MARK: - Geltungsbereich
 
@@ -659,7 +668,7 @@ public struct EventDraft: Identifiable, Hashable, Sendable {
             c.location = location.trimmed.isEmpty ? .clear : .set(location.trimmed)
         }
         if notes != before.notes { c.notes = notes.trimmed.isEmpty ? .clear : .set(notes) }
-        if effectiveURL != Self.effectiveURL(before.url) { c.url = effectiveURL.map { .set($0) } ?? .clear }
+        if linkChanged { c.url = effectiveURL.map { .set($0) } ?? .clear }
         if availability != before.availability { c.availability = availability }
         if startValue != Self.startValue(before) || endValue != Self.endValue(before) {
             if scope == .all, isSeriesOccurrence, let seriesStart = original.seriesStart {

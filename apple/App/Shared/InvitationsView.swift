@@ -88,7 +88,7 @@ private struct InvitationsToolbarButton: ViewModifier {
         #else
         content
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .topBarTrailing) {
                     // Label mit Titel, damit der Eintrag im ⋯-Menü Text hat (LIC-66).
                     Button { showsList = true } label: {
                         Label { Text(Self.title(count)) } icon: { InvitationsIcon(count: count) }

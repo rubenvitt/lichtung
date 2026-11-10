@@ -88,6 +88,31 @@ struct AgendaTests {
         #expect(AgendaBuilder.sentence(L.allDay("A", 24, through: 26), today: today, calendar: L.cal) == "Samstag bis Montag, ganztägig")
     }
 
+    @Test func nextSentenceForThePhoneHeader() {
+        // Fr 23. Okt., 10:40 Uhr.
+        let now = L.day(23).date(hour: 10, minute: 40, in: L.cal)
+        func next(_ occ: [Occurrence], at time: Date = now) -> String {
+            AgendaBuilder.nextSentence(occ, now: time, calendar: L.cal)
+        }
+        #expect(next([L.timed("Sport", 23, 11, to: 12)]) == "Sport beginnt in 20 Minuten")
+        // Aufgerundet: nie „in 0 Minuten“, Einzahl bei einer Minute.
+        #expect(next([L.timed("Sport", 23, 10, 41, to: 12)], at: now.addingTimeInterval(30)) == "Sport beginnt in 1 Minute")
+        // Ab einer Stunde Abstand die Uhrzeit.
+        #expect(next([L.timed("Sport", 23, 14, to: 15)]) == "Sport beginnt um 14:00")
+        // Ein laufender Termin geht vor; der zuletzt begonnene ist der genauere (Rahmen 8–17 Uhr).
+        #expect(next([L.timed("Arbeit", 23, 8, to: 17), L.timed("Sport", 23, 10, to: 11, 45), L.timed("C", 23, 11, to: 12)])
+            == "Sport läuft bis 11:45")
+        #expect(next([L.timed("Nacht", 23, 22, to: 6, endDay: 24)], at: L.day(23).date(hour: 23, minute: 0, in: L.cal))
+            == "Nacht läuft bis morgen 06:00")
+        // Ganztägiges, Vorbeies und Morgiges zählen nicht.
+        #expect(next([L.allDay("Urlaub", 23), L.timed("A", 23, 8, to: 9), L.timed("B", 24, 9, to: 10)]) == "Heute nichts mehr")
+        #expect(next([]) == "Heute nichts mehr")
+        // Abgesagt zählt nicht.
+        var cancelled = L.timed("Sport", 23, 11, to: 12)
+        cancelled.details.status = .cancelled
+        #expect(next([cancelled, L.timed("B", 23, 14, to: 15)]) == "B beginnt um 14:00")
+    }
+
     @Test func headingOtherYearAndYesterday() {
         #expect(AgendaBuilder.heading(LocalDate(year: 2027, month: 1, day: 3), today: today) == "So 3. Jan. 2027")
         #expect(AgendaBuilder.heading(L.day(22), today: today) == "Gestern · Do 22.")

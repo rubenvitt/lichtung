@@ -36,6 +36,8 @@ struct DayGridView: View {
     static let minimumHourHeight: CGFloat = 56
     var hourHeight: CGFloat = DayGridView.minimumHourHeight
     var visibleAllDayLanes = 3
+    /// Am iPhone zeigt die Tagesansicht den Tag schon groß im eigenen Kopf.
+    var showsHeader = true
 
     private let gutter: CGFloat = 48
     /// Breite der Spalte für die zweite Zeitzone (LIC-42).
@@ -74,7 +76,9 @@ struct DayGridView: View {
         GeometryReader { geo in
             let daysWidth: CGFloat = max(0, geo.size.width - leadingWidth)
             VStack(spacing: 0) {
-                header(days, widths: widths, daysWidth: daysWidth)
+                if showsHeader {
+                    header(days, widths: widths, daysWidth: daysWidth)
+                }
                 if !bars.isEmpty {
                     AllDayRow(bars: bars, columns: dayCount, visibleLanes: visibleAllDayLanes, leadingInset: leadingWidth, widths: widths)
                 }
@@ -1423,9 +1427,14 @@ struct DayHeaderCell: View {
         // Ein Text, damit er beim Schrumpfen als Ganzes kleiner wird.
         Group {
             if isFocus {
-                Text(QuickEntryPreview.weekdayLong[index]).fontWeight(.light).foregroundStyle(Theme.text1)
-                    + Text(verbatim: " ")
-                    + number.fontWeight(isToday ? .bold : .semibold)
+                // Passt „Donnerstag 12“ nicht (iPhone-Woche), dann „Do 12“ in derselben Größe.
+                ViewThatFits(in: .horizontal) {
+                    ForEach([QuickEntryPreview.weekdayLong[index], QuickEntryPreview.weekdayShort[index]], id: \.self) { name in
+                        Text(name).fontWeight(.light).foregroundStyle(Theme.text1)
+                            + Text(verbatim: " ")
+                            + number.fontWeight(isToday ? .bold : .semibold)
+                    }
+                }
             } else {
                 Text(QuickEntryPreview.weekdayShort[index]).foregroundStyle(Theme.text2)
                     + Text(verbatim: " ")
@@ -1548,6 +1557,7 @@ private struct OverflowList: View {
         }
         .padding(12)
         .frame(minWidth: 220, alignment: .leading)
+        .presentationCompactAdaptation(.popover) // iPhone: Popover statt Blatt
         .environment(model)
     }
 }

@@ -62,7 +62,7 @@ private struct SyncProblemsToolbarButton: ViewModifier {
         content
             .toolbar {
                 if count > 0 {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button { showsList = true } label: {
                             Label { Text(Self.title(count)) } icon: { SyncProblemsIcon(count: count) }
                         }

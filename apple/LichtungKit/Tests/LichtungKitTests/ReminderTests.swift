@@ -25,12 +25,13 @@ private enum R {
         )
     }
 
-    static func plan(_ events: [Event], limit: Int = ReminderPlanner.defaultLimit) -> [PlannedReminder] {
+    static func plan(_ events: [Event], limit: Int = ReminderPlanner.defaultLimit, merge: MergeRules = .off) -> [PlannedReminder] {
         var s = SyncState()
         s.calendars["cal_1"] = CalendarInfo(id: "cal_1", accountId: "acc", name: "Privat")
+        s.calendars["cal_2"] = CalendarInfo(id: "cal_2", accountId: "acc", name: "Arbeit", writable: false, position: 1)
         s.calendars["cal_aus"] = CalendarInfo(id: "cal_aus", accountId: "acc", name: "Aus", hidden: true)
         for e in events { s.events[e.id] = e }
-        return ReminderPlanner.plan(CalendarQuery(state: s, deviceTimeZone: tz), now: now, limit: limit, calendar: cal)
+        return ReminderPlanner.plan(CalendarQuery(state: s, deviceTimeZone: tz), now: now, limit: limit, calendar: cal, merge: merge)
     }
 }
 
@@ -142,5 +143,25 @@ struct ReminderTests {
         #expect(d.add.map(\.id) == ["b", "c"])
         let same = ReminderPlanner.diff(scheduled: [a, b], wanted: [a, b])
         #expect(same.remove.isEmpty && same.add.isEmpty)
+    }
+
+    @Test("Zusammengefasste Termine erinnern einmal pro Zeitpunkt")
+    func mergedGroupRemindsOncePerFireDate() {
+        let a = R.event("a", start: R.timed(9, 14), end: R.timed(9, 15), alarms: [.minutesBefore(10)], calendar: "cal_1")
+        let b = R.event("b", start: R.timed(9, 14), end: R.timed(9, 15), alarms: [.minutesBefore(10)], calendar: "cal_2")
+        #expect(R.plan([a, b]).count == 2)
+        let merged = R.plan([a, b], merge: .default)
+        #expect(merged.count == 1)
+        #expect(merged[0].occurrenceId == "a")
+    }
+
+    @Test("Nur der Blocker hat einen Alarm: Erinnerung bleibt, mit Titel des Sichtbaren")
+    func blockerAlarmSurvivesWithShownTitle() {
+        let sport = R.event("s", title: "Sport", start: R.timed(9, 14), end: R.timed(9, 15), alarms: [], calendar: "cal_1")
+        let blocker = R.event("b", title: "Blockiert", start: R.timed(9, 14), end: R.timed(9, 15), alarms: [.minutesBefore(10)], calendar: "cal_2")
+        let plan = R.plan([sport, blocker], merge: .default)
+        #expect(plan.count == 1)
+        #expect(plan[0].title == "Sport")
+        #expect(plan[0].occurrenceId == "s")
     }
 }

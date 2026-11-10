@@ -44,9 +44,7 @@ struct PhoneRootView: View {
     // Schnelleingabe als Blatt hinter „+“
     @State private var showsQuickEntry = false
     @State private var opensEditorAfterQuickEntry = false
-    /// Großer Titel in der Zeile der Knöpfe; wächst mit der Schriftgröße. 30 statt
-    /// 32 pt, damit „Donnerstag 12“ neben drei Knöpfen passt, ohne dass das
-    /// System sie ins ⋯-Menü schiebt.
+    /// Großer Titel in der Zeile der Knöpfe (32 pt, Spec §4); wächst mit der Schriftgröße.
     @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 32
 
     private var isSearching: Bool { showsSearch || !searchText.trimmingCharacters(in: .whitespaces).isEmpty }

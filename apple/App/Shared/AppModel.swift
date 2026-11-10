@@ -42,6 +42,11 @@ final class AppModel {
     var highlightedOccurrence: Occurrence?
     /// Ob das Kalenderfeld den Tastaturfokus hat (kein Textfeld). Setzt `MacRootView`.
     var calendarHasKeyboardFocus = false
+    /// Ob im Feld der Mac-Toolbar getippt wird (`CommandField`). Es holt sich
+    /// den Fokus über AppKit, das sieht `calendarHasKeyboardFocus` nicht immer.
+    var commandFieldEditing = false
+    /// Ob die rechte Spalte ins Mac-Fenster passt (für ⌃⌘I). Setzt `MacRootView`.
+    var inspectorFits = true
     /// Bitte an `MacRootView`, den Fokus ins Kalenderfeld zu holen (Zähler wie `searchFocusRequests`).
     var calendarFocusRequests = 0
     /// Zählt „Heute“ mit: Ist heute schon gewählt, ändert sich `selectedDay` nicht,
@@ -386,7 +391,7 @@ extension AppModel {
     /// Ob Menüpunkte mit Kürzeln, die auch Textfelder kennen (⌘←/⌘→, ⌘⌫),
     /// fürs Kalenderfeld gelten: Fokus dort und kein Blatt offen (LIC-50).
     var calendarCommandsEnabled: Bool {
-        calendarHasKeyboardFocus && selectedOccurrence == nil && editorDraft == nil
+        calendarHasKeyboardFocus && !commandFieldEditing && selectedOccurrence == nil && editorDraft == nil
     }
 
     /// Einen Schritt der Ansicht vor oder zurück (⌘←/⌘→ im Menü „Darstellung“).
@@ -412,6 +417,7 @@ extension AppModel {
     /// Klick auf einen Termin (Mac): markieren, Fokus ins Kalenderfeld.
     func highlight(_ occ: Occurrence) {
         highlightedOccurrence = occ
+        refreshHighlight() // ein zusammengefasstes Vorkommen (Suchtreffer) → das angezeigte
         calendarFocusRequests += 1
     }
 
@@ -494,13 +500,14 @@ extension AppModel {
     }
 
     /// Nach jedem neuen Stand: Markierung auf den frischen Termin setzen
-    /// (z. B. nach dem Verschieben), gelöschte fallen weg.
+    /// (z. B. nach dem Verschieben), gelöschte fallen weg. Ist der Termin mit
+    /// anderen zusammengefasst und nicht zu sehen, gilt das angezeigte Vorkommen.
     func refreshHighlight() {
         guard let h = highlightedOccurrence else { return }
         let day = LocalDate(h.start, calendar: calendar).adding(days: -1)
-        let around = occurrences(from: day, days: 3)
+        let around = mergedOccurrences(from: day, days: 3)
         highlightedOccurrence = OccurrenceNavigation.refreshed(h, in: visibleOccurrences)
-            ?? OccurrenceNavigation.refreshed(h, in: around)
+            ?? around.first { $0.shown.id == h.id || $0.others.contains { $0.id == h.id } }?.shown
     }
 
     // MARK: Löschen

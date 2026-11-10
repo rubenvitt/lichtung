@@ -16,7 +16,7 @@ import UniformTypeIdentifiers
 ///
 /// Trackpad (Spec §5): Waagerechtes Wischen mit zwei Fingern blättert einen
 /// Schritt der Ansicht (`TrackpadPaging`), Aufziehen ändert im Raster die Höhe
-/// der Stunde (40–120 pt, gemerkt).
+/// der Stunde (56–120 pt, gemerkt).
 struct MacRootView: View {
     @Environment(AppModel.self) private var model
 
@@ -28,12 +28,15 @@ struct MacRootView: View {
     @State private var pinchHeight: Double?
     /// Breite des Fensterinhalts; darunter blendet sich die rechte Spalte aus.
     @State private var contentWidth: CGFloat = .infinity
+    /// Text und Modus des Felds liegen hier: Beim Wechsel zwischen schmaler und
+    /// breiter Toolbar entsteht ein neues Feld, der Entwurf soll bleiben.
+    @State private var commandText = ""
     @State private var commandMode = CommandField.Mode.create
     @State private var showsMiniMonth = false
     // Tastatur im Kalenderfeld (LIC-24)
     @FocusState private var calendarFocused: Bool
 
-    static let hourHeightRange = 40.0...120.0
+    static let hourHeightRange = Double(DayGridView.minimumHourHeight)...120.0
     /// Schmaler als das, blendet sich die rechte Spalte von selbst aus (Spec §8)
     /// und kommt wieder, wenn das Fenster breiter wird und sie eingeschaltet ist.
     static let inspectorMinWidth: CGFloat = 900
@@ -45,6 +48,10 @@ struct MacRootView: View {
     /// Schmales Fenster: Titel ohne Jahr, Feld schmaler, Umschalter als Menü, damit
     /// Blättern, „Heute“ und der Umschalter nicht ins Überlaufmenü rutschen.
     private var compact: Bool { contentWidth < Self.compactToolbarWidth }
+    /// Gemerkte Stundenhöhe im erlaubten Bereich (ältere Stände kannten 40 pt).
+    private var storedHourHeight: Double {
+        min(max(hourHeight, Self.hourHeightRange.lowerBound), Self.hourHeightRange.upperBound)
+    }
 
     var body: some View {
         @Bindable var model = model
@@ -58,6 +65,8 @@ struct MacRootView: View {
         }
         .frame(minWidth: Self.minWidth)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+        // Für ⌃⌘I im Menü: aus, solange die Spalte nicht passt.
+        .onChange(of: contentWidth >= Self.inspectorMinWidth, initial: true) { _, fits in model.inspectorFits = fits }
         .background(Theme.shade)
         // Was weiter innen steht, landet in der Toolbar weiter rechts: Anfragen,
         // Sync-Probleme und ganz rechts der Knopf für die Spalte.
@@ -85,13 +94,13 @@ struct MacRootView: View {
             if compact {
                 ToolbarItem(placement: .navigation) { titleButton(compact: true) }
                 ToolbarItem(placement: .navigation) { pagingButtons }
-                ToolbarItem(placement: .navigation) { CommandField(mode: $commandMode, compact: true) }
+                ToolbarItem(placement: .navigation) { CommandField(text: $commandText, mode: $commandMode, compact: true) }
                 // Umschalter als Aufklappmenü.
                 ToolbarItem(placement: .primaryAction) { viewPicker.pickerStyle(.menu).labelsHidden().fixedSize() }
             } else {
                 ToolbarItem(placement: .navigation) { titleButton(compact: false) }
                 ToolbarItem(placement: .navigation) { pagingButtons }
-                ToolbarItem(placement: .navigation) { CommandField(mode: $commandMode) }
+                ToolbarItem(placement: .navigation) { CommandField(text: $commandText, mode: $commandMode) }
                 ToolbarItem(placement: .primaryAction) { viewPicker.pickerStyle(.segmented) }
             }
             ToolbarItem(placement: .primaryAction) {
@@ -133,6 +142,9 @@ struct MacRootView: View {
         return Picker("Ansicht", selection: $model.viewMode) {
             ForEach(CalendarViewMode.allCases) { Text($0.label).tag($0) }
         }
+        // Ohne die Licht-Tönung der App: Das System schreibt auf die gewählte
+        // Fläche weiß, auf `light` im dunklen Modus wäre das unlesbar.
+        .tint(nil)
         .help("Ansicht (⌘1–⌘4)")
     }
 
@@ -179,8 +191,8 @@ struct MacRootView: View {
     private var detail: some View {
         let d = model.selectedDay
         switch model.viewMode {
-        case .day: DayGridView(start: d, dayCount: 1, hourHeight: CGFloat(pinchHeight ?? hourHeight)).simultaneousGesture(pinch)
-        case .week: DayGridView(start: weekStart, dayCount: 7, hourHeight: CGFloat(pinchHeight ?? hourHeight)).simultaneousGesture(pinch)
+        case .day: DayGridView(start: d, dayCount: 1, hourHeight: CGFloat(pinchHeight ?? storedHourHeight)).simultaneousGesture(pinch)
+        case .week: DayGridView(start: weekStart, dayCount: 7, hourHeight: CGFloat(pinchHeight ?? storedHourHeight)).simultaneousGesture(pinch)
         case .month: MonthView(year: d.year, month: d.month)
         case .year: YearView(year: d.year)
         }
@@ -191,7 +203,7 @@ struct MacRootView: View {
     private var pinch: some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                let base = pinchBase ?? hourHeight
+                let base = pinchBase ?? storedHourHeight
                 pinchBase = base
                 pinchHeight = min(max(base * value.magnification, Self.hourHeightRange.lowerBound), Self.hourHeightRange.upperBound)
             }
@@ -362,6 +374,7 @@ struct LichtungCommands: Commands {
             ViewModeMenuItems(model: model, calendarFocused: calendarKeyboardFocus == true)
             Button(inspectorVisible ? "Rechte Spalte ausblenden" : "Rechte Spalte einblenden") { inspectorVisible.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .control])
+                .disabled(!model.inspectorFits)
             Divider()
         }
         // Aktionen am markierten Termin; ohne Markierung ausgegraut.

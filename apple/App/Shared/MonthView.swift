@@ -61,7 +61,7 @@ struct MonthWeekRow: View {
                         .padding(.leading, 4)
                         .padding(.top, 3)
                         .contentShape(Rectangle())
-                        .onTapGesture { model.selectedDay = day }
+                        .onTapGesture { model.focus(day) }
                         .modifier(DaySlotContextMenu(day: day)) // LIC-24
                 }
             }

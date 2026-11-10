@@ -33,8 +33,37 @@ enum Theme {
     static let sun = Color(light: 0xC58500, dark: 0xF0B840)
     /// Stundenlinien und Trennungen.
     static let line = Color(light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.07, darkAlpha: 0.06)
-    /// Schrift auf einem laufenden Termin (volle Kalenderfarbe), in beiden Modi.
-    static let onRunning = Color(light: 0x141513, dark: 0x141513)
+    /// Schrift auf einem laufenden Termin (volle Kalenderfarbe): dunkel
+    /// `#141513` oder weiß, je nachdem, was nach WCAG mehr Kontrast hat.
+    /// Unbekannte Farbe → dunkel, passend zur grauen Ersatzfarbe.
+    static func onRunning(for hex: String?) -> Color {
+        let dark: UInt32 = 0x141513
+        guard let calendar = hexValue(hex) else { return Color(light: dark, dark: dark) }
+        let l = luminance(calendar)
+        // Weiß hat die Leuchtdichte 1.
+        let text: UInt32 = contrast(l, luminance(dark)) >= contrast(l, 1) ? dark : 0xFFFFFF
+        return Color(light: text, dark: text)
+    }
+
+    /// Relative Leuchtdichte nach WCAG 2.x (sRGB linearisiert, 0…1).
+    static func luminance(_ value: UInt32) -> Double {
+        func linear(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        let (r, g, b) = rgb(value)
+        return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+    }
+
+    /// Kontrastverhältnis nach WCAG (1…21) zweier Leuchtdichten.
+    static func contrast(_ a: Double, _ b: Double) -> Double {
+        (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    /// `#RRGGBB` aus der API als `0xRRGGBB`; sonst `nil`.
+    fileprivate static func hexValue(_ hex: String?) -> UInt32? {
+        var text = (hex ?? "").trimmingCharacters(in: .whitespaces)
+        if text.hasPrefix("#") { text.removeFirst() }
+        guard text.count == 6 else { return nil }
+        return UInt32(text, radix: 16)
+    }
 
     /// Fläche eines kommenden Termins: Kalenderfarbe deckend auf `shade`
     /// gemischt, dunkel 30 %, hell 20 % (wie `color-mix(in srgb …)` im Entwurf).
@@ -104,17 +133,12 @@ enum Theme {
 extension Color {
     /// `#RRGGBB` aus der API; unbekannt → Grau.
     init(hex: String?) {
-        var text = (hex ?? "").trimmingCharacters(in: .whitespaces)
-        if text.hasPrefix("#") { text.removeFirst() }
-        guard text.count == 6, let value = Int(text, radix: 16) else {
+        guard let value = Theme.hexValue(hex) else {
             self = .gray
             return
         }
-        self = Color(
-            red: Double((value >> 16) & 0xFF) / 255,
-            green: Double((value >> 8) & 0xFF) / 255,
-            blue: Double(value & 0xFF) / 255
-        )
+        let (r, g, b) = Theme.rgb(value)
+        self = Color(red: r, green: g, blue: b)
     }
 
     /// Farbe mit eigener Fassung für den dunklen Modus (`0xRRGGBB`).

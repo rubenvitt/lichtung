@@ -4,22 +4,31 @@ import SwiftUI
 
 /// Ein Feld für Eintragen und Suchen in der Mitte der Mac-Toolbar (Spec §5).
 ///
-/// Beim Tippen zeigt ein Popover darunter die Zeile „Anlegen: …“ mit der
+/// Beim Tippen zeigt eine Liste darunter die Zeile „Anlegen: …“ mit der
 /// Vorschau der Schnelleingabe und die Suchtreffer. ⌘K (`.create`) stellt
 /// „Anlegen“ nach oben und wählt es vor, ⌘F (`.search`) die Treffer. Return
 /// führt die vorgewählte Zeile aus, ↑/↓ wählen, Esc leert das Feld und gibt
 /// den Fokus ans Raster zurück. Ohne Text zeigt das Feld nichts.
+///
+/// Die Liste liegt in einem Fenster, das nie key wird; VoiceOver bleibt also
+/// im Feld. Deshalb trägt das Feld die vorgewählte Zeile als Wert und sagt
+/// sie an, wenn sie wechselt.
 struct CommandField: View {
     enum Mode { case create, search }
 
     @Binding var mode: Mode
+    /// Schmales Fenster: Feld auf Mindestbreite.
+    var compact = false
     @Environment(AppModel.self) private var model
     /// Dauer, wenn der Satz keine nennt (LIC-53, `NewEventDuration`).
     @AppStorage(NewEventDuration.storageKey) private var storedMinutes = 0
     @State private var text = ""
-    /// Vorgewählte Zeile.
+    /// Vorgewählte Zeile (wird beim Zeichnen auf die vorhandenen Zeilen begrenzt).
     @State private var selection = 0
-    @FocusState private var focused: Bool
+    /// Ob das Feld gerade bearbeitet wird (meldet `CommandTextField`).
+    @State private var focused = false
+    /// Zähler: Fokus ins Feld holen (⌘K, ⌘F).
+    @State private var focusRequest = 0
 
     /// Eine Zeile der Liste.
     private enum Row: Identifiable {
@@ -34,17 +43,31 @@ struct CommandField: View {
         }
     }
 
+    /// Was sich ändern muss, damit VoiceOver die vorgewählte Zeile neu ansagt:
+    /// andere Zeile gewählt oder andere Zeilen da, nicht jeder Tastendruck.
+    private struct Announcement: Equatable {
+        var selected: Int?
+        var rows: [String]
+    }
+
     var body: some View {
         let rows = self.rows(now: Date())
+        let current: Int? = rows.isEmpty ? nil : min(selection, rows.count - 1)
+        let spoken: String? = current.map { accessibilityText(rows[$0]) }
         HStack(spacing: 6) {
-            TextField("Termin eintragen oder suchen", text: $text)
-                .textFieldStyle(.plain)
-                .focused($focused)
-                .onSubmit { run(rows.indices.contains(selection) ? rows[selection] : nil) }
-                .onKeyPress(.downArrow) { move(1, count: rows.count) }
-                .onKeyPress(.upArrow) { move(-1, count: rows.count) }
-                .onExitCommand(perform: close)
-                .accessibilityLabel("Termin eintragen oder suchen")
+            CommandTextField(
+                text: $text,
+                isFocused: $focused,
+                focusRequest: focusRequest,
+                placeholder: compact ? "Eintragen oder suchen" : "Termin eintragen oder suchen",
+                valueDescription: spoken,
+                onMove: { delta in
+                    guard !rows.isEmpty else { return }
+                    selection = min(max((current ?? 0) + delta, 0), rows.count - 1)
+                },
+                onSubmit: { run(current.map { rows[$0] }) },
+                onCancel: close
+            )
             Text(mode == .search ? "⌘F" : "⌘K")
                 .font(.callout)
                 .foregroundStyle(Theme.text2)
@@ -52,12 +75,16 @@ struct CommandField: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .frame(minWidth: 160, idealWidth: 240, maxWidth: 380)
+        // Feste Breite: Das `NSTextField` bringt keine sinnvolle Wunschbreite mit.
+        .frame(width: compact ? 190 : 280)
         .background(RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous).fill(Theme.line))
         .background {
-            DropdownPanel(content: showsList ? AnyView(list(rows).environment(model)) : nil)
+            DropdownPanel(content: showsList ? AnyView(list(rows, selected: current).environment(model)) : nil)
         }
         .onChange(of: text) { selection = 0 }
+        .onChange(of: Announcement(selected: current, rows: rows.map(\.id))) {
+            if focused, let spoken { AccessibilityNotification.Announcement(spoken).post() }
+        }
         .onChange(of: model.createFieldRequests) { request(.create) }
         .onChange(of: model.searchFocusRequests) { request(.search) }
     }
@@ -70,13 +97,7 @@ struct CommandField: View {
     private func request(_ newMode: Mode) {
         mode = newMode
         selection = 0
-        focused = true
-    }
-
-    private func move(_ delta: Int, count: Int) -> KeyPress.Result {
-        guard count > 0 else { return .ignored }
-        selection = min(max(selection + delta, 0), count - 1)
-        return .handled
+        focusRequest += 1
     }
 
     /// Esc: Feld leeren, Fokus zurück ans Raster.
@@ -118,9 +139,31 @@ struct CommandField: View {
         }
     }
 
+    /// Texte der Zeile „Anlegen“: Titel, Zeit mit Kalender, Wiederholung und Ort.
+    private func createTexts(_ entry: QuickEntry) -> (title: String, when: String, extras: String?, calendarId: String?) {
+        let preview = QuickEntryPreview(entry, now: Date(), timeZone: model.timeZone, calendars: choices)
+        let calendarId = entry.calendarID ?? model.defaultCalendarId
+        let calendarName = preview.calendarName ?? calendarId.flatMap { model.state.calendars[$0]?.name } ?? "Kein Kalender"
+        let title = preview.title.trimmingCharacters(in: .whitespaces)
+        let extras = [preview.recurrence, preview.location].compactMap { $0 }
+        return (title.isEmpty ? "Neuer Termin" : title, "\(when(entry)) in \(calendarName)",
+                extras.isEmpty ? nil : extras.joined(separator: ", "), calendarId)
+    }
+
+    /// Die Zeile als ein Satz für VoiceOver.
+    private func accessibilityText(_ row: Row) -> String {
+        switch row {
+        case let .create(entry):
+            let t = createTexts(entry)
+            return "Anlegen: \(t.title), \(t.when)"
+        case let .hit(occ):
+            return "\(occ.title), \(AgendaBuilder.sentence(occ, today: model.today, calendar: model.calendar))"
+        }
+    }
+
     // MARK: Liste
 
-    private func list(_ rows: [Row]) -> some View {
+    private func list(_ rows: [Row], selected: Int?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 Button { run(row) } label: {
@@ -129,7 +172,7 @@ struct CommandField: View {
                         .padding(.vertical, 5)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background {
-                            if index == selection {
+                            if index == selected {
                                 RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous)
                                     .fill(Theme.light.opacity(0.12))
                             }
@@ -138,7 +181,7 @@ struct CommandField: View {
                 }
                 .buttonStyle(.plain)
                 .focusable(false)
-                .accessibilityAddTraits(index == selection ? .isSelected : [])
+                .accessibilityAddTraits(index == selected ? .isSelected : [])
             }
             if !rows.contains(where: { if case .hit = $0 { true } else { false } }) {
                 Text("Keine Treffer")
@@ -160,20 +203,17 @@ struct CommandField: View {
     private func rowLabel(_ row: Row) -> some View {
         switch row {
         case let .create(entry):
-            let preview = QuickEntryPreview(entry, now: Date(), timeZone: model.timeZone, calendars: choices)
-            let calendarId = entry.calendarID ?? model.defaultCalendarId
-            let calendarName = preview.calendarName ?? calendarId.flatMap { model.state.calendars[$0]?.name } ?? "Kein Kalender"
+            let t = createTexts(entry)
             HStack(alignment: .top, spacing: 8) {
-                CalendarBar(color: calendarId.map { model.color(for: $0) } ?? Theme.text2, width: 3)
+                CalendarBar(color: t.calendarId.map { model.color(for: $0) } ?? Theme.text2, width: 3)
                 VStack(alignment: .leading, spacing: 1) {
-                    (Text("Anlegen: ").fontWeight(.semibold) + Text(preview.title))
+                    (Text("Anlegen: ").fontWeight(.semibold) + Text(t.title))
                         .foregroundStyle(Theme.text1)
-                    Text("\(when(entry)) in \(calendarName)")
+                    Text(t.when)
                         .font(.callout)
                         .foregroundStyle(Theme.text2)
-                    let extras = [preview.recurrence, preview.location].compactMap { $0 }
-                    if !extras.isEmpty {
-                        Text(extras.joined(separator: ", "))
+                    if let extras = t.extras {
+                        Text(extras)
                             .font(.callout)
                             .foregroundStyle(Theme.text2)
                     }
@@ -210,6 +250,92 @@ struct CommandField: View {
                                           allDay: true, today: today, calendar: cal)
         case let .timed(start, end):
             return AgendaBuilder.sentence(from: start, to: end, allDay: false, today: today, calendar: cal)
+        }
+    }
+}
+
+/// Das Textfeld selbst als `NSTextField`: ↑/↓, Return und Esc kommen über
+/// `control(_:textView:doCommandBy:)` sicher an, auch während der Feld-Editor
+/// den Fokus hat. Bei `TextField` mit `onKeyPress` ist das am Mac nicht verlässlich.
+private struct CommandTextField: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    /// Ändert sich der Zähler, holt sich das Feld den Fokus.
+    let focusRequest: Int
+    let placeholder: String
+    /// Vorgewählte Zeile für VoiceOver.
+    let valueDescription: String?
+    let onMove: (Int) -> Void
+    let onSubmit: () -> Void
+    let onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> FocusTextField {
+        let field = FocusTextField()
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: NSFont.systemFontSize)
+        field.lineBreakMode = .byTruncatingTail
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
+        field.setAccessibilityLabel("Termin eintragen oder suchen")
+        field.delegate = context.coordinator
+        field.onFocus = { [weak coordinator = context.coordinator] in coordinator?.parent.isFocused = true }
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return field
+    }
+
+    func updateNSView(_ field: FocusTextField, context: Context) {
+        context.coordinator.parent = self
+        if field.stringValue != text { field.stringValue = text }
+        field.placeholderString = placeholder
+        field.setAccessibilityValueDescription(valueDescription)
+        if context.coordinator.focusRequest != focusRequest {
+            context.coordinator.focusRequest = focusRequest
+            DispatchQueue.main.async { field.window?.makeFirstResponder(field) }
+        }
+    }
+
+    final class FocusTextField: NSTextField {
+        var onFocus: () -> Void = {}
+
+        override func becomeFirstResponder() -> Bool {
+            let became = super.becomeFirstResponder()
+            if became { onFocus() }
+            return became
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: CommandTextField
+        var focusRequest: Int
+
+        init(_ parent: CommandTextField) {
+            self.parent = parent
+            focusRequest = parent.focusRequest
+        }
+
+        func controlTextDidChange(_ note: Notification) {
+            guard let field = note.object as? NSTextField else { return }
+            parent.text = field.stringValue
+        }
+
+        func controlTextDidEndEditing(_ note: Notification) {
+            parent.isFocused = false
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            switch selector {
+            case #selector(NSResponder.moveUp(_:)): parent.onMove(-1)
+            case #selector(NSResponder.moveDown(_:)): parent.onMove(1)
+            case #selector(NSResponder.insertNewline(_:)): parent.onSubmit()
+            case #selector(NSResponder.cancelOperation(_:)): parent.onCancel()
+            default: return false
+            }
+            return true
         }
     }
 }

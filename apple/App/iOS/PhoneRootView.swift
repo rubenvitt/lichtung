@@ -38,14 +38,18 @@ struct PhoneRootView: View {
     @AppStorage("phoneViewMode") private var mode: Mode = .day
     // Suche und Rückgängig (LIC-42)
     @State private var searchText = ""
+    /// Suchfeld nur, solange gesucht wird (Lupe oben rechts).
+    @State private var showsSearch = false
     @State private var showsUndoAlert = false
     // Schnelleingabe als Blatt hinter „+“
     @State private var showsQuickEntry = false
     @State private var opensEditorAfterQuickEntry = false
-    /// Großer Titel im Kopf; wächst mit der Schriftgröße.
+    /// Großer Titel in der Zeile der Knöpfe; wächst mit der Schriftgröße. 30 statt
+    /// 32 pt, damit „Donnerstag 12“ neben drei Knöpfen passt, ohne dass das
+    /// System sie ins ⋯-Menü schiebt.
     @ScaledMetric(relativeTo: .largeTitle) private var titleSize: CGFloat = 32
 
-    private var isSearching: Bool { !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
+    private var isSearching: Bool { showsSearch || !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
         @Bindable var model = model
@@ -53,7 +57,8 @@ struct PhoneRootView: View {
             searchableContent
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) { todayButton }
+                    titleItem
+                    ToolbarItem(placement: .topBarTrailing) { searchButton }
                     // Erst nach „Kopieren“ zu sehen (LIC-50).
                     ToolbarItem(placement: .topBarTrailing) { pasteMenu }
                     ToolbarItem(placement: .topBarTrailing) { undoMenu }
@@ -104,52 +109,101 @@ struct PhoneRootView: View {
 
     // MARK: Kopf
 
-    /// Kopf je Ansicht: Tag „Dienstag 10“ mit dem Satz zum nächsten Termin,
-    /// Woche „November“ mit „KW 46“, Monat und Liste „November 2026“.
-    /// Der Wochenstreifen steht in Tag und Liste.
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            switch mode {
-            case .day:
-                let day = model.selectedDay
-                title(QuickEntryPreview.weekdayLong[day.weekday.rawValue - 1], .light, "\(day.day)", .semibold)
-                if day == model.today {
-                    // Jede Minute neu, damit „beginnt in 20 Minuten“ mitzählt.
-                    TimelineView(.everyMinute) { context in
-                        Text(AgendaBuilder.nextSentence(model.occurrences(from: day, days: 1), now: context.date, calendar: model.calendar))
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.text2)
-                }
-            case .week:
-                let day = model.focusDay
-                title(MonthTitle.monthName(day.month), .semibold)
-                Text(verbatim: "KW \(MonthGrid.isoWeek(day))")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.text2)
-            case .month, .list:
-                let day = model.selectedDay
-                title(MonthTitle.monthName(day.month), .semibold, "\(day.year)", .light)
-            }
-            if mode == .day || mode == .list {
-                DayTickerView()
-                    .padding(.top, 8)
-            }
+    /// Großer Titel links in der Zeile der Knöpfe: Tag „Dienstag 10“, Woche
+    /// „November“, Monat und Liste „November 2026“.
+    @ToolbarContentBuilder
+    private var titleItem: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            titleText.frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.shade)
+    }
+
+    @ViewBuilder
+    private var titleText: some View {
+        switch mode {
+        case .day:
+            let day = model.selectedDay
+            title(QuickEntryPreview.weekdayLong[day.weekday.rawValue - 1], .light, "\(day.day)", .semibold)
+        case .week:
+            title(MonthTitle.monthName(model.focusDay.month), .semibold)
+        case .month, .list:
+            let day = model.selectedDay
+            title(MonthTitle.monthName(day.month), .semibold, "\(day.year)", .light)
+        }
+    }
+
+    /// Unter dem Titel eine Zeile: im Tag der Satz zum nächsten Termin (an
+    /// anderen Tagen die Zahl der Termine, damit die Zeile bleibt), in der
+    /// Woche „KW 46“, rechts „Heute“, wenn heute nicht zu sehen ist. In Tag und
+    /// Liste darunter der Wochenstreifen.
+    @ViewBuilder
+    private var header: some View {
+        let showsLine = mode == .day || mode == .week || !isShowingToday
+        if showsLine || mode == .list {
+            VStack(alignment: .leading, spacing: 0) {
+                if showsLine {
+                    HStack(alignment: .firstTextBaseline) {
+                        subtitle
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text2)
+                        Spacer(minLength: 8)
+                        todayButton
+                    }
+                }
+                if mode == .day || mode == .list {
+                    DayTickerView()
+                        .padding(.top, 6)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.shade)
+        }
+    }
+
+    @ViewBuilder
+    private var subtitle: some View {
+        switch mode {
+        case .day:
+            let day = model.selectedDay
+            // Jede Minute neu, damit „beginnt in 20 Minuten“ mitzählt.
+            TimelineView(.everyMinute) { context in
+                let occurrences = model.occurrences(from: day, days: 1)
+                Text(day == model.today
+                    ? AgendaBuilder.nextSentence(occurrences, now: context.date, calendar: model.calendar)
+                    : Self.countText(occurrences.count))
+            }
+        case .week:
+            Text(verbatim: "KW \(MonthGrid.isoWeek(model.focusDay))")
+        case .month, .list:
+            EmptyView()
+        }
+    }
+
+    /// „Nichts geplant“, „Ein Termin“, „4 Termine“.
+    private static func countText(_ count: Int) -> String {
+        switch count {
+        case 0: "Nichts geplant"
+        case 1: "Ein Termin"
+        default: "\(count) Termine"
+        }
+    }
+
+    /// Lupe: Suchfeld ein- und ausblenden.
+    private var searchButton: some View {
+        Button {
+            showsSearch.toggle()
+        } label: {
+            Label("Suchen", systemImage: "magnifyingglass") // Text fürs ⋯-Menü (LIC-66)
+        }
     }
 
     /// Großer Titel aus zwei Teilen, je mit eigener Stärke („Dienstag“ leicht, „10“ halbfett).
     private func title(_ first: String, _ firstWeight: Font.Weight, _ second: String? = nil, _ secondWeight: Font.Weight = .regular) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(first).fontWeight(firstWeight)
-            if let second {
-                Text(second).fontWeight(secondWeight).monospacedDigit()
-            }
-        }
+        // Ein Text, damit er beim Schrumpfen als Ganzes kleiner wird.
+        (Text(first).fontWeight(firstWeight)
+            + Text(verbatim: second.map { " \($0)" } ?? "").fontWeight(secondWeight).monospacedDigit())
         .font(.system(size: titleSize))
         .foregroundStyle(Theme.text1)
         .lineLimit(1)
@@ -158,11 +212,14 @@ struct PhoneRootView: View {
         .accessibilityAddTraits(.isHeader)
     }
 
-    /// „Heute“ oben links, nur wenn heute nicht zu sehen ist.
+    /// „Heute“ als Textknopf unter den Knöpfen oben, nur wenn heute nicht zu sehen ist.
     @ViewBuilder
     private var todayButton: some View {
         if !isShowingToday {
             Button("Heute") { model.goToToday() }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.text1)
+                .buttonStyle(.plain)
                 .accessibilityHint("Springt zum heutigen Tag")
         }
     }
@@ -261,7 +318,10 @@ extension PhoneRootView {
             }
         }
         // Oben unter der Navigationsleiste; unten steht die eigene Leiste.
-        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Termine suchen")
+        .modifier(PhoneSearch(isShown: $showsSearch, text: $searchText))
+        .onChange(of: showsSearch) { _, shown in
+            if !shown { searchText = "" }
+        }
     }
 
     /// Antippen: Rückgängig. Lange drücken: Rückgängig oder Wiederholen mit
@@ -328,5 +388,21 @@ extension PhoneRootView {
             Button("Wiederholen") { Task { await model.redo() } }
         }
         Button("Abbrechen", role: .cancel) {}
+    }
+}
+
+/// Suchfeld unter der Navigationsleiste nur, solange gesucht wird. Unten steht
+/// die eigene Leiste; ohne feste Platzierung legte das System das Feld darunter.
+private struct PhoneSearch: ViewModifier {
+    @Binding var isShown: Bool
+    @Binding var text: String
+
+    func body(content: Content) -> some View {
+        if isShown {
+            content.searchable(text: $text, isPresented: $isShown,
+                               placement: .navigationBarDrawer(displayMode: .always), prompt: "Termine suchen")
+        } else {
+            content
+        }
     }
 }

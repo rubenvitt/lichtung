@@ -19,37 +19,37 @@ struct AgendaView: View {
             occurrences, from: start, days: count, today: model.today, calendar: model.calendar, anchor: selected
         )
         ScrollViewReader { proxy in
-                List {
-                    ForEach(sections) { section in
-                        Section {
-                            if section.items.isEmpty {
-                                Label("Nichts geplant", systemImage: "leaf")
-                                    .font(.callout)
-                                    .foregroundStyle(.tertiary)
-                                    .listRowSeparator(.hidden)
-                            }
-                            ForEach(section.items) { item in
-                                AgendaRow(item: item)
-                                    .contentShape(Rectangle())
-                                    .modifier(OccurrenceTap(occurrence: item.occurrence)) // LIC-24
-                                    .contextMenu { OccurrenceMenu(occurrence: item.occurrence) }
-                                    .listRowBackground(rowBackground(item.occurrence))
-                                    .listRowSeparator(.hidden)
-                            }
-                        } header: {
-                            AgendaSectionHeader(section: section)
+            List {
+                ForEach(sections) { section in
+                    Section {
+                        if section.items.isEmpty {
+                            Label("Nichts geplant", systemImage: "leaf")
+                                .font(.callout)
+                                .foregroundStyle(.tertiary)
+                                .listRowSeparator(.hidden)
                         }
-                        .id(section.date)
+                        ForEach(section.items) { item in
+                            AgendaRow(item: item)
+                                .contentShape(Rectangle())
+                                .modifier(OccurrenceTap(occurrence: item.occurrence)) // LIC-24
+                                .contextMenu { OccurrenceMenu(occurrence: item.occurrence) }
+                                .listRowBackground(rowBackground(item.occurrence))
+                                .listRowSeparator(.hidden)
+                        }
+                    } header: {
+                        AgendaSectionHeader(section: section)
                     }
+                    .id(section.date)
                 }
-                .listStyle(.plain)
-                // Oben steht der ausgewählte Tag, vergangene Tage liegen darüber.
-                .onAppear { scrollToSelected(proxy) }
-                // Der erste Stand kommt oft erst nach dem Erscheinen; ohne erneuten Sprung
-                // blieben die davor eingefügten Tage oben stehen.
-                .onChange(of: occurrences.isEmpty) { scrollToSelected(proxy) }
-                .onChange(of: model.selectedDay) { scrollToSelected(proxy) }
-                .onChange(of: model.todayRequests) { scrollToSelected(proxy) }
+            }
+            .listStyle(.plain)
+            // Oben steht der ausgewählte Tag, vergangene Tage liegen darüber.
+            .onAppear { scrollToSelected(proxy) }
+            // Der erste Stand kommt oft erst nach dem Erscheinen; ohne erneuten Sprung
+            // blieben die davor eingefügten Tage oben stehen.
+            .onChange(of: occurrences.isEmpty) { scrollToSelected(proxy) }
+            .onChange(of: model.selectedDay) { scrollToSelected(proxy) }
+            .onChange(of: model.todayRequests) { scrollToSelected(proxy) }
         }
     }
 

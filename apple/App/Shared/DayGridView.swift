@@ -134,7 +134,8 @@ struct DayGridView: View {
         .coordinateSpace(.named(GridScroller.viewportSpace))
         // Über dieselbe `ScrollPosition` wie das Mitscrollen; `ScrollViewReader.scrollTo`
         // kam gegen die gebundene Position nicht an (Raster blieb bei 0 Uhr).
-        .onAppear { scroller.position.scrollTo(y: hourHeight * 7) }
+        // Etwas über 7 Uhr, damit die Beschriftung „07:00“ nicht oben angeschnitten ist.
+        .onAppear { scroller.position.scrollTo(y: hourHeight * 7 - 10) }
     }
 
     /// Kopf: Fokus-Tag ausgeschrieben und groß, übrige „Mo 9“. Die KW steht in der Toolbar.
@@ -1265,6 +1266,8 @@ struct EventBlockView: View {
     static let oneLineHeight: CGFloat = 28
     /// Darunter wird ein Block auch im Fokus-Tag schmal gesetzt.
     private static let tightWidth: CGFloat = 60
+    /// Darunter bleibt der Titel einzeilig, damit er nicht mitten im Wort umbricht.
+    private static let wrapWidth: CGFloat = 140
     /// Ab dieser Höhe hat „Beitreten“ im Fokus-Tag Platz.
     private static let joinHeight: CGFloat = 60
 
@@ -1315,22 +1318,32 @@ struct EventBlockView: View {
                 .padding(.trailing, 6)
             } else {
                 VStack(alignment: .leading, spacing: 1) {
-                    title.lineLimit(tight ? 1 : 2)
-                    HStack(spacing: 6) {
-                        Text(AgendaBuilder.timeText(occurrence, calendar: model.calendar))
+                    title.lineLimit(size.width < Self.wrapWidth ? 1 : 2)
+                    if showsTime(compact: compact) {
+                        HStack(spacing: 6) {
+                            // Passt „09:00–10:00“ nicht, dann nur der Beginn.
+                            ViewThatFits(in: .horizontal) {
+                                Text(AgendaBuilder.timeText(occurrence, calendar: model.calendar))
+                                Text(startText)
+                            }
                             .layoutPriority(1)
-                        if !compact, let location = occurrence.details.location, !location.isEmpty {
-                            Text(location)
+                            if !compact, let location = occurrence.details.location, !location.isEmpty {
+                                Text(location)
+                            }
                         }
+                        .font(detailFont)
+                        .foregroundStyle(detailColor)
+                        .lineLimit(1)
                     }
-                    .font(detailFont)
-                    .foregroundStyle(detailColor)
-                    .lineLimit(1)
                     if let joinLink {
                         Button {
                             JoinButton.join(joinLink, with: openURL)
                         } label: {
-                            Label("Beitreten", systemImage: "video.fill")
+                            // Schmal nur das Symbol, damit „Beitreten“ nicht im Wort umbricht.
+                            ViewThatFits(in: .horizontal) {
+                                Label("Beitreten", systemImage: "video.fill").lineLimit(1)
+                                Image(systemName: "video.fill")
+                            }
                         }
                         .buttonStyle(Theme.PrimaryButtonStyle())
                         .controlSize(.small)
@@ -1375,6 +1388,15 @@ struct EventBlockView: View {
     }
 
     /// Beginn „09:30“ für die einzeilige Fassung.
+    /// iPhone: schmale Tage zeigen nur Farbfläche und Titelanfang (Spec §5).
+    private func showsTime(compact: Bool) -> Bool {
+        #if os(iOS)
+        !compact
+        #else
+        true
+        #endif
+    }
+
     private var startText: String {
         DayGridView.clockText(occurrence.start, calendar: model.calendar)
     }
@@ -1427,6 +1449,7 @@ struct DayHeaderCell: View {
         // Ein Text, damit er beim Schrumpfen als Ganzes kleiner wird.
         Group {
             if isFocus {
+                #if os(iOS)
                 // Passt „Donnerstag 12“ nicht (iPhone-Woche), dann „Do 12“ in derselben Größe.
                 ViewThatFits(in: .horizontal) {
                     ForEach([QuickEntryPreview.weekdayLong[index], QuickEntryPreview.weekdayShort[index]], id: \.self) { name in
@@ -1435,6 +1458,12 @@ struct DayHeaderCell: View {
                             + number.fontWeight(isToday ? .bold : .semibold)
                     }
                 }
+                #else
+                // Mac: immer ausgeschrieben (Spec §4), notfalls kleiner.
+                Text(QuickEntryPreview.weekdayLong[index]).fontWeight(.light).foregroundStyle(Theme.text1)
+                    + Text(verbatim: " ")
+                    + number.fontWeight(isToday ? .bold : .semibold)
+                #endif
             } else {
                 Text(QuickEntryPreview.weekdayShort[index]).foregroundStyle(Theme.text2)
                     + Text(verbatim: " ")

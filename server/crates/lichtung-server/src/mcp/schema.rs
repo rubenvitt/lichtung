@@ -212,7 +212,10 @@ fn event_fields(nullable: bool) -> Vec<(&'static str, Value)> {
                      (die bisherige Gesamtzahl oder die Restzahl zu schicken ergibt dasselbe). \
                      Ein geändertes COUNT gilt wie angegeben, bei this_and_following ab dem \
                      gewählten Vorkommen. Ein unverändertes UNTIL wandert mit, wenn start die \
-                     Serie verschiebt; ein geändertes UNTIL gilt wie angegeben.",
+                     Serie verschiebt, und zwar in der Wanduhrzeit des Termins: Über eine \
+                     Zeitumstellung weicht ein UTC-UNTIL daher um eine Stunde von der \
+                     Verschiebung in UTC ab (gleiche Ortszeit am neuen Tag). Ein geändertes \
+                     UNTIL gilt wie angegeben.",
                 )
             } else {
                 string(

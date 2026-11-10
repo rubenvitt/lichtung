@@ -89,48 +89,48 @@ struct DayGridView: View {
 
     private func grid(_ days: [LocalDate], timed: [Occurrence], zoneLabels: SecondaryZoneLabels?,
                       widths: ColumnWidths, daysWidth: CGFloat) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                HStack(alignment: .top, spacing: 0) {
-                    if let zoneLabels {
-                        secondaryLabels(zoneLabels.gutter)
-                    }
-                    hourLabels(showsNow: days.contains(model.today))
-                    ForEach(days, id: \.self) { day in
-                        let index = start.days(until: day)
-                        let focus = isFocus(day)
-                        DayColumn(
-                            day: day,
-                            index: index,
-                            dayCount: dayCount,
-                            layout: TimelineLayout.day(timed, day: day, calendar: model.calendar, maxColumns: focus ? 5 : 3),
-                            isFocus: focus,
-                            widths: widths,
-                            daysX: leadingWidth,
-                            hourHeight: hourHeight,
-                            scroller: scroller,
-                            zoneLabels: zoneLabels?.perDay[index]
-                        )
-                        .frame(width: daysWidth * CGFloat(widths.fractions[index]))
-                    }
+        ScrollView(.vertical) {
+            HStack(alignment: .top, spacing: 0) {
+                if let zoneLabels {
+                    secondaryLabels(zoneLabels.gutter)
                 }
-                .frame(height: hourHeight * 24)
+                hourLabels(showsNow: days.contains(model.today))
+                ForEach(days, id: \.self) { day in
+                    let index = start.days(until: day)
+                    let focus = isFocus(day)
+                    DayColumn(
+                        day: day,
+                        index: index,
+                        dayCount: dayCount,
+                        layout: TimelineLayout.day(timed, day: day, calendar: model.calendar, maxColumns: focus ? 5 : 3),
+                        isFocus: focus,
+                        widths: widths,
+                        daysX: leadingWidth,
+                        hourHeight: hourHeight,
+                        scroller: scroller,
+                        zoneLabels: zoneLabels?.perDay[index]
+                    )
+                    .frame(width: daysWidth * CGFloat(widths.fractions[index]))
+                }
             }
-            .scrollPosition($scroller.position)
-            .onScrollGeometryChange(for: GridViewport.self) { geometry in
-                GridViewport(
-                    offset: geometry.contentOffset.y,
-                    height: geometry.containerSize.height,
-                    contentHeight: geometry.contentSize.height
-                )
-            } action: { _, viewport in
-                scroller.viewport = viewport
-            }
-            // Gesten in den Spalten messen im sichtbaren Ausschnitt, damit
-            // der Rand beim automatischen Scrollen fest bleibt.
-            .coordinateSpace(.named(GridScroller.viewportSpace))
-            .onAppear { proxy.scrollTo(7, anchor: .top) }
+            .frame(height: hourHeight * 24)
         }
+        .scrollPosition($scroller.position)
+        .onScrollGeometryChange(for: GridViewport.self) { geometry in
+            GridViewport(
+                offset: geometry.contentOffset.y,
+                height: geometry.containerSize.height,
+                contentHeight: geometry.contentSize.height
+            )
+        } action: { _, viewport in
+            scroller.viewport = viewport
+        }
+        // Gesten in den Spalten messen im sichtbaren Ausschnitt, damit
+        // der Rand beim automatischen Scrollen fest bleibt.
+        .coordinateSpace(.named(GridScroller.viewportSpace))
+        // Über dieselbe `ScrollPosition` wie das Mitscrollen; `ScrollViewReader.scrollTo`
+        // kam gegen die gebundene Position nicht an (Raster blieb bei 0 Uhr).
+        .onAppear { scroller.position.scrollTo(y: hourHeight * 7) }
     }
 
     /// Kopf: Fokus-Tag ausgeschrieben und groß, übrige „Mo 9“. Die KW steht in der Toolbar.
@@ -216,7 +216,6 @@ struct DayGridView: View {
                             .frame(width: gutter - 6, height: hourHeight, alignment: .topTrailing)
                             .padding(.trailing, 6)
                             .offset(y: -7)
-                            .id(hour)
                     }
                 }
                 if let now {
@@ -385,7 +384,8 @@ struct DayColumn: View {
 
     /// Abstand je Rahmen, um den Blöcke einrücken; Linien liegen je 5 pt auseinander.
     private static let frameInset: CGFloat = 10
-    private static let frameSpacing: CGFloat = 5
+    /// Zeilenhöhe der Rahmentitel (10 pt Schrift).
+    private static let frameTitleLine: CGFloat = 13
 
     private var blocks: [TimelineBlock] { layout.blocks }
 
@@ -394,6 +394,8 @@ struct DayColumn: View {
     @State private var shownOverflow: String?
     /// In der Liste gewählter Termin; öffnet, sobald das Popover zu ist (LIC-64).
     @State private var pendingOverflowOpen: Occurrence?
+    /// Block unter dem Zeiger (Griff zum Längeändern zeigen).
+    @State private var hoveredBlock: String?
     /// Mausposition für „Neuer Termin hier“ (Mac, LIC-24).
     @State private var hover = HoverPoint()
     /// Vorschau nach dem Loslassen, bis der neue Stand da ist (LIC-47).
@@ -416,8 +418,7 @@ struct DayColumn: View {
             let width = geo.size.width
             let height = geo.size.height
             ZStack(alignment: .topLeading) {
-                // Leere Fläche: hier beginnt das Anlegen per Ziehen. Heute (in
-                // mehrtägigen Ansichten) auf der Licht-Fläche.
+                // Leere Fläche: hier beginnt das Anlegen per Ziehen. Heute auf der Licht-Fläche.
                 columnFill
                     .frame(width: width, height: height)
                     .contentShape(Rectangle())
@@ -445,8 +446,13 @@ struct DayColumn: View {
                 }
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
+                // Erst die Trefferflächen, darüber die Titel: Ein Klick auf einen Titel trifft dessen Rahmen.
+                ForEach(TimelineLayout.frameHitAreas(layout.frames), id: \.self) { area in
+                    frameHitView(area, height: height)
+                }
+                let titleRows = TimelineLayout.frameTitleRows(layout.frames, lineHeight: Double(Self.frameTitleLine / max(1, height)))
                 ForEach(layout.frames) { frame in
-                    frameView(frame, width: width, height: height)
+                    frameView(frame, titleRow: titleRows[frame.id] ?? 0, width: width, height: height)
                 }
                 // Reisezeit (LIC-42) unter den Terminen.
                 ForEach(blocks) { block in
@@ -560,15 +566,22 @@ struct DayColumn: View {
         let draggable = model.canDrag(occ)
         let isDragged = drag?.occurrenceId == occ.id || settling?.occurrenceId == occ.id
         let rect = blockRect(block, width: width)
+        let blockHeight: CGFloat = max(14, height * block.height - 1)
+        // Griff nur bei Bedarf (überfahren, markiert, gezogen) und nie über einzeiligen Titeln.
+        let wantsGrip = hoveredBlock == occ.id || model.highlightedOccurrence?.id == occ.id || drag?.occurrenceId == occ.id
+        let showsGrip = wantsGrip && blockHeight >= EventBlockView.oneLineHeight
         return EventBlockView(occurrence: occ, compact: !isFocus)
             .overlay(alignment: .bottom) {
                 if draggable && !block.continuesAfter {
-                    ResizeHandle()
+                    ResizeHandle(showsBar: showsGrip)
                         .gesture(resizeGesture(occ, height: height))
                 }
             }
             .opacity(isDragged ? 0.35 : 1)
-            .frame(width: rect.width, height: max(14, height * block.height - 1))
+            .frame(width: rect.width, height: blockHeight)
+            .onHover { inside in
+                if inside { hoveredBlock = occ.id } else if hoveredBlock == occ.id { hoveredBlock = nil }
+            }
             #if os(iOS)
             // Vor `offset`, damit das Popover am gezeichneten Block hängt.
             .popover(isPresented: menuBinding(for: occ.id)) {
@@ -596,52 +609,66 @@ struct DayColumn: View {
 
     // MARK: Rahmen und „+n“ (Spec §5)
 
-    /// Langer Termin als Linie am linken Rand mit kleinem Titel oben. Anklickbar
-    /// und mit Menü wie ein Block, aber ohne Ziehen.
-    private func frameView(_ frame: TimelineFrame, width: CGFloat, height: CGFloat) -> some View {
+    /// Langer Termin als Linie am linken Rand mit kleinem Titel oben. Der Titel
+    /// ist anklickbar und hat das Menü wie ein Block; die Linie trifft man über
+    /// `frameHitView`. Ziehen geht nicht.
+    private func frameView(_ frame: TimelineFrame, titleRow: Int, width: CGFloat, height: CGFloat) -> some View {
         let occ = frame.occurrence
-        let lineX: CGFloat = 3 + Self.frameSpacing * CGFloat(frame.index)
-        let hitX: CGFloat = max(0, lineX + 0.75 - 8)
+        let lineX: CGFloat = CGFloat(TimelineLayout.frameLineX(frame.index))
         let frameHeight: CGFloat = max(14, height * frame.height)
-        let titleX: CGFloat = lineX + 6
+        // Rechts aller Linien des Tages, damit keine durch einen Titel läuft.
+        let lastLine: CGFloat = CGFloat(TimelineLayout.frameLineX(max(0, layout.frames.count - 1)))
+        let titleX: CGFloat = lastLine + 6
+        let titleY: CGFloat = height * frame.top + 1 + CGFloat(titleRow) * Self.frameTitleLine
         let isHighlighted: Bool = model.highlightedOccurrence?.id == occ.id
         let time = AgendaBuilder.timeText(occ, calendar: model.calendar)
         return TimelineView(.everyMinute) { context in
             let state = Theme.state(of: occ, now: context.date)
             ZStack(alignment: .topLeading) {
-                // Trefferfläche: mindestens 16 pt breit über die ganze Höhe.
-                Color.clear
-                    .frame(width: 16, height: frameHeight)
-                    .contentShape(Rectangle())
-                    .modifier(HighlightBorder(isOn: isHighlighted))
-                    .offset(x: hitX)
                 Rectangle()
                     .fill(model.color(for: occ.calendarId).opacity(state == .past ? 0.4 : 1))
                     .frame(width: 1.5, height: frameHeight)
-                    .offset(x: lineX)
+                    .modifier(HighlightBorder(isOn: isHighlighted))
+                    .offset(x: lineX, y: height * frame.top)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 HStack(spacing: 4) {
                     Text(occ.title)
                     if isFocus {
                         Text(time).monospacedDigit()
                     }
                 }
-                .font(.system(size: 10))
+                .font(.system(size: 10, weight: isHighlighted ? .semibold : .regular))
                 .fontWidth(isFocus ? .standard : .condensed)
                 .foregroundStyle(state == .past ? Theme.text2 : Theme.text1)
                 .lineLimit(1)
                 // Vor `frame`: Nur der Titel selbst ist Trefferfläche, nicht die Zeile.
                 .contentShape(Rectangle())
                 .frame(maxWidth: max(0, width - titleX - 2), alignment: .leading)
-                .offset(x: titleX, y: 1)
+                .offset(x: titleX, y: titleY)
+                .modifier(OccurrenceTap(occurrence: occ))
+                .modifier(BlockMenu(occurrence: occ, draggable: false))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(occ.title), \(time)")
+                .accessibilityValue(EventBlockView.accessibilityValue(state))
+                .accessibilityAddTraits(isHighlighted ? [.isButton, .isSelected] : .isButton)
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(occ.title), \(time)")
-            .accessibilityValue(EventBlockView.accessibilityValue(state))
-            .accessibilityAddTraits(isHighlighted ? [.isButton, .isSelected] : .isButton)
         }
-        .offset(y: height * frame.top)
-        .modifier(OccurrenceTap(occurrence: occ))
-        .modifier(BlockMenu(occurrence: occ, draggable: false))
+    }
+
+    /// Trefferfläche einer Linie: Das Band links (mindestens 16 pt) teilt sich
+    /// zwischen Rahmen, die zur selben Zeit laufen (`TimelineLayout.frameHitAreas`).
+    @ViewBuilder
+    private func frameHitView(_ area: FrameHitArea, height: CGFloat) -> some View {
+        if let occ = layout.frames.first(where: { $0.id == area.frameId })?.occurrence {
+            Color.clear
+                .frame(width: CGFloat(area.width), height: max(14, height * CGFloat(area.height)))
+                .contentShape(Rectangle())
+                .offset(x: CGFloat(area.x), y: height * CGFloat(area.top))
+                .modifier(OccurrenceTap(occurrence: occ))
+                .modifier(BlockMenu(occurrence: occ, draggable: false))
+                .accessibilityHidden(true)
+        }
     }
 
     /// Feld „+n“ für Termine über die erlaubten Spalten hinaus. Im schmalen Tag
@@ -665,6 +692,8 @@ struct DayColumn: View {
         }
         .buttonStyle(.plain)
         .frame(width: max(0, columnWidth - 2), height: max(14, height * overflow.height - 1))
+        // Markierung (Tastatur) auf einem verborgenen Termin: dann am Feld zeigen.
+        .modifier(HighlightBorder(isOn: overflow.hidden.contains { $0.id == model.highlightedOccurrence?.id }))
         .popover(isPresented: overflowBinding(overflow.id)) {
             OverflowList(model: model, occurrences: overflow.hidden) { occ in
                 pendingOverflowOpen = occ
@@ -824,11 +853,14 @@ struct DayColumn: View {
         return fraction > 0 ? width / CGFloat(fraction) : width
     }
 
-    /// Zieltag aus der Spalte unter dem Zeiger (ungleiche Breiten, `ColumnWidths`).
-    private func movedInterval(_ occ: Occurrence, translation: CGSize, pointerX: CGFloat?, width: CGFloat, height: CGFloat) -> DateInterval {
-        let offset: Int = pointerX.map { x in
+    /// Tage vom Ausgangstag zur Spalte unter dem Zeiger (ungleiche Breiten, `ColumnWidths`).
+    private func moveDayOffset(pointerX: CGFloat?, width: CGFloat) -> Int {
+        pointerX.map { x in
             widths.dayOffset(fromColumn: index, pointerFraction: Double((x - daysX) / max(1, daysWidth(width))))
         } ?? 0
+    }
+
+    private func movedInterval(_ occ: Occurrence, translation: CGSize, dayOffset offset: Int, height: CGFloat) -> DateInterval {
         let delta = GridInteraction.minutes(forDistance: Double(translation.height + scroller.scrolled), columnHeight: Double(height))
         return GridInteraction.moved(start: occ.start, end: occ.end, deltaMinutes: delta, dayOffset: offset, calendar: model.calendar)
     }
@@ -864,14 +896,15 @@ struct DayColumn: View {
     // MARK: Verschieben
 
     private func commitMove(_ occ: Occurrence, translation: CGSize, pointerX: CGFloat?, width: CGFloat, height: CGFloat) {
-        let target = movedInterval(occ, translation: translation, pointerX: pointerX, width: width, height: height)
-        commit(occ, to: target, preview: targetPreview(target, from: occ))
+        let offset = moveDayOffset(pointerX: pointerX, width: width)
+        let target = movedInterval(occ, translation: translation, dayOffset: offset, height: height)
+        commit(occ, to: target, preview: targetPreview(target, from: occ, dayOffset: offset))
     }
 
     /// Bedienhilfen: 15 Minuten früher oder später (LIC-47).
     private func nudge(_ occ: Occurrence, by minutes: Int) {
         let target = GridInteraction.nudged(start: occ.start, end: occ.end, minutes: minutes, calendar: model.calendar)
-        commit(occ, to: target, preview: targetPreview(target, from: occ))
+        commit(occ, to: target, preview: targetPreview(target, from: occ, dayOffset: nil))
     }
 
     /// Neue Zeit übernehmen. Bei Serien erst nach der Frage nach dem
@@ -1023,13 +1056,16 @@ struct DayColumn: View {
     }
     #endif
 
-    /// Gezeichnet wird in der Spalte, um so viele Tage versetzt, wie der Beginn
-    /// gewandert ist (auch nach links; ein Termin aus dem Vortag bleibt in
-    /// dieser Spalte); `nil`, wenn die außerhalb der sichtbaren Tage liegt.
-    private func targetPreview(_ target: DateInterval, from occ: Occurrence) -> PreviewTarget? {
-        let offset = LocalDate(occ.start, calendar: model.calendar).days(until: LocalDate(target.start, calendar: model.calendar))
-        guard (0..<dayCount).contains(index + offset) else { return nil }
-        return PreviewTarget(interval: target, columnOffset: offset, calendarId: occ.calendarId)
+    /// Gezeichnet wird in der Spalte des Zugs (`dayOffset`, auch für Termine
+    /// aus dem Vortag), sonst in der Spalte, in der der neue Beginn liegt;
+    /// `nil`, wenn der Termin in keiner sichtbaren Spalte zu sehen wäre.
+    private func targetPreview(_ target: DateInterval, from occ: Occurrence, dayOffset: Int?) -> PreviewTarget? {
+        let startOffset = day.days(until: LocalDate(target.start, calendar: model.calendar))
+        let offset = [dayOffset, startOffset].compactMap { $0 }.first { offset in
+            (0..<dayCount).contains(index + offset)
+                && GridInteraction.frame(of: target, day: day.adding(days: offset), calendar: model.calendar) != nil
+        }
+        return offset.map { PreviewTarget(interval: target, columnOffset: $0, calendarId: occ.calendarId) }
     }
 
     private func previewTarget(width: CGFloat, height: CGFloat) -> PreviewTarget? {
@@ -1039,8 +1075,9 @@ struct DayColumn: View {
             return createPreview(fromY: fromY, toY: toY, dx: dx, height: height)
         case let .move(id, translation, x):
             guard let occ = blocks.first(where: { $0.occurrence.id == id })?.occurrence else { return nil }
-            let target = movedInterval(occ, translation: translation, pointerX: x, width: width, height: height)
-            return targetPreview(target, from: occ)
+            let offset = moveDayOffset(pointerX: x, width: width)
+            let target = movedInterval(occ, translation: translation, dayOffset: offset, height: height)
+            return targetPreview(target, from: occ, dayOffset: offset)
         case let .resize(id, dy):
             guard let occ = blocks.first(where: { $0.occurrence.id == id })?.occurrence else { return nil }
             return PreviewTarget(interval: resizedInterval(occ, dy: dy, height: height), columnOffset: 0, calendarId: occ.calendarId)
@@ -1088,16 +1125,21 @@ struct DayColumn: View {
 }
 
 /// Griff am unteren Rand eines Blocks zum Länge-Ändern.
+/// Die Fläche greift immer; der Strich erscheint nur, wenn `showsBar`.
 private struct ResizeHandle: View {
+    let showsBar: Bool
+
     var body: some View {
         Color.clear
             .frame(maxWidth: .infinity)
             .frame(height: 8)
             .contentShape(Rectangle())
             .overlay {
-                Capsule()
-                    .fill(Theme.text2.opacity(0.6))
-                    .frame(width: 18, height: 3)
+                if showsBar {
+                    Capsule()
+                        .fill(Theme.text2.opacity(0.6))
+                        .frame(width: 18, height: 3)
+                }
             }
             #if os(macOS)
             .onHover { inside in
@@ -1226,7 +1268,9 @@ struct EventBlockView: View {
     var compact: Bool = false
 
     /// Darunter ist ein Termin eine Zeile.
-    private static let oneLineHeight: CGFloat = 28
+    static let oneLineHeight: CGFloat = 28
+    /// Darunter wird ein Block auch im Fokus-Tag schmal gesetzt.
+    private static let tightWidth: CGFloat = 60
     /// Ab dieser Höhe hat „Beitreten“ im Fokus-Tag Platz.
     private static let joinHeight: CGFloat = 60
 
@@ -1234,13 +1278,17 @@ struct EventBlockView: View {
         // Jede Minute neu: Der Zustand wechselt auch bei offenem Raster.
         TimelineView(.everyMinute) { context in
             GeometryReader { geo in
-                block(state: Theme.state(of: occurrence, now: context.date), height: geo.size.height)
+                block(state: Theme.state(of: occurrence, now: context.date), size: geo.size)
             }
         }
     }
 
-    private func block(state: Theme.EventState, height: CGFloat) -> some View {
+    private func block(state: Theme.EventState, size: CGSize) -> some View {
+        let height = size.height
         let oneLine = height < Self.oneLineHeight
+        // Unter 60 pt Breite wie eine schmale Spalte, Titel einzeilig (kein Umbruch mitten im Wort).
+        let tight = size.width < Self.tightWidth
+        let compact = self.compact || tight
         // Fokus-Tag: großer Knopf statt Symbol, auch vor dem Zeitfenster (Spec §4: kommend oder laufend).
         let joinLink: VideoLink? = !compact && state != .past && height >= Self.joinHeight
             ? VideoLinkDetector.detect(in: occurrence.details) : nil
@@ -1273,7 +1321,7 @@ struct EventBlockView: View {
                 .padding(.trailing, 6)
             } else {
                 VStack(alignment: .leading, spacing: 1) {
-                    title.lineLimit(2)
+                    title.lineLimit(tight ? 1 : 2)
                     HStack(spacing: 6) {
                         Text(AgendaBuilder.timeText(occurrence, calendar: model.calendar))
                             .layoutPriority(1)

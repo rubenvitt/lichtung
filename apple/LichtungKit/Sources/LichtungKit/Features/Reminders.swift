@@ -93,12 +93,12 @@ public enum ReminderPlanner {
         let sorted = result
             .sorted { $0.fireDate != $1.fireDate ? $0.fireDate < $1.fireDate : $0.id < $1.id }
             .filter { seen.insert($0.id).inserted }
-        return Array(collapse(sorted, occurrences: occurrences, query: query, rules: merge).prefix(max(0, limit)))
+        return Array(collapse(sorted, occurrences: occurrences, query: query, rules: merge, today: today, calendar: calendar).prefix(max(0, limit)))
     }
 
     /// Zusammengefasste Termine erinnern einmal pro Zeitpunkt. Die übrig
-    /// bleibende Erinnerung trägt Titel und Vorkommen des sichtbaren Termins.
-    static func collapse(_ reminders: [PlannedReminder], occurrences: [Occurrence], query: CalendarQuery, rules: MergeRules) -> [PlannedReminder] {
+    /// bleibende Erinnerung trägt Titel, Text und Kennungen des sichtbaren Termins.
+    static func collapse(_ reminders: [PlannedReminder], occurrences: [Occurrence], query: CalendarQuery, rules: MergeRules, today: LocalDate, calendar cal: Calendar) -> [PlannedReminder] {
         guard rules != .off else { return reminders }
         let groups = OccurrenceMerge.merge(occurrences, calendars: query.calendars, rules: rules).filter { !$0.others.isEmpty }
         var shownOf: [String: Occurrence] = [:]
@@ -111,6 +111,8 @@ public enum ReminderPlanner {
             var r = r
             r.title = shown.title.isEmpty ? "Termin" : shown.title
             r.occurrenceId = shown.id
+            r.eventId = shown.eventId
+            r.body = body(for: shown, firingOn: LocalDate(r.fireDate, calendar: cal), today: today, calendar: cal)
             return r
         }
     }

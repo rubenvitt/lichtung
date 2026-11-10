@@ -1,10 +1,7 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import LichtungKit
 import SwiftUI
 
-/// Ansicht A: Tagesleiste oben, Termine als Liste darunter (Spec §5).
+/// Ansicht A: Termine als Liste; der Wochenstreifen steht darüber im Kopf (`PhoneRootView`).
 struct AgendaView: View {
     @Environment(AppModel.self) private var model
     /// Wie viele Tage die Liste ab dem ausgewählten Tag zeigt.
@@ -12,7 +9,6 @@ struct AgendaView: View {
     /// Wie viele Tage vor dem ausgewählten Tag beim Hochscrollen zu sehen sind.
     /// Die Liste öffnet trotzdem beim ausgewählten Tag.
     var pastDays = 30
-    var showsTicker = true
 
     var body: some View {
         let selected = model.selectedDay
@@ -22,12 +18,7 @@ struct AgendaView: View {
         let sections = AgendaBuilder.days(
             occurrences, from: start, days: count, today: model.today, calendar: model.calendar, anchor: selected
         )
-        VStack(spacing: 0) {
-            if showsTicker {
-                DayTickerView()
-                Divider()
-            }
-            ScrollViewReader { proxy in
+        ScrollViewReader { proxy in
                 List {
                     ForEach(sections) { section in
                         Section {
@@ -54,9 +45,11 @@ struct AgendaView: View {
                 .listStyle(.plain)
                 // Oben steht der ausgewählte Tag, vergangene Tage liegen darüber.
                 .onAppear { scrollToSelected(proxy) }
+                // Der erste Stand kommt oft erst nach dem Erscheinen; ohne erneuten Sprung
+                // blieben die davor eingefügten Tage oben stehen.
+                .onChange(of: occurrences.isEmpty) { scrollToSelected(proxy) }
                 .onChange(of: model.selectedDay) { scrollToSelected(proxy) }
                 .onChange(of: model.todayRequests) { scrollToSelected(proxy) }
-            }
         }
     }
 
@@ -188,7 +181,8 @@ struct AgendaRow: View {
     }
 }
 
-/// Fantasticals DayTicker: Tage nebeneinander, Farbpunkte je Kalender.
+/// Wochenstreifen (Spec §5 iPhone): Mo bis So über die ganze Breite, Farbpunkte
+/// je Kalender. Wischen blättert wochenweise, ein Tipp macht den Tag zum Fokus-Tag.
 ///
 /// Virtualisiert über ±100 Jahre (LIC-67): Jede Zelle ist ein Tagesindex
 /// (`DayTicker.index(of:)`), gebaut werden nur die sichtbaren. Farbpunkte und
@@ -209,19 +203,22 @@ struct DayTickerView: View {
         // Monat) weiter weg, bleibt auch um sie herum genug Band zum Scrollen.
         let base = DayTicker.indexRange(around: today)
         let around = DayTicker.indexRange(around: model.selectedDay)
-        let range = min(base.lowerBound, around.lowerBound)..<max(base.upperBound, around.upperBound)
+        // Beginnt an einem Montag, damit jede Seite eine ganze Woche ist.
+        let first = Self.monday(min(base.lowerBound, around.lowerBound))
+        let range = first..<max(base.upperBound, around.upperBound)
         let shown = window.isEmpty ? DayTicker.window(current: window, visible: selected...selected) : window
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 TickerStrip(range: range, window: shown, today: today)
             }
+            .scrollTargetBehavior(.paging)
             .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.5) { ids in
                 guard let lo = ids.min(), let hi = ids.max() else { return }
                 visibility.range = lo...hi
                 let next = DayTicker.window(current: window, visible: lo...hi)
                 if next != window { window = next }
             }
-            .frame(height: TickerCell.height + 16)
+            .frame(height: TickerCell.height + 8)
             .onAppear { reveal(model.selectedDay, proxy: proxy, animated: false) }
             // Wischen im Raster, Monatsansicht, „Heute“: das Band folgt, auch weit weg.
             .onChange(of: model.selectedDay) { _, day in reveal(day, proxy: proxy, animated: true) }
@@ -229,18 +226,24 @@ struct DayTickerView: View {
         }
     }
 
-    /// Scrollt den Tag in die Mitte, außer er ist schon ganz zu sehen (Tippen auf eine Zelle).
+    /// Index des Montags der Woche von `index`.
+    private static func monday(_ index: Int) -> Int {
+        index - (DayTicker.day(at: index).weekday.rawValue - 1)
+    }
+
+    /// Blättert zur Woche des Tages, außer er ist schon zu sehen (Tippen auf eine Zelle).
     private func reveal(_ day: LocalDate, proxy: ScrollViewProxy, animated: Bool) {
         let index = DayTicker.index(of: day)
-        if let visible = visibility.range, visible.lowerBound < index, index < visible.upperBound { return }
+        if let visible = visibility.range, visible.contains(index) { return }
         // Belegung für das Ziel gleich mitrechnen, nicht erst nach der nächsten Messung.
         let next = DayTicker.window(current: window, visible: index...index)
         if next != window { window = next }
         let near = visibility.range.map { abs($0.lowerBound - index) <= 60 || abs($0.upperBound - index) <= 60 } ?? false
+        let monday = Self.monday(index)
         if animated && near {
-            withAnimation(.snappy) { proxy.scrollTo(index, anchor: .center) }
+            withAnimation(.snappy) { proxy.scrollTo(monday, anchor: .leading) }
         } else {
-            proxy.scrollTo(index, anchor: .center)
+            proxy.scrollTo(monday, anchor: .leading)
         }
     }
 }
@@ -262,17 +265,18 @@ private struct TickerStrip: View {
         let start = DayTicker.day(at: window.lowerBound)
         let occurrences = model.occurrences(from: start, days: window.count)
         let summaries = DayTicker.summaries(occurrences, in: window, today: today, calendar: model.calendar)
-        LazyHStack(spacing: 4) {
+        LazyHStack(spacing: 0) {
             ForEach(range, id: \.self) { index in
                 // Außerhalb des Ausschnitts (schnelles Wischen): Tag ohne Punkte, bis er nachgerechnet ist.
                 let day = summaries[index] ?? DayTicker.day(DayTicker.day(at: index), today: today, calendar: model.calendar)
                 TickerCell(day: day)
-                    .onTapGesture { model.selectedDay = day.date }
+                    .containerRelativeFrame(.horizontal, count: 7, spacing: 0)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.focus(day.date) }
             }
         }
         .scrollTargetLayout()
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
     }
 }
 
@@ -284,22 +288,23 @@ struct TickerCell: View {
 
     var body: some View {
         let isSelected = day.date == model.selectedDay
-        let numberColor: Color = isSelected ? Theme.onLight : (day.isToday ? Theme.light : (day.isWeekend ? Theme.text2 : Theme.text1))
+        // Heute in Licht, am Wochenende Text 2; der gewählte Tag liegt auf einer stillen Fläche.
+        let numberColor: Color = day.isToday ? Theme.light : (day.isWeekend ? Theme.text2 : Theme.text1)
         VStack(spacing: 3) {
             Text(day.weekdayShort)
                 .font(.caption)
-                .foregroundStyle(isSelected ? Theme.onLight : Theme.text2)
+                .foregroundStyle(Theme.text2)
             Text(verbatim: "\(day.dayNumber)")
-                .font(Theme.digits(.title3, weight: day.isToday || isSelected ? .bold : .medium))
+                .font(Theme.digits(.body, weight: day.isToday || isSelected ? .bold : .regular))
                 .foregroundStyle(numberColor)
             HStack(spacing: 2) {
                 ForEach(day.calendarIds.prefix(4), id: \.self) { id in
-                    CalendarDot(color: isSelected ? Theme.onLight : model.color(for: id), size: 5)
+                    CalendarDot(color: model.color(for: id), size: 5)
                 }
             }
             .frame(height: 5)
             Capsule()
-                .fill(isSelected ? Theme.onLight.opacity(0.7) : Theme.text2.opacity(0.6))
+                .fill(Theme.text2.opacity(0.6))
                 .frame(width: 26 * max(0.1, day.busyFraction), height: 2)
                 .opacity(day.busyFraction > 0 ? 1 : 0)
         }
@@ -307,9 +312,10 @@ struct TickerCell: View {
         .dynamicTypeSize(...DynamicTypeSize.large)
         .frame(width: 44, height: Self.height)
         .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isSelected ? Theme.light : Color.clear)
+            RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous)
+                .fill(isSelected ? Theme.line : Color.clear)
         }
+        .frame(maxWidth: .infinity)
         .animation(.snappy(duration: 0.2), value: isSelected)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(day.weekdayShort) \(day.dayNumber)")

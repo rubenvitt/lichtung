@@ -114,6 +114,34 @@ public enum AgendaBuilder {
         return "\(dayText(first)), \(clock(start, cal)) bis \(endText)"
     }
 
+    /// Ein Satz zum nächsten Termin von heute für den Kopf am iPhone:
+    /// „Sport läuft bis 11:45“, „Sport beginnt in 20 Minuten“, ab einer Stunde
+    /// „Sport beginnt um 14:00“, sonst „Heute nichts mehr“. Ganztägige und abgesagte zählen nicht.
+    /// Laufen mehrere, gilt der zuletzt begonnene (ein kurzer Termin in einem langen).
+    public static func nextSentence(_ occurrences: [Occurrence], now: Date, calendar cal: Calendar) -> String {
+        let today = LocalDate(now, calendar: cal)
+        let dayEnd = today.adding(days: 1).startDate(in: cal)
+        let timed = occurrences.filter { !$0.isAllDay && $0.details.status != .cancelled }
+        let running = timed.filter { $0.start <= now && now < $0.end }
+            .max { a, b in a.start != b.start ? a.start < b.start : a.end > b.end }
+        if let o = running {
+            let endDay = LocalDate(o.end, calendar: cal)
+            let until: String = switch today.days(until: endDay) {
+            case 0: clock(o.end, cal)
+            case 1 where o.end == dayEnd: clock(o.end, cal) // Mitternacht
+            case 1: "morgen \(clock(o.end, cal))"
+            default: "\(QuickEntryPreview.weekdayLong[endDay.weekday.rawValue - 1]) \(clock(o.end, cal))"
+            }
+            return "\(o.title) läuft bis \(until)"
+        }
+        guard let o = timed.filter({ $0.start > now && $0.start < dayEnd }).min(by: CalendarQuery.displayOrder) else {
+            return "Heute nichts mehr"
+        }
+        let minutes = Int((o.start.timeIntervalSince(now) / 60).rounded(.up))
+        if minutes >= 60 { return "\(o.title) beginnt um \(clock(o.start, cal))" }
+        return "\(o.title) beginnt in \(minutes) \(minutes == 1 ? "Minute" : "Minuten")"
+    }
+
     /// „Heute · Fr 23.“, „Morgen · Sa 24.“, „Gestern · Do 22.“, sonst „So 25. Okt.“
     public static func heading(_ day: LocalDate, today: LocalDate) -> String {
         let wd = QuickEntryPreview.weekdayShort[day.weekday.rawValue - 1]

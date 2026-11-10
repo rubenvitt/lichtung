@@ -1,12 +1,14 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import LichtungKit
 import SwiftUI
 
 /// Schnelleingabe per Satz mit Vorschau beim Tippen (Spec §5, LIC-17).
+/// Nur am iPhone: als Blatt hinter dem Knopf „+“ der Leiste unten.
 struct QuickEntryBar: View {
     @Environment(AppModel.self) private var model
+    /// Fertig: Termin angelegt (`false`) oder leer „+“ gedrückt, dann soll der
+    /// Editor aufgehen (`true`). Das Blatt schließt sich vorher, weil SwiftUI
+    /// keine zwei Blätter zugleich zeigt.
+    let finished: (_ opensEditor: Bool) -> Void
     @State private var text = ""
     @FocusState private var focused: Bool
     /// Dauer, wenn der Satz keine nennt (LIC-53, `NewEventDuration`).
@@ -81,6 +83,7 @@ struct QuickEntryBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .animation(.snappy(duration: 0.25), value: text.isEmpty)
+        .onAppear { focused = true }
     }
 
     /// Vorschau des Satzes: Titel groß, darunter Zeit, Wiederholung, Ort, Kalender.
@@ -117,7 +120,7 @@ struct QuickEntryBar: View {
 
     private func primaryAction() {
         if isEmpty {
-            model.newEvent()
+            finished(true)
         } else {
             submit()
         }
@@ -128,5 +131,6 @@ struct QuickEntryBar: View {
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         text = ""
         Task { await model.create(from: entry) }
+        finished(false)
     }
 }

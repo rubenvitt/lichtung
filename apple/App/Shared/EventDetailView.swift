@@ -162,17 +162,20 @@ private struct EventDetailHeader: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     CalendarDot(color: color, size: 7)
-                    Text(calendarName.uppercased())
-                        .font(.caption2.weight(.bold))
-                        .tracking(0.6)
-                        .foregroundStyle(.secondary)
+                    Text(calendarName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.text2)
                         .lineLimit(1)
                     TimelineView(.everyMinute) { context in
-                        if occurrence.isRunning(now: context.date) { NowBadge() }
+                        if occurrence.isRunning(now: context.date) {
+                            Text("läuft gerade")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.text1)
+                        }
                     }
                 }
                 Text(occurrence.title)
-                    .font(Theme.display(.title2))
+                    .font(.title2.weight(.semibold))
                     .strikethrough(occurrence.details.status == .cancelled)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
@@ -180,12 +183,12 @@ private struct EventDetailHeader: View {
                     Text(AgendaBuilder.heading(day, today: model.today))
                         .font(.subheadline.weight(.semibold))
                     Text(AgendaBuilder.timeText(occurrence, calendar: model.calendar))
-                        .font(Theme.number(.subheadline))
+                        .font(Theme.digits(.subheadline))
                         .foregroundStyle(.secondary)
                     // Mehrtägig: auch das Ende nennen, sonst fehlt es im Kopf.
                     if let until = untilText {
                         Text(until)
-                            .font(Theme.number(.subheadline))
+                            .font(Theme.digits(.subheadline))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -223,9 +226,9 @@ private struct AttendeeRow: View {
         HStack(spacing: 10) {
             Text(initials)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.text2)
                 .frame(width: 28, height: 28)
-                .background(Circle().fill(Theme.accent.opacity(0.14)))
+                .background(Circle().fill(Theme.line))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 // Lange Namen und Adressen umbrechen statt abschneiden.

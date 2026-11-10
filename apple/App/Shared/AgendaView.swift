@@ -71,7 +71,7 @@ struct AgendaView: View {
     /// Markierter Termin (Mac, LIC-24) hinterlegt; sonst der Standard der Liste.
     private func rowBackground(_ occ: Occurrence) -> Color? {
         guard model.highlightedOccurrence?.id == occ.id else { return nil }
-        return Theme.accent.opacity(0.16)
+        return Theme.light.opacity(0.12)
     }
 }
 
@@ -80,22 +80,22 @@ struct AgendaSectionHeader: View {
     let section: AgendaDay
 
     var body: some View {
-        let tint: Color = section.isToday ? Theme.accent : Color.primary
+        let tint: Color = section.isToday ? Theme.light : Theme.text1
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(verbatim: "\(section.date.day)")
-                .font(Theme.number(.title2, weight: .bold))
+                .font(Theme.digits(.title2, weight: .bold))
                 .foregroundStyle(tint)
             Text(section.heading)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(section.isToday ? Theme.accent : Color.secondary)
+                .foregroundStyle(Theme.text2)
             Spacer(minLength: 0)
             if !section.items.isEmpty {
                 Text(verbatim: "\(section.items.count)")
-                    .font(Theme.number(.caption, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .font(Theme.digits(.caption, weight: .semibold))
+                    .foregroundStyle(Theme.text2)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(Theme.wash))
+                    .background(Capsule().fill(Theme.line))
                     .accessibilityLabel("\(section.items.count) Termine")
             }
         }
@@ -129,13 +129,10 @@ struct AgendaRow: View {
             CalendarBar(color: color)
                 .frame(height: 34)
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(occ.title)
-                        .font(.body.weight(.medium))
-                        .strikethrough(occ.details.status == .cancelled)
-                        .lineLimit(2)
-                    if running { NowBadge() }
-                }
+                Text(occ.title)
+                    .font(.body.weight(.medium))
+                    .strikethrough(occ.details.status == .cancelled)
+                    .lineLimit(2)
                 if let location = occ.details.location, !location.isEmpty {
                     Label(location, systemImage: "mappin")
                         .labelStyle(.titleAndIcon)
@@ -165,6 +162,7 @@ struct AgendaRow: View {
         // Vergangene Termine treten zurück.
         .opacity(occ.isPast(now: now) ? 0.5 : 1)
         .accessibilityElement(children: .combine)
+        .accessibilityValue(EventBlockView.accessibilityValue(Theme.state(of: occ, now: now)))
     }
 
     /// Beginn kräftig, Ende gedämpft darunter („09:00“ / „09:30“).
@@ -174,14 +172,14 @@ struct AgendaRow: View {
         if parts.count == 2 {
             VStack(alignment: .trailing, spacing: 1) {
                 Text(parts[0])
-                    .font(Theme.number(.subheadline, weight: .semibold))
+                    .font(Theme.digits(.subheadline, weight: .semibold))
                 Text(parts[1])
-                    .font(Theme.number(.caption))
+                    .font(Theme.digits(.caption))
                     .foregroundStyle(.secondary)
             }
         } else {
             Text(item.timeText)
-                .font(Theme.number(.caption, weight: .semibold))
+                .font(Theme.digits(.caption, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(2)
@@ -286,23 +284,22 @@ struct TickerCell: View {
 
     var body: some View {
         let isSelected = day.date == model.selectedDay
-        let numberColor: Color = isSelected ? Theme.onAccent : (day.isToday ? Theme.accent : (day.isWeekend ? .secondary : .primary))
+        let numberColor: Color = isSelected ? Theme.onLight : (day.isToday ? Theme.light : (day.isWeekend ? Theme.text2 : Theme.text1))
         VStack(spacing: 3) {
-            Text(day.weekdayShort.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.4)
-                .foregroundStyle(isSelected ? Theme.onAccent.opacity(0.85) : (day.isToday ? Theme.accent : Color.secondary))
+            Text(day.weekdayShort)
+                .font(.caption)
+                .foregroundStyle(isSelected ? Theme.onLight : Theme.text2)
             Text(verbatim: "\(day.dayNumber)")
-                .font(Theme.number(.title3, weight: day.isToday || isSelected ? .bold : .medium))
+                .font(Theme.digits(.title3, weight: day.isToday || isSelected ? .bold : .medium))
                 .foregroundStyle(numberColor)
             HStack(spacing: 2) {
                 ForEach(day.calendarIds.prefix(4), id: \.self) { id in
-                    CalendarDot(color: isSelected ? Theme.onAccent : model.color(for: id), size: 5)
+                    CalendarDot(color: isSelected ? Theme.onLight : model.color(for: id), size: 5)
                 }
             }
             .frame(height: 5)
             Capsule()
-                .fill(isSelected ? Theme.onAccent.opacity(0.7) : Theme.accent.opacity(0.45))
+                .fill(isSelected ? Theme.onLight.opacity(0.7) : Theme.text2.opacity(0.6))
                 .frame(width: 26 * max(0.1, day.busyFraction), height: 2)
                 .opacity(day.busyFraction > 0 ? 1 : 0)
         }
@@ -311,15 +308,7 @@ struct TickerCell: View {
         .frame(width: 44, height: Self.height)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isSelected ? Theme.accent : Color.clear)
-                .shadow(color: isSelected ? Theme.accent.opacity(0.35) : .clear, radius: 6, y: 3)
-        }
-        .overlay {
-            // Heute, aber nicht ausgewählt: grüner Rahmen.
-            if day.isToday && !isSelected {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Theme.accent.opacity(0.6), lineWidth: 1.5)
-            }
+                .fill(isSelected ? Theme.light : Color.clear)
         }
         .animation(.snappy(duration: 0.2), value: isSelected)
         .accessibilityElement(children: .ignore)

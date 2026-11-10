@@ -37,7 +37,7 @@ struct QuickEntryBar: View {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles")
                         .font(.callout.weight(.semibold))
-                        .foregroundStyle(focused ? Theme.accent : Color.secondary)
+                        .foregroundStyle(focused ? Theme.text1 : Theme.text2)
                         .accessibilityHidden(true)
                     TextField("Zahnarzt Di 14 Uhr …", text: $text)
                         .textFieldStyle(.plain)
@@ -61,16 +61,15 @@ struct QuickEntryBar: View {
                     Capsule().fill(.background.secondary)
                 }
                 .overlay {
-                    Capsule().strokeBorder(focused ? Theme.accent.opacity(0.7) : Theme.hairline, lineWidth: focused ? 1.5 : 1)
+                    Capsule().strokeBorder(focused ? Theme.text2 : Theme.line, lineWidth: focused ? 1.5 : 1)
                 }
                 // Leer: Editor öffnen. Mit Text: den Satz als Termin anlegen.
                 Button(action: primaryAction) {
                     Image(systemName: isEmpty ? "plus" : "arrow.up")
                         .font(.body.weight(.bold))
-                        .foregroundStyle(Theme.onAccent)
+                        .foregroundStyle(Theme.onLight)
                         .frame(width: 38, height: 38)
-                        .background(Circle().fill(Theme.accent))
-                        .shadow(color: Theme.accent.opacity(0.35), radius: 6, y: 3)
+                        .background(RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous).fill(Theme.light))
                         .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(.plain)
@@ -88,7 +87,7 @@ struct QuickEntryBar: View {
     private func previewCard(_ preview: QuickEntryPreview, calendarId: String?) -> some View {
         let fallbackName: String? = calendarId.flatMap { model.state.calendars[$0]?.name }
         let calendarName: String = preview.calendarName ?? fallbackName ?? "Kein Kalender"
-        let color: Color = calendarId.map { model.color(for: $0) } ?? Theme.accent
+        let color: Color = calendarId.map { model.color(for: $0) } ?? Theme.text2
         return HStack(alignment: .top, spacing: 10) {
             CalendarBar(color: color)
             VStack(alignment: .leading, spacing: 4) {
@@ -111,7 +110,7 @@ struct QuickEntryBar: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1)
+                .strokeBorder(Theme.line, lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
     }

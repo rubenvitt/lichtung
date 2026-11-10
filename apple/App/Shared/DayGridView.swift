@@ -100,6 +100,7 @@ struct DayGridView: View {
                 .onAppear { proxy.scrollTo(7, anchor: .top) }
             }
         }
+        .background(Theme.shade)
     }
 
     private func header(_ days: [LocalDate]) -> some View {
@@ -107,7 +108,7 @@ struct DayGridView: View {
             if let zone = model.secondaryTimeZone {
                 Text(TimeZoneDisplay.cityName(for: zone))
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.text3)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                     .frame(width: zoneGutter)
@@ -115,10 +116,10 @@ struct DayGridView: View {
             VStack(spacing: 0) {
                 Text("KW")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.text3)
                 Text(verbatim: "\(MonthGrid.isoWeek(start))")
-                    .font(Theme.number(.caption, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .font(Theme.digits(.caption, weight: .semibold))
+                    .foregroundStyle(Theme.text2)
             }
             .frame(width: gutter)
             .accessibilityElement(children: .combine)
@@ -143,7 +144,7 @@ struct DayGridView: View {
     private func selectedDayMarker(_ day: LocalDate) -> some View {
         #if os(macOS)
         if dayCount > 1 && day == model.selectedDay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.accent.opacity(0.10))
+            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.light.opacity(0.08))
                 .padding(.horizontal, 2)
         }
         #endif
@@ -156,8 +157,8 @@ struct DayGridView: View {
             ForEach(0..<24, id: \.self) { hour in
                 // 0 Uhr oben am Rand bliebe abgeschnitten.
                 Text(hour == 0 ? "" : String(format: "%02d:00", hour))
-                    .font(Theme.number(.caption2, weight: .medium))
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.digits(.caption2, weight: .medium))
+                    .foregroundStyle(Theme.text3)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .frame(width: gutter - 6, height: hourHeight, alignment: .topTrailing)
@@ -177,7 +178,7 @@ struct DayGridView: View {
             ForEach(0..<24, id: \.self) { hour in
                 Text(labels.indices.contains(hour) ? labels[hour] ?? "" : "")
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.text3)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .frame(width: zoneGutter, height: hourHeight, alignment: .topTrailing)
@@ -327,8 +328,8 @@ struct DayColumn: View {
             let width = geo.size.width
             let height = geo.size.height
             ZStack(alignment: .topLeading) {
-                // Leere Fläche: hier beginnt das Anlegen per Ziehen. Wochenende
-                // und heute (in mehrtägigen Ansichten) leicht getönt.
+                // Leere Fläche: hier beginnt das Anlegen per Ziehen. Heute (in
+                // mehrtägigen Ansichten) auf der Licht-Fläche.
                 columnFill
                     .frame(width: width, height: height)
                     .contentShape(Rectangle())
@@ -338,14 +339,9 @@ struct DayColumn: View {
                     })
                 ForEach(0..<24, id: \.self) { hour in
                     Rectangle()
-                        .fill(Theme.hairline)
+                        .fill(Theme.line)
                         .frame(width: width, height: 0.5)
                         .offset(y: CGFloat(hour) * hourHeight)
-                        .allowsHitTesting(false)
-                    Rectangle()
-                        .fill(Theme.hairlineFaint)
-                        .frame(width: width, height: 0.5)
-                        .offset(y: (CGFloat(hour) + 0.5) * hourHeight)
                         .allowsHitTesting(false)
                 }
                 if let zoneLabels {
@@ -373,7 +369,7 @@ struct DayColumn: View {
                 slotMenuAnchor(width: width, height: height)
                 #endif
                 if let line = TimelineLayout.nowLine(Date(), day: day, calendar: model.calendar) {
-                    let lineY: CGFloat = height * CGFloat(line) - NowLine.knob / 2
+                    let lineY: CGFloat = height * CGFloat(line) - NowLine.thickness / 2
                     NowLine(width: width)
                         .offset(y: lineY)
                         .allowsHitTesting(false)
@@ -383,7 +379,7 @@ struct DayColumn: View {
             .frame(width: width, height: height, alignment: .topLeading)
         }
         .overlay(alignment: .leading) {
-            Rectangle().fill(Theme.hairline).frame(width: 0.5)
+            Rectangle().fill(Theme.line).frame(width: 0.5)
         }
         // Beim Ziehen in einen Nachbartag liegt die Vorschau über den anderen Spalten.
         .zIndex(drag == nil && settling == nil ? 0 : 1)
@@ -431,11 +427,10 @@ struct DayColumn: View {
         }
     }
 
-    /// Grund der Spalte: Wochenende gedämpft, heute zart grün (nur mit
-    /// mehreren Tagen; in der Tagesansicht bliebe es eine Fläche ohne Aussage).
+    /// Grund der Spalte: heute die Licht-Fläche (nur mit mehreren Tagen; in
+    /// der Tagesansicht bliebe es eine Fläche ohne Aussage).
     private var columnFill: Color {
-        if dayCount > 1 && day == model.today { return Theme.accent.opacity(0.05) }
-        if day.weekday.rawValue >= 6 { return Theme.wash }
+        if dayCount > 1 && day == model.today { return Theme.lit }
         return Color.clear
     }
 
@@ -486,7 +481,7 @@ struct DayColumn: View {
             if let label = labels[hour] {
                 Text(label)
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.text3)
                     .padding(.leading, 2)
                     .offset(y: CGFloat(hour) * hourHeight + 1)
                     .allowsHitTesting(false)
@@ -841,14 +836,13 @@ struct DayColumn: View {
     private func preview(width: CGFloat, height: CGFloat) -> some View {
         if let target = previewTarget(width: width, height: height),
            let frame = GridInteraction.frame(of: target.interval, day: day.adding(days: target.columnOffset), calendar: model.calendar) {
-            let color = target.calendarId.map { model.color(for: $0) } ?? Theme.accent
+            let color = target.calendarId.map { model.color(for: $0) } ?? Theme.text2
             RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous)
                 .fill(color.opacity(0.3))
                 .overlay {
                     RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous)
                         .strokeBorder(color, style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
                 }
-                .shadow(color: color.opacity(0.3), radius: 8, y: 4)
                 .overlay(alignment: .topLeading) {
                     Text(GridInteraction.timeText(target.interval, calendar: model.calendar))
                         .font(.caption2.monospacedDigit().weight(.semibold))
@@ -873,7 +867,7 @@ private struct ResizeHandle: View {
             .contentShape(Rectangle())
             .overlay {
                 Capsule()
-                    .fill(Color.primary.opacity(0.25))
+                    .fill(Theme.text2.opacity(0.6))
                     .frame(width: 18, height: 3)
             }
             #if os(macOS)
@@ -979,7 +973,7 @@ private struct TravelBlockView: View {
                 if geo.size.height >= 16 {
                     Label(TravelTime.label(minutes: minutes), systemImage: "car.fill")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                         .lineLimit(1)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -992,91 +986,125 @@ private struct TravelBlockView: View {
     }
 }
 
+/// Termin im Raster in einem von drei Zuständen (Spec §4): vorbei ohne
+/// Fläche, kommend getönt, laufend in voller Kalenderfarbe.
 struct EventBlockView: View {
     @Environment(AppModel.self) private var model
     let occurrence: Occurrence
+    /// Schmale Spalte: Schrift schmal, einzeilig ohne Uhrzeit.
+    var compact: Bool = false
+
+    /// Darunter ist ein Termin eine Zeile.
+    private static let oneLineHeight: CGFloat = 28
 
     var body: some View {
-        // Jede Minute neu: Vergangene Termine treten auch bei offenem Raster zurück.
+        // Jede Minute neu: Der Zustand wechselt auch bei offenem Raster.
         TimelineView(.everyMinute) { context in
-            block(past: occurrence.isPast(now: context.date))
+            GeometryReader { geo in
+                block(state: Theme.state(of: occurrence, now: context.date), oneLine: geo.size.height < Self.oneLineHeight)
+            }
         }
     }
 
-    private func block(past: Bool) -> some View {
+    private func block(state: Theme.EventState, oneLine: Bool) -> some View {
         let color = model.color(for: occurrence.calendarId)
         let isHighlighted: Bool = model.highlightedOccurrence?.id == occurrence.id
-        let shape = RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous)
-        return HStack(alignment: .top, spacing: 0) {
-            Rectangle().fill(color).frame(width: 3.5)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(occurrence.title)
-                    .font(.caption.weight(.semibold))
-                    .strikethrough(occurrence.details.status == .cancelled)
-                    .lineLimit(2)
-                Text(subtitle)
-                    .font(Theme.number(.caption2))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+        let titleColor: Color = state == .running ? Theme.onRunning : (state == .past ? Theme.text2 : Theme.text1)
+        let detailColor: Color = state == .running ? Theme.onRunning.opacity(0.7) : Theme.text2
+        let fill: Color = state == .running ? color : (state == .past ? Color.clear : Theme.eventFill(color))
+        let title = Text(occurrence.title)
+            .font(.caption.weight(.medium))
+            .strikethrough(occurrence.details.status == .cancelled)
+            .foregroundStyle(titleColor)
+        return HStack(alignment: oneLine ? .center : .top, spacing: 0) {
+            if oneLine {
+                HStack(spacing: 6) {
+                    title.lineLimit(1)
+                    if !compact {
+                        Text(startText)
+                            .font(Theme.digits(.caption2))
+                            .foregroundStyle(detailColor)
+                            .fixedSize()
+                    }
+                }
+                .padding(.leading, 9)
+                .padding(.trailing, 6)
+            } else {
+                VStack(alignment: .leading, spacing: 1) {
+                    title.lineLimit(2)
+                    Text(AgendaBuilder.timeText(occurrence, calendar: model.calendar))
+                        .font(Theme.digits(.caption2))
+                        .foregroundStyle(detailColor)
+                        .lineLimit(1)
+                }
+                .padding(.leading, 9)
+                .padding(.trailing, 6)
+                .padding(.vertical, 2)
             }
-            .padding(.horizontal, 5)
-            .padding(.vertical, 3)
             Spacer(minLength: 0)
             JoinButton(occurrence: occurrence, iconOnly: true) // Beitreten (LIC-42)
+                .tint(titleColor)
+                .foregroundStyle(titleColor)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background { shape.fill(Theme.eventFill(color, past: past)) }
-        .overlay { shape.strokeBorder(color.opacity(past ? 0.15 : 0.3), lineWidth: 0.5) }
-        .clipShape(shape)
-        .opacity(past ? 0.75 : 1)
+        .fontWidth(compact ? .condensed : .standard)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: oneLine ? .leading : .topLeading)
+        .background(fill)
+        .overlay(alignment: .leading) {
+            Rectangle().fill(color.opacity(state == .past ? 0.4 : 1)).frame(width: 3)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous))
+        // Vorbei hat keine Fläche; Tippen, Ziehen und Menü treffen trotzdem den ganzen Block.
+        .contentShape(RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous))
         .modifier(HighlightBorder(isOn: isHighlighted))
         .accessibilityElement(children: .combine)
+        .accessibilityValue(Self.accessibilityValue(state))
         .accessibilityAddTraits(isHighlighted ? .isSelected : [])
     }
 
-    /// „09:30 · Raum 2“: Beginn und Ort in einer Zeile.
-    private var subtitle: String {
+    /// Zustand nie nur über Farbe (Spec §4).
+    static func accessibilityValue(_ state: Theme.EventState) -> String {
+        switch state {
+        case .past: "vorbei"
+        case .running: "läuft gerade"
+        case .upcoming: ""
+        }
+    }
+
+    /// Beginn „09:30“ für die einzeilige Fassung.
+    private var startText: String {
         let c = model.calendar.dateComponents([.hour, .minute], from: occurrence.start)
-        let time = String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
-        guard let location = occurrence.details.location, !location.isEmpty else { return time }
-        return "\(time) · \(location)"
+        return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
     }
 }
 
-/// Rahmen um den markierten Termin (LIC-24).
+/// Rahmen um den markierten Termin (LIC-24): 1,5 pt in Text 1, 1 pt Abstand.
 struct HighlightBorder: ViewModifier {
     let isOn: Bool
 
     func body(content: Content) -> some View {
         content.overlay {
             if isOn {
-                RoundedRectangle(cornerRadius: Theme.blockRadius, style: .continuous)
-                    .strokeBorder(Theme.accent, lineWidth: 2)
+                RoundedRectangle(cornerRadius: Theme.blockRadius + 2.5, style: .continuous)
+                    .strokeBorder(Theme.text1, lineWidth: 1.5)
+                    .padding(-2.5)
             }
         }
     }
 }
 
-/// Jetzt-Linie: Punkt am linken Rand, Linie über die Spalte.
+/// Jetzt-Linie: 1,5 pt in Sonne über die Spalte.
 struct NowLine: View {
-    static let knob: CGFloat = 8
+    static let thickness: CGFloat = 1.5
     let width: CGFloat
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            Rectangle()
-                .fill(Theme.now)
-                .frame(width: width, height: 2)
-            Circle()
-                .fill(Theme.now)
-                .frame(width: Self.knob, height: Self.knob)
-                .offset(x: -Self.knob / 2)
-        }
-        .frame(width: width, height: Self.knob, alignment: .leading)
+        Rectangle()
+            .fill(Theme.sun)
+            .frame(width: width, height: Self.thickness)
     }
 }
 
-/// Kopf einer Tagesspalte: Wochentag klein, Tageszahl groß; heute im grünen Kreis.
+/// Kopf einer Tagesspalte: Wochentag klein, Tageszahl groß; heute in Licht.
 struct DayHeaderCell: View {
     let day: LocalDate
     let isToday: Bool
@@ -1087,17 +1115,13 @@ struct DayHeaderCell: View {
 
     var body: some View {
         VStack(spacing: 2) {
-            Text(QuickEntryPreview.weekdayShort[day.weekday.rawValue - 1].uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.4)
-                .foregroundStyle(isToday ? Theme.accent : (isWeekend ? Color.secondary.opacity(0.7) : Color.secondary))
+            Text(QuickEntryPreview.weekdayShort[day.weekday.rawValue - 1])
+                .font(.caption)
+                .foregroundStyle(Theme.text2)
             Text(verbatim: "\(day.day)")
-                .font(Theme.number(.title3, weight: isToday ? .bold : .medium))
-                .foregroundStyle(isToday ? Theme.onAccent : (isWeekend ? Color.secondary : Color.primary))
+                .font(Theme.digits(.title3, weight: isToday ? .bold : .regular))
+                .foregroundStyle(isToday ? Theme.light : (isWeekend ? Theme.text2 : Theme.text1))
                 .frame(minWidth: 30, minHeight: 30)
-                .background {
-                    if isToday { Circle().fill(Theme.accent) }
-                }
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
@@ -1130,7 +1154,9 @@ struct AllDayRow: View {
                     let y: CGFloat = CGFloat(bar.lane) * laneHeight
                     let isHighlighted: Bool = model.highlightedOccurrence?.id == bar.occurrence.id
                     Text(bar.occurrence.title)
-                        .font(.caption2.weight(.semibold))
+                        .font(.caption2.weight(.medium))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Theme.text1)
                         .lineLimit(1)
                         .padding(.leading, 6)
                         .padding(.trailing, 4)
@@ -1144,8 +1170,8 @@ struct AllDayRow: View {
                 ForEach(0..<columns, id: \.self) { column in
                     if hidden[column] > 0 {
                         Text("+\(hidden[column])")
-                            .font(Theme.number(.caption2, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                            .font(Theme.digits(.caption2, weight: .semibold))
+                            .foregroundStyle(Theme.text2)
                             .offset(x: leadingInset + columnWidth * CGFloat(column) + 4, y: CGFloat(lanes) * laneHeight)
                     }
                 }
@@ -1155,17 +1181,11 @@ struct AllDayRow: View {
     }
 }
 
-/// Hintergrund eines Balkens: getönt, links ein Streifen in Kalenderfarbe.
+/// Hintergrund eines Balkens: Kalenderfarbe auf dem Grund, Radius 3.
 private struct AllDayBarShape: View {
     let color: Color
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
-        shape
-            .fill(color.opacity(0.22))
-            .overlay(alignment: .leading) {
-                Rectangle().fill(color).frame(width: 3)
-            }
-            .clipShape(shape)
+        RoundedRectangle(cornerRadius: 3, style: .continuous).fill(Theme.eventFill(color))
     }
 }

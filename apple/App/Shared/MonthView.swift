@@ -18,18 +18,17 @@ struct MonthView: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 ForEach(Array(QuickEntryPreview.weekdayShort.enumerated()), id: \.offset) { index, wd in
-                    Text(wd.uppercased())
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(0.6)
-                        .foregroundStyle(index >= 5 ? Color.secondary.opacity(0.7) : Color.secondary)
+                    Text(wd)
+                        .font(.caption)
+                        .foregroundStyle(Theme.text2)
                         .frame(maxWidth: .infinity)
                 }
             }
             .padding(.vertical, 6)
-            Rectangle().fill(Theme.hairline).frame(height: 0.5)
+            Rectangle().fill(Theme.line).frame(height: 0.5)
             ForEach(weeks, id: \.first) { week in
                 MonthWeekRow(days: week, month: month, occurrences: occurrences, visibleLanes: visibleLanes)
-                Rectangle().fill(Theme.hairline).frame(height: 0.5)
+                Rectangle().fill(Theme.line).frame(height: 0.5)
             }
         }
     }
@@ -49,14 +48,14 @@ struct MonthWeekRow: View {
                 ForEach(days, id: \.self) { day in
                     let isToday = day == model.today
                     Text(verbatim: "\(day.day)")
-                        .font(Theme.number(.caption, weight: isToday ? .bold : .medium))
+                        .font(Theme.digits(.caption, weight: isToday ? .bold : .medium))
                         .foregroundStyle(numberColor(day, isToday: isToday))
                         .frame(width: 24, height: 24)
                         .background(Circle().fill(numberFill(day, isToday: isToday)))
                         .overlay {
                             // Gewählter Tag (Ziel für Einfügen, LIC-24): Ring.
                             if day == model.selectedDay && !isToday {
-                                Circle().strokeBorder(Theme.accent, lineWidth: 1.5)
+                                Circle().strokeBorder(Theme.light, lineWidth: 1.5)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -75,29 +74,27 @@ struct MonthWeekRow: View {
         .background { emptyDayAreas }
     }
 
-    /// Heute gefüllt, der gewählte Tag (Ziel für Einfügen, LIC-24) blass.
+    /// Der gewählte Tag (Ziel für Einfügen, LIC-24) blass hinterlegt.
     private func numberFill(_ day: LocalDate, isToday: Bool) -> Color {
-        if isToday { return Theme.accent }
-        if day == model.selectedDay { return Theme.accent.opacity(0.12) }
+        if day == model.selectedDay && !isToday { return Theme.light.opacity(0.12) }
         return Color.clear
     }
 
+    /// Heute in Licht, Wochenende und fremde Monate in Text 2.
     private func numberColor(_ day: LocalDate, isToday: Bool) -> Color {
-        if isToday { return Theme.onAccent }
-        if day.month != month { return Color.secondary.opacity(0.6) }
-        if day.weekday.rawValue >= 6 { return Color.secondary }
-        return Color.primary
+        if isToday { return Theme.light }
+        if day.month != month || day.weekday.rawValue >= 6 { return Theme.text2 }
+        return Theme.text1
     }
 
-    /// Wochenende und Tage außerhalb des Monats gedämpft, dazu feine Spaltenlinien.
+    /// Tage außerhalb des Monats gedämpft, dazu feine Spaltenlinien.
     private var dayWash: some View {
         HStack(spacing: 0) {
             ForEach(days, id: \.self) { day in
-                let dimmed: Bool = day.month != month || day.weekday.rawValue >= 6
                 Rectangle()
-                    .fill(dimmed ? Theme.wash : Color.clear)
+                    .fill(day.month != month ? Theme.line : Color.clear)
                     .overlay(alignment: .leading) {
-                        Rectangle().fill(Theme.hairline).frame(width: 0.5)
+                        Rectangle().fill(Theme.line).frame(width: 0.5)
                     }
             }
         }
@@ -143,7 +140,7 @@ struct MiniMonthView: View {
                     ForEach(QuickEntryPreview.weekdayShort, id: \.self) { wd in
                         Text(String(wd.prefix(1)))
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Theme.text2)
                     }
                 }
                 ForEach(weeks, id: \.first) { week in
@@ -169,17 +166,12 @@ struct MiniDayCell: View {
         let isToday = day == model.today
         VStack(spacing: 1) {
             Text(verbatim: "\(day.day)")
-                .font(Theme.number(.caption2, weight: isToday || selected ? .bold : .regular))
-                .foregroundStyle(selected ? Theme.onAccent : (inMonth ? (isToday ? Theme.accent : Color.primary) : Color.secondary.opacity(0.5)))
+                .font(Theme.digits(.caption2, weight: isToday || selected ? .bold : .regular))
+                .foregroundStyle(selected ? Theme.onLight : (inMonth ? (isToday ? Theme.light : Theme.text1) : Theme.text2))
                 .frame(width: 22, height: 20)
-                .background(Circle().fill(selected ? Theme.accent : Color.clear))
-                .overlay {
-                    if isToday && !selected {
-                        Circle().strokeBorder(Theme.accent.opacity(0.6), lineWidth: 1)
-                    }
-                }
+                .background(Circle().fill(selected ? Theme.light : Color.clear))
             Circle()
-                .fill(selected ? Theme.accent : Color.secondary.opacity(0.6))
+                .fill(selected ? Theme.light : Theme.text2)
                 .frame(width: 3, height: 3)
                 .opacity(events > 0 && inMonth ? 1 : 0)
         }

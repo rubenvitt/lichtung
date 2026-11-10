@@ -33,7 +33,7 @@ struct LoginView: View {
                     LichtungMark(size: 88)
                         .padding(.bottom, 4)
                     Text("Lichtung")
-                        .font(Theme.display(.largeTitle))
+                        .font(.largeTitle.weight(.semibold))
                     Text(isReauthentication
                         ? "Dieses Gerät ist nicht mehr angemeldet. Termine und noch nicht gesendete Änderungen bleiben erhalten."
                         : "Melde dich an deinem eigenen Lichtung-Server an.")
@@ -70,7 +70,7 @@ struct LoginView: View {
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: Theme.cardRadius + 4, style: .continuous)
-                        .strokeBorder(Theme.hairline, lineWidth: 1)
+                        .strokeBorder(Theme.line, lineWidth: 1)
                 }
                 .frame(maxWidth: 420)
 
@@ -84,8 +84,7 @@ struct LoginView: View {
                         }
                         .frame(minWidth: 220)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .buttonStyle(Theme.PrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
                     .disabled(busy || ServerAddress.problem(with: session.serverInput) != nil)
 
@@ -114,7 +113,7 @@ struct LoginView: View {
             .padding(32)
             .frame(maxWidth: .infinity)
         }
-        .background { LoginBackdrop() }
+        .background(Theme.shade)
         #if os(macOS)
         .frame(minWidth: 460, minHeight: 520)
         #endif
@@ -137,40 +136,20 @@ struct LoginView: View {
     }
 }
 
-/// Marke: Lichtung im Wald – Sonne über einer hellen Fläche, grüner Verlauf.
+/// Marke: Sonne über dem Horizont auf der Licht-Farbe.
 struct LichtungMark: View {
     var size: CGFloat = 64
 
     var body: some View {
         RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [Theme.accent, Theme.accentDeep],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .fill(Theme.light)
             .overlay {
                 Image(systemName: "sun.horizon.fill")
                     .font(.system(size: size * 0.46, weight: .semibold))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(Theme.sun, Color.white)
+                    .foregroundStyle(Theme.onLight)
             }
             .frame(width: size, height: size)
-            .shadow(color: Theme.accent.opacity(0.35), radius: size * 0.18, y: size * 0.08)
             .accessibilityHidden(true)
-    }
-}
-
-/// Zarter grüner Schein oben, wie Licht, das auf eine Lichtung fällt.
-private struct LoginBackdrop: View {
-    var body: some View {
-        LinearGradient(
-            colors: [Theme.accent.opacity(0.18), Theme.sun.opacity(0.05), Color.clear],
-            startPoint: .top,
-            endPoint: .center
-        )
-        .ignoresSafeArea()
     }
 }
 

@@ -19,7 +19,8 @@ struct InspectorColumn: View {
 
     private func content(now: Date) -> some View {
         let rest = model.occurrences(from: model.today, days: 1)
-            .filter { !DayGridView.isAllDayRow($0) && $0.end > now }
+            // Abgesagte zählen nicht (wie `AgendaBuilder.nextSentence`).
+            .filter { !DayGridView.isAllDayRow($0) && $0.details.status != .cancelled && $0.end > now }
             .sorted { $0.start < $1.start }
         let shown = model.highlightedOccurrence ?? rest.first
         let invitations = model.invitations.items

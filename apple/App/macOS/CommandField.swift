@@ -16,13 +16,14 @@ import SwiftUI
 struct CommandField: View {
     enum Mode { case create, search }
 
+    /// Entwurf; liegt beim Aufrufer, damit er einen Wechsel der Toolbar übersteht.
+    @Binding var text: String
     @Binding var mode: Mode
     /// Schmales Fenster: Feld auf Mindestbreite.
     var compact = false
     @Environment(AppModel.self) private var model
     /// Dauer, wenn der Satz keine nennt (LIC-53, `NewEventDuration`).
     @AppStorage(NewEventDuration.storageKey) private var storedMinutes = 0
-    @State private var text = ""
     /// Vorgewählte Zeile (wird beim Zeichnen auf die vorhandenen Zeilen begrenzt).
     @State private var selection = 0
     /// Ob das Feld gerade bearbeitet wird (meldet `CommandTextField`).
@@ -82,6 +83,10 @@ struct CommandField: View {
             DropdownPanel(content: showsList ? AnyView(list(rows, selected: current).environment(model)) : nil)
         }
         .onChange(of: text) { selection = 0 }
+        // Solange hier getippt wird, gelten ⌘⌫, ⌘←/⌘→ usw. nicht dem Kalender,
+        // auch wenn SwiftUI den Fokus noch dort sieht (`AppModel.calendarCommandsEnabled`).
+        .onChange(of: focused) { model.commandFieldEditing = focused }
+        .onDisappear { if focused { model.commandFieldEditing = false } }
         .onChange(of: Announcement(selected: current, rows: rows.map(\.id))) {
             if focused, let spoken { AccessibilityNotification.Announcement(spoken).post() }
         }

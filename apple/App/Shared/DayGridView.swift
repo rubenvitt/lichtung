@@ -119,6 +119,9 @@ struct DayGridView: View {
             }
             .frame(height: hourHeight * 24)
         }
+        // Ein sichtbarer Rollbalken machte den Inhalt schmaler als Kopf und
+        // ganztägige Zeile, die mit derselben Breite rechnen (auch „immer zeigen“).
+        .scrollIndicators(.never)
         .scrollPosition($scroller.position)
         .onScrollGeometryChange(for: GridViewport.self) { geometry in
             GridViewport(
@@ -445,7 +448,8 @@ struct DayColumn: View {
                 ForEach(TimelineLayout.frameHitAreas(layout.frames), id: \.self) { area in
                     frameHitView(area, height: height)
                 }
-                let titleRows = TimelineLayout.frameTitleRows(layout.frames, lineHeight: Double(Self.frameTitleLine / max(1, height)))
+                let titleRows = TimelineLayout.frameTitleRows(layout.frames, lineHeight: Double(Self.frameTitleLine / max(1, height)),
+                                                             blocks: layout.blocks)
                 ForEach(layout.frames) { frame in
                     frameView(frame, titleRow: titleRows[frame.id] ?? 0, width: width, height: height)
                 }
@@ -612,7 +616,7 @@ struct DayColumn: View {
         let lineX: CGFloat = CGFloat(TimelineLayout.frameLineX(frame.index))
         let frameHeight: CGFloat = max(14, height * frame.height)
         // Rechts aller Linien des Tages, damit keine durch einen Titel läuft.
-        let lastLine: CGFloat = CGFloat(TimelineLayout.frameLineX(max(0, layout.frames.count - 1)))
+        let lastLine: CGFloat = CGFloat(TimelineLayout.frameLineX(layout.frames.map(\.index).max() ?? 0))
         let titleX: CGFloat = lastLine + 6
         let titleY: CGFloat = height * frame.top + 1 + CGFloat(titleRow) * Self.frameTitleLine
         let isHighlighted: Bool = model.highlightedOccurrence?.id == occ.id
@@ -669,8 +673,7 @@ struct DayColumn: View {
     /// Feld „+n“ für Termine über die erlaubten Spalten hinaus. Im schmalen Tag
     /// macht es den Tag zum Fokus-Tag, im Fokus-Tag zeigt es die Termine als Liste.
     private func overflowView(_ overflow: TimelineOverflow, width: CGFloat, height: CGFloat) -> some View {
-        let frames = layout.frames.filter { $0.top < overflow.top + overflow.height && overflow.top < $0.top + $0.height }.count
-        let inset: CGFloat = CGFloat(frames) * Self.frameInset
+        let inset: CGFloat = CGFloat(overflow.insetByFrames) * Self.frameInset
         let columnWidth: CGFloat = max(0, width - inset) / CGFloat(max(1, overflow.columns))
         let x: CGFloat = inset + columnWidth * CGFloat(overflow.column) + 1
         let count = overflow.hidden.count
@@ -1387,7 +1390,6 @@ struct EventBlockView: View {
         }
     }
 
-    /// Beginn „09:30“ für die einzeilige Fassung.
     /// iPhone: schmale Tage zeigen nur Farbfläche und Titelanfang (Spec §5).
     private func showsTime(compact: Bool) -> Bool {
         #if os(iOS)
@@ -1397,6 +1399,7 @@ struct EventBlockView: View {
         #endif
     }
 
+    /// Beginn „09:30“ für die einzeilige Fassung.
     private var startText: String {
         DayGridView.clockText(occurrence.start, calendar: model.calendar)
     }

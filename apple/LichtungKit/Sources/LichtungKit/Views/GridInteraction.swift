@@ -46,14 +46,6 @@ public enum GridInteraction {
         return (minutes / step).rounded(rule) * step
     }
 
-    /// Wie viele Spalten weit ein waagrechter Zug reicht, begrenzt auf die
-    /// sichtbaren Tage (`column` ist die Spalte, in der der Zug beginnt).
-    public static func dayOffset(forDistance dx: Double, columnWidth: Double, column: Int, columns: Int) -> Int {
-        guard columnWidth > 0, columns > 0 else { return 0 }
-        let raw = Int((dx / columnWidth).rounded())
-        return min(columns - 1 - column, max(-column, raw))
-    }
-
     // MARK: - Was sich ziehen lässt
 
     /// Ganztägige Termine und Termine in schreibgeschützten (oder unbekannten)

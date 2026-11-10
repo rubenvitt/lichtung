@@ -23,13 +23,6 @@ struct GridInteractionTests {
         #expect(G.snapped(37) == 30 && G.snapped(38) == 45 && G.snapped(-20) == -15)
     }
 
-    @Test func dayOffsetStaysInVisibleColumns() {
-        #expect(G.dayOffset(forDistance: 130, columnWidth: 100, column: 2, columns: 7) == 1)
-        #expect(G.dayOffset(forDistance: 940, columnWidth: 100, column: 2, columns: 7) == 4)
-        #expect(G.dayOffset(forDistance: -340, columnWidth: 100, column: 2, columns: 7) == -2)
-        #expect(G.dayOffset(forDistance: 400, columnWidth: 100, column: 0, columns: 1) == 0)
-    }
-
     @Test func createSnapsOutwardInBothDirections() {
         let d = L.day(23)
         let down = G.creation(day: d, fromY: 545, toY: 610, columnHeight: h, calendar: L.cal)

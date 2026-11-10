@@ -218,7 +218,7 @@ struct MonthTitle: View {
     }
 }
 
-/// Kopf einer Gruppe in Seitenleisten und Listen („Als Nächstes“): eine halbfette Zeile.
+/// Kopf über einem Feld (Anmeldung: „Server“, „Gerätename“): eine halbfette Zeile.
 struct SectionLabel: View {
     let text: String
 

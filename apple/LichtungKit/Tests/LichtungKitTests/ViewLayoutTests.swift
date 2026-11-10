@@ -403,6 +403,30 @@ struct FrameAndOverflowTests {
         #expect(d.blocks.map(\.insetByFrames) == [1, 0])
     }
 
+    @Test func framesThatDoNotOverlapShareTheFirstLine() {
+        let d = day([L.timed("f1", 12, 0, to: 4), L.timed("a", 12, 1, to: 2),
+                     L.timed("f2", 12, 6, to: 10), L.timed("b", 12, 7, to: 8),
+                     L.timed("f3", 12, 12, to: 16), L.timed("c", 12, 13, to: 14)])
+        #expect(d.frames.map(\.index) == [0, 0, 0])
+        #expect(d.blocks.map(\.insetByFrames) == [1, 1, 1])
+    }
+
+    /// A 00–06, B 01–12, C 05–14: C bekommt Linie 2, der Block um 13 Uhr liegt nur unter C.
+    let staircase = [L.timed("A", 12, 0, to: 6), L.timed("B", 12, 1, to: 12), L.timed("C", 12, 5, to: 14),
+                     L.timed("a", 12, 0, 15, to: 0, 45), L.timed("b", 12, 11, to: 11, 30)]
+
+    @Test func insetClearsTheRightmostOverlappingLine() {
+        let d = day(staircase + [L.timed("c", 12, 13, to: 13, 30)])
+        #expect(d.frames.map(\.index) == [0, 1, 2])
+        #expect(d.blocks.first { $0.occurrence.eventId == "c" }?.insetByFrames == 3)
+    }
+
+    @Test func overflowClearsTheRightmostOverlappingLine() {
+        let d = day(staircase + (0..<4).map { L.timed("c\($0)", 12, 13, to: 13, 30) })
+        #expect(d.overflows.count == 1)
+        #expect(d.overflows.first?.insetByFrames == 3)
+    }
+
     @Test func overflowCollapsesExtraColumns() {
         let d = day((0..<10).map { L.timed("e\($0)", 12, 10, to: 11) })
         #expect(d.blocks.count == 2)
@@ -471,6 +495,32 @@ struct FrameAndOverflowTests {
         // b beginnt 5 Minuten nach a; eine Zeile ist 10 Minuten hoch.
         let rows = TimelineLayout.frameTitleRows([frame("a", 0, from: 8, to: 17), frame("b", 1, from: 8 + 5.0 / 60, to: 16)], lineHeight: 10.0 / 1440)
         #expect(rows == ["a": 0, "b": 1])
+    }
+
+    func block(from h: Double, to e: Double) -> TimelineBlock {
+        TimelineBlock(occurrence: L.timed("x", 12, 8, to: 9), top: h / 24, height: (e - h) / 24,
+                      column: 0, columns: 1, span: 1, continuesBefore: false, continuesAfter: false)
+    }
+
+    @Test func titleCoveredByABlockGoesAboveTheStartLine() {
+        let rows = TimelineLayout.frameTitleRows([frame("a", 0, from: 8, to: 17)], lineHeight: 0.01, blocks: [block(from: 8, to: 9)])
+        #expect(rows == ["a": -1])
+    }
+
+    @Test func titleNotCoveredStaysOnItsLine() {
+        let rows = TimelineLayout.frameTitleRows([frame("a", 0, from: 8, to: 17)], lineHeight: 0.01, blocks: [block(from: 12, to: 13)])
+        #expect(rows == ["a": 0])
+    }
+
+    @Test func titleAtMidnightHasNoRowAbove() {
+        let rows = TimelineLayout.frameTitleRows([frame("a", 0, from: 0, to: 9)], lineHeight: 0.01, blocks: [block(from: 0, to: 1)])
+        #expect(rows == ["a": 0])
+    }
+
+    @Test func coveredTitlesStartingTogetherStackAbove() {
+        let rows = TimelineLayout.frameTitleRows([frame("a", 0, from: 8, to: 17), frame("b", 1, from: 8, to: 16)],
+                                                 lineHeight: 0.01, blocks: [block(from: 8, to: 9)])
+        #expect(rows == ["a": -1, "b": -2])
     }
 
     @Test func dstDayKeepsPositiveHeights() {

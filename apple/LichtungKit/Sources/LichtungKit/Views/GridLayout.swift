@@ -169,7 +169,8 @@ public struct TimelineBlock: Hashable, Sendable, Identifiable {
     /// Beginnt vor diesem Tag bzw. endet danach (für abgeschnittene Kanten).
     public var continuesBefore: Bool
     public var continuesAfter: Bool
-    /// Zahl der Rahmen, die den Block zeitlich überdecken (`TimelineLayout.day`).
+    /// Rahmenlinien links vom Block: höchster Index der Rahmen, die ihn
+    /// zeitlich überdecken, plus 1 (`TimelineLayout.day`).
     public var insetByFrames = 0
 
     public var id: String { occurrence.id }
@@ -199,6 +200,8 @@ public struct TimelineOverflow: Hashable, Sendable, Identifiable {
     public var column: Int
     public var columns: Int
     public var id: String
+    /// Wie `TimelineBlock.insetByFrames`.
+    public var insetByFrames = 0
 }
 
 /// Trefferfläche eines Rahmens in einem Zeitabschnitt (`TimelineLayout.frameHitAreas`).
@@ -253,15 +256,27 @@ public enum TimelineLayout {
         let frameIds = Set(frameItems.map(\.o.id))
         let rest = all.filter { !frameIds.contains($0.o.id) }
 
-        let frames = frameItems.enumerated().map { index, f in
-            TimelineFrame(occurrence: f.o, top: f.s / WallClockAxis.minutesPerDay,
-                          height: (f.shownEnd - f.s) / WallClockAxis.minutesPerDay, index: index)
+        // Jeder Rahmen nimmt die erste Linie, die kein zeitgleicher Rahmen hat.
+        var frames: [TimelineFrame] = []
+        for f in frameItems {
+            let used = Set(zip(frames, frameItems).filter { $0.1.s < f.shownEnd && f.s < $0.1.shownEnd }.map(\.0.index))
+            let index = (0...).first { !used.contains($0) } ?? 0
+            frames.append(TimelineFrame(occurrence: f.o, top: f.s / WallClockAxis.minutesPerDay,
+                                        height: (f.shownEnd - f.s) / WallClockAxis.minutesPerDay, index: index))
+        }
+        /// Rechts der höchsten Linie der Rahmen, die `s..<e` überdecken.
+        func inset(_ s: Double, _ e: Double) -> Int {
+            (zip(frames, frameItems).filter { $0.1.s < e && s < $0.1.shownEnd }.map(\.0.index).max() ?? -1) + 1
         }
         let byId = Dictionary(rest.map { ($0.o.id, $0) }, uniquingKeysWith: { a, _ in a })
         var (blocks, overflows) = columnLayout(rest, axis: axis, maxColumns: maxColumns)
         for i in blocks.indices {
             guard let b = byId[blocks[i].id] else { continue }
-            blocks[i].insetByFrames = frameItems.filter { $0.s < b.shownEnd && b.s < $0.shownEnd }.count
+            blocks[i].insetByFrames = inset(b.s, b.shownEnd)
+        }
+        for i in overflows.indices {
+            let o = overflows[i]
+            overflows[i].insetByFrames = inset(o.top * WallClockAxis.minutesPerDay, (o.top + o.height) * WallClockAxis.minutesPerDay)
         }
         return TimelineDay(blocks: blocks, frames: frames, overflows: overflows)
     }
@@ -298,12 +313,24 @@ public enum TimelineLayout {
 
     /// Zeile des Titels je Rahmen: Titel, die näher als `lineHeight` (Anteil
     /// der Spalte) beieinander begännen, rutschen je eine Zeile nach unten.
-    public static func frameTitleRows(_ frames: [TimelineFrame], lineHeight: Double) -> [String: Int] {
+    /// Liegt ein Block über dieser Zeile, steht der Titel stattdessen über
+    /// der Anfangslinie (Zeile -1, bei mehreren -2 …), sofern dort Platz ist.
+    public static func frameTitleRows(_ frames: [TimelineFrame], lineHeight: Double, blocks: [TimelineBlock] = []) -> [String: Int] {
         var placed: [Double] = []
         var rows: [String: Int] = [:]
         for f in frames.sorted(by: { ($0.top, $0.index) < ($1.top, $1.index) }) {
+            func titleFree(_ row: Int) -> Bool {
+                !placed.contains { abs($0 - (f.top + Double(row) * lineHeight)) < lineHeight }
+            }
+            func blockFree(_ row: Int) -> Bool {
+                let top = f.top + Double(row) * lineHeight, bottom = f.top + Double(row + 1) * lineHeight
+                return top >= 0 && !blocks.contains { $0.top < bottom && top < $0.top + $0.height }
+            }
             var row = 0
-            while placed.contains(where: { abs($0 - (f.top + Double(row) * lineHeight)) < lineHeight }) { row += 1 }
+            while !titleFree(row) { row += 1 }
+            if !blockFree(row), let above = (1...max(1, frames.count)).map({ -$0 }).first(where: { titleFree($0) && blockFree($0) }) {
+                row = above
+            }
             placed.append(f.top + Double(row) * lineHeight)
             rows[f.id] = row
         }

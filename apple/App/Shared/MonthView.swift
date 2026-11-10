@@ -176,7 +176,7 @@ struct MiniDayCell: View {
                 .opacity(events > 0 && inMonth ? 1 : 0)
         }
         .contentShape(Rectangle())
-        .onTapGesture { model.selectedDay = day }
+        .onTapGesture { model.focus(day) }
         .accessibilityLabel(isToday ? "Heute, \(day.day). \(events) Termine" : "\(day.day). \(events) Termine")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }

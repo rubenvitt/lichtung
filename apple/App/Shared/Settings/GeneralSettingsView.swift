@@ -62,6 +62,8 @@ struct GeneralSettingsView: View {
                 Text("Erscheint als zusätzliche Uhrzeitspalte im Zeitraster.")
             }
 
+            mergeSection
+
             newEventsSection
 
             remindersSection
@@ -104,6 +106,26 @@ struct GeneralSettingsView: View {
             Text("Lichtung erinnert an die nächsten sieben Tage, mit den Erinnerungen, die am Termin stehen. Termine, die Claude anlegt, erinnern, sobald die App sie einmal geladen hat.")
         }
         .task { await ReminderScheduler.shared.refreshPermission() }
+    }
+
+    /// Gleiche Termine und Blocker zusammenfassen (`AppModel.mergeRules`).
+    private var mergeSection: some View {
+        @Bindable var model = session.model
+        let titles = Binding<String>(
+            get: { model.mergeRules.blockerTitles.joined(separator: ", ") },
+            set: { model.mergeRules.blockerTitles = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+        )
+        return Section {
+            Toggle("Gleiche Termine zusammenfassen", isOn: $model.mergeRules.mergeIdentical)
+            Toggle("Blocker ausblenden", isOn: $model.mergeRules.hideBlockers)
+            if model.mergeRules.hideBlockers {
+                TextField("Titel von Blockern", text: titles)
+            }
+        } header: {
+            Text("Zusammenfassen")
+        } footer: {
+            Text("Ein Blocker wird nur ausgeblendet, wenn er zeitgleich mit einem anderen Termin liegt. Am Termin steht, in welchen Kalendern er noch eingetragen ist.")
+        }
     }
 
     /// Standardkalender (LIC-47) und Standarddauer (LIC-53) für neue Termine.

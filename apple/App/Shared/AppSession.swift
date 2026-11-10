@@ -100,6 +100,11 @@ final class AppSession {
     // MARK: Start
 
     private func restore() {
+        // Für Bildschirmfotos: direkt in den Demo-Modus, ohne die Wahl zu speichern.
+        if ProcessInfo.processInfo.arguments.contains("--demo") {
+            enterDemo()
+            return
+        }
         let start = SessionStart.decide(
             mode: defaults.string(forKey: Key.mode),
             serverURL: defaults.string(forKey: Key.server),

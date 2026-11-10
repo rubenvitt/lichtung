@@ -42,17 +42,39 @@ enum DemoData {
             "demo_set_arbeit": CalendarSet(id: "demo_set_arbeit", name: "Arbeit", calendarIds: ["demo_arbeit", "demo_fokus"], position: 0),
             "demo_set_privat": CalendarSet(id: "demo_set_privat", name: "Privat", calendarIds: ["demo_privat", "demo_sport", "demo_ehrenamt"], position: 1),
         ]
+        // Laufende Woche nach dem Muster KW 46 der Vorlage (Spec §5), Werte erfunden.
+        let tue = monday.adding(days: 1), wed = monday.adding(days: 2), thu = monday.adding(days: 3)
+        let fri = monday.adding(days: 4), sat = monday.adding(days: 5)
+        let teams = "Einwahl: https://teams.microsoft.com/l/meetup-join/demo"
         let events = [
-            event("d1", "demo_arbeit", "Team-Sync", monday, 9, 0, minutes: 30, location: "Raum 2", rrule: "FREQ=WEEKLY;BYDAY=MO,WE",
-                  notes: "Einwahl: https://meet.google.com/abc-defg-hij"),
-            event("d2", "demo_fokus", "Fokuszeit", monday, 10, 0, minutes: 120, rrule: "FREQ=WEEKLY;BYDAY=MO,FR"),
-            event("d3", "demo_sport", "Laufen mit Hund", today, 7, 0, minutes: 45, rrule: "FREQ=DAILY"),
-            event("d4", "demo_privat", "Zahnarzt", today.adding(days: 2), 14, 0, minutes: 60, location: "Praxis am Markt"),
-            event("d5", "demo_arbeit", "Workshop", today.adding(days: 1), 10, 0, minutes: 90, location: "Raum 4"),
-            event("d6", "demo_arbeit", "Abstimmung", today, 11, 0, minutes: 60),
-            event("d7", "demo_privat", "Mittagessen", today, 11, 30, minutes: 60, location: "Café Sonne"),
-            event("d8", "demo_ehrenamt", "Dienstabend", today.adding(days: 3), 19, 30, minutes: 120, rrule: "FREQ=WEEKLY;INTERVAL=2"),
-            allDay("d9", "demo_ehrenamt", "Bereitschaft", today.adding(days: 1)),
+            event("d1", "demo_arbeit", "Daily Stand-up", monday, 8, 45, minutes: 15, rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,FR", notes: teams),
+            // Drei Termine à 15 Minuten hintereinander.
+            event("d2", "demo_arbeit", "Kurzabstimmung Design", monday, 9, 0, minutes: 15),
+            event("d2b", "demo_arbeit", "Kurzabstimmung Technik", monday, 9, 15, minutes: 15),
+            event("d2c", "demo_arbeit", "Kurzabstimmung Planung", monday, 9, 30, minutes: 15),
+            event("d3", "demo_fokus", "Fokuszeit", monday, 10, 15, minutes: 45),
+            event("d3b", "demo_privat", "Mittag", monday, 12, 20, minutes: 55),
+            event("d4", "demo_arbeit", "Statusrunde", tue, 9, 0, minutes: 60, location: "Raum 2"),
+            // Sport privat, im Arbeitskalender als „Blockiert“ gespiegelt.
+            event("d5", "demo_privat", "Sport", tue, 11, 0, minutes: 45),
+            event("d5b", "demo_arbeit", "Blockiert", tue, 11, 0, minutes: 45),
+            event("d6", "demo_arbeit", "Vorbereitung Workshop", tue, 13, 0, minutes: 120, notes: teams),
+            event("d7", "demo_arbeit", "Retro November", wed, 10, 0, minutes: 90, notes: "Einwahl: https://meet.google.com/abc-defg-hij"),
+            // Ein Termin, gleich in drei Kalendern.
+            event("d8a", "demo_arbeit", "Jahresplanung", wed, 14, 0, minutes: 60),
+            event("d8b", "demo_privat", "Jahresplanung", wed, 14, 0, minutes: 60),
+            event("d8c", "demo_ehrenamt", "Jahresplanung", wed, 14, 0, minutes: 60),
+            // Ein langer Termin mit drei kurzen: wird zum Rahmen.
+            event("d14", "demo_arbeit", "Werkstatt-Tag", thu, 8, 0, minutes: 9 * 60, location: "Köln"),
+            event("d15", "demo_arbeit", "Austausch Plattform", thu, 11, 0, minutes: 60),
+            event("d16", "demo_arbeit", "Abschluss Werkstatt", thu, 14, 0, minutes: 60),
+            event("d17", "demo_arbeit", "Kurzer Anruf", thu, 15, 30, minutes: 30),
+            event("d18", "demo_arbeit", "Gespräch mit Lea", fri, 10, 0, minutes: 45),
+            event("d19", "demo_privat", "Zug nach Hause", fri, 17, 45, minutes: 195),
+            event("d20", "demo_ehrenamt", "Lehrgang", sat, 10, 0, minutes: 8 * 60, location: "Bereitschaftsheim"),
+            event("d21", "demo_sport", "Laufen mit Hund", today, 7, 0, minutes: 45, rrule: "FREQ=DAILY"),
+            allDay("d9", "demo_ehrenamt", "Bereitschaft", monday, days: 7),
+            allDay("d9b", "demo_privat", "Urlaub Marie", fri),
             allDay("d10", "demo_privat", "Urlaub", today.adding(days: 10), days: 5),
         ]
         for e in events { s.events[e.id] = e }

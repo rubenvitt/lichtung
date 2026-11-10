@@ -95,6 +95,10 @@ private struct BlockerRuleEditor: View {
     @State private var title: String
     @State private var allDay: Bool
     @State private var confirmsDelete = false
+    /// Läuft ein Aufruf, bleibt „Sichern“ gesperrt (auch gegen Doppeltippen).
+    @State private var isSaving = false
+    /// Fehler des letzten Aufrufs, im Blatt angezeigt.
+    @State private var error: String?
 
     init(rule: BlockerRule?) {
         original = rule
@@ -137,6 +141,12 @@ private struct BlockerRuleEditor: View {
                 } footer: {
                     Text("Den Titel sehen alle, die den Zielkalender sehen. In Lichtung steht der Blocker hinter seinem Termin, wenn „Blocker ausblenden“ an ist.")
                 }
+                if let error {
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                    }
+                }
                 if original != nil {
                     Section {
                         Button("Regel löschen", role: .destructive) { confirmsDelete = true }
@@ -151,7 +161,7 @@ private struct BlockerRuleEditor: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Sichern") { save() }
-                        .disabled(!canSave || settings.isWorking)
+                        .disabled(!canSave || isSaving || settings.isWorking)
                 }
             }
             .confirmationDialog("Regel löschen?", isPresented: $confirmsDelete, titleVisibility: .visible) {
@@ -171,8 +181,11 @@ private struct BlockerRuleEditor: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
         let settings = session.settings
         Task {
+            defer { isSaving = false }
             let ok: Bool
             if let original {
                 let newTitle = trimmedTitle.isEmpty ? "Blockiert" : trimmedTitle
@@ -188,15 +201,28 @@ private struct BlockerRuleEditor: View {
             } else {
                 ok = false
             }
-            if ok { dismiss() }
+            finish(ok)
         }
     }
 
     private func delete() {
-        guard let original else { return }
+        guard let original, !isSaving else { return }
+        isSaving = true
         let settings = session.settings
         Task {
-            if await settings.deleteBlockerRule(original.id) { dismiss() }
+            defer { isSaving = false }
+            finish(await settings.deleteBlockerRule(original.id))
+        }
+    }
+
+    /// Erfolg schließt das Blatt; einen Fehler zeigt es selbst an.
+    private func finish(_ ok: Bool) {
+        let settings = session.settings
+        if ok {
+            dismiss()
+        } else {
+            error = settings.errorMessage ?? "Das hat nicht geklappt."
+            settings.errorMessage = nil
         }
     }
 }

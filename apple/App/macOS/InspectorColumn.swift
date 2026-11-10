@@ -65,6 +65,7 @@ struct InspectorColumn: View {
             .padding(.bottom, 20)
         }
         .scrollIndicators(.never)
+        .modifier(NoTopScrollEdgeEffect())
     }
 
     private func heading(_ text: String) -> some View {
@@ -169,5 +170,18 @@ private struct InspectorRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Ohne den Schleier, den macOS 26 oben über einen ScrollView unter der
+/// Toolbar legt: Sonst wirkt die Toolbar über der Spalte anders getönt als
+/// über dem Raster, dessen Kopf nicht scrollt.
+private struct NoTopScrollEdgeEffect: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content.scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            content
+        }
     }
 }

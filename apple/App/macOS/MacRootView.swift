@@ -24,23 +24,41 @@ struct MacRootView: View {
     @AppStorage("hourHeight") private var hourHeight = Double(DayGridView.minimumHourHeight)
     /// Stundenhöhe zu Beginn des Aufziehens; die Vergrößerung zählt ab dort.
     @State private var pinchBase: Double?
+    /// Stundenhöhe während des Aufziehens; gespeichert wird erst am Ende.
+    @State private var pinchHeight: Double?
+    /// Breite des Fensterinhalts; darunter blendet sich die rechte Spalte aus.
+    @State private var contentWidth: CGFloat = .infinity
     @State private var commandMode = CommandField.Mode.create
     @State private var showsMiniMonth = false
     // Tastatur im Kalenderfeld (LIC-24)
     @FocusState private var calendarFocused: Bool
 
     static let hourHeightRange = 40.0...120.0
+    /// Schmaler als das, blendet sich die rechte Spalte von selbst aus (Spec §8)
+    /// und kommt wieder, wenn das Fenster breiter wird und sie eingeschaltet ist.
+    static let inspectorMinWidth: CGFloat = 900
+    static let minWidth: CGFloat = 720
+    /// Darunter wird die Toolbar knapper (`compact`).
+    static let compactToolbarWidth: CGFloat = 1100
+
+    private var showsInspector: Bool { inspectorVisible && contentWidth >= Self.inspectorMinWidth }
+    /// Schmales Fenster: Titel ohne Jahr, Feld schmaler, Umschalter als Menü, damit
+    /// Blättern, „Heute“ und der Umschalter nicht ins Überlaufmenü rutschen.
+    private var compact: Bool { contentWidth < Self.compactToolbarWidth }
 
     var body: some View {
         @Bindable var model = model
         HStack(spacing: 0) {
             keyboardDetail
-            if inspectorVisible {
+                // Wischen nur über dem Kalender, nicht über Spalte und Toolbar.
+                .background { TrackpadPagingMonitor { model.step($0) } }
+            if showsInspector {
                 InspectorColumn()
             }
         }
+        .frame(minWidth: Self.minWidth)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
         .background(Theme.shade)
-        .background { TrackpadPagingMonitor { model.step($0) } }
         // Was weiter innen steht, landet in der Toolbar weiter rechts: Anfragen,
         // Sync-Probleme und ganz rechts der Knopf für die Spalte.
         .toolbar {
@@ -48,7 +66,9 @@ struct MacRootView: View {
                 Button { inspectorVisible.toggle() } label: {
                     Label("Rechte Spalte", systemImage: "sidebar.right")
                 }
-                .help(inspectorVisible ? "Rechte Spalte ausblenden (⌃⌘I)" : "Rechte Spalte einblenden (⌃⌘I)")
+                .help(contentWidth < Self.inspectorMinWidth ? "Für die rechte Spalte ist das Fenster zu schmal"
+                    : inspectorVisible ? "Rechte Spalte ausblenden (⌃⌘I)" : "Rechte Spalte einblenden (⌃⌘I)")
+                .disabled(contentWidth < Self.inspectorMinWidth)
             }
         }
         .syncProblemsButton() // Konflikte, abgelehnte Änderungen (LIC-70)
@@ -57,31 +77,22 @@ struct MacRootView: View {
         // Der Titel steht als Knopf in der Toolbar (Mini-Monat).
         .toolbar(removing: .title)
         .toolbar {
-            ToolbarItem(placement: .navigation) {
-                titleButton
-            }
-            ToolbarItem(placement: .principal) {
-                CommandField(mode: $commandMode)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Picker("Ansicht", selection: $model.viewMode) {
-                    ForEach(CalendarViewMode.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .help("Ansicht (⌘1–⌘4)")
-            }
-            // ⌘← und ⌘→ liegen im Menü „Darstellung“ (LIC-50): Als Kürzel
-            // der Toolbar fingen sie in Textfeldern den Sprung an
-            // Zeilenanfang und -ende ab.
-            ToolbarItem(placement: .primaryAction) {
-                ControlGroup {
-                    Button { model.step(-1) } label: { Image(systemName: "chevron.left") }
-                        .help("\(model.viewMode.stepTitle(forward: false)) (⌘←)")
-                    Button("Heute") { model.goToToday() }
-                        .keyboardShortcut("t", modifiers: .command)
-                    Button { model.step(1) } label: { Image(systemName: "chevron.right") }
-                        .help("\(model.viewMode.stepTitle(forward: true)) (⌘→)")
-                }
+            // Schmal und breit als getrennte Einträge: Die Toolbar misst einen
+            // Eintrag nur einmal; ändert er nur seine Breite, überlappt er die
+            // Nachbarn. Alles links (`.navigation`), damit Blättern, „Heute“ und
+            // das Feld nicht ins Überlaufmenü rutschen; in der Mitte
+            // (`.principal`) überlappte das Feld die Knöpfe zum Blättern.
+            if compact {
+                ToolbarItem(placement: .navigation) { titleButton(compact: true) }
+                ToolbarItem(placement: .navigation) { pagingButtons }
+                ToolbarItem(placement: .navigation) { CommandField(mode: $commandMode, compact: true) }
+                // Umschalter als Aufklappmenü.
+                ToolbarItem(placement: .primaryAction) { viewPicker.pickerStyle(.menu).labelsHidden().fixedSize() }
+            } else {
+                ToolbarItem(placement: .navigation) { titleButton(compact: false) }
+                ToolbarItem(placement: .navigation) { pagingButtons }
+                ToolbarItem(placement: .navigation) { CommandField(mode: $commandMode) }
+                ToolbarItem(placement: .primaryAction) { viewPicker.pickerStyle(.segmented) }
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
@@ -104,8 +115,29 @@ struct MacRootView: View {
         }
     }
 
-    /// „November 2026, KW 46“; Klick zeigt den Mini-Monat.
-    private var titleButton: some View {
+    /// ⌘← und ⌘→ liegen im Menü „Darstellung“ (LIC-50): Als Kürzel der
+    /// Toolbar fingen sie in Textfeldern den Sprung an Zeilenanfang und -ende ab.
+    private var pagingButtons: some View {
+        ControlGroup {
+            Button { model.step(-1) } label: { Image(systemName: "chevron.left") }
+                .help("\(model.viewMode.stepTitle(forward: false)) (⌘←)")
+            Button("Heute") { model.goToToday() }
+                .keyboardShortcut("t", modifiers: .command)
+            Button { model.step(1) } label: { Image(systemName: "chevron.right") }
+                .help("\(model.viewMode.stepTitle(forward: true)) (⌘→)")
+        }
+    }
+
+    private var viewPicker: some View {
+        @Bindable var model = model
+        return Picker("Ansicht", selection: $model.viewMode) {
+            ForEach(CalendarViewMode.allCases) { Text($0.label).tag($0) }
+        }
+        .help("Ansicht (⌘1–⌘4)")
+    }
+
+    /// „November 2026, KW 46“, schmal „November KW 46“; Klick zeigt den Mini-Monat.
+    private func titleButton(compact: Bool) -> some View {
         let d = model.selectedDay
         return Button { showsMiniMonth.toggle() } label: {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -113,7 +145,8 @@ struct MacRootView: View {
                     Text(verbatim: "\(d.year)").fontWeight(.semibold)
                 } else {
                     Text(MonthTitle.monthName(d.month)).fontWeight(.semibold)
-                    Text(verbatim: "\(d.year), KW \(MonthGrid.isoWeek(d))").foregroundStyle(Theme.text2)
+                    Text(verbatim: compact ? "KW \(MonthGrid.isoWeek(d))" : "\(d.year), KW \(MonthGrid.isoWeek(d))")
+                        .foregroundStyle(Theme.text2)
                 }
             }
             .font(.system(size: 15))
@@ -144,22 +177,27 @@ struct MacRootView: View {
     private var detail: some View {
         let d = model.selectedDay
         switch model.viewMode {
-        case .day: DayGridView(start: d, dayCount: 1, hourHeight: CGFloat(hourHeight)).simultaneousGesture(pinch)
-        case .week: DayGridView(start: weekStart, dayCount: 7, hourHeight: CGFloat(hourHeight)).simultaneousGesture(pinch)
+        case .day: DayGridView(start: d, dayCount: 1, hourHeight: CGFloat(pinchHeight ?? hourHeight)).simultaneousGesture(pinch)
+        case .week: DayGridView(start: weekStart, dayCount: 7, hourHeight: CGFloat(pinchHeight ?? hourHeight)).simultaneousGesture(pinch)
         case .month: MonthView(year: d.year, month: d.month)
         case .year: YearView(year: d.year)
         }
     }
 
-    /// Aufziehen mit zwei Fingern: Höhe der Stunde, ab der Höhe zu Beginn der Geste.
+    /// Aufziehen mit zwei Fingern: Höhe der Stunde, ab der Höhe zu Beginn der
+    /// Geste. In die Einstellungen geschrieben wird erst am Ende.
     private var pinch: some Gesture {
         MagnifyGesture()
             .onChanged { value in
                 let base = pinchBase ?? hourHeight
                 pinchBase = base
-                hourHeight = min(max(base * value.magnification, Self.hourHeightRange.lowerBound), Self.hourHeightRange.upperBound)
+                pinchHeight = min(max(base * value.magnification, Self.hourHeightRange.lowerBound), Self.hourHeightRange.upperBound)
             }
-            .onEnded { _ in pinchBase = nil }
+            .onEnded { _ in
+                if let pinchHeight { hourHeight = pinchHeight }
+                pinchBase = nil
+                pinchHeight = nil
+            }
     }
 
     // MARK: Tastatur (LIC-24)
@@ -380,7 +418,8 @@ struct EventMenuBarItems: View {
 /// Waagerechtes Wischen mit zwei Fingern blättert (Spec §5). Ein lokaler
 /// Monitor sieht die Scroll-Ereignisse dieses Fensters, bevor das Raster sie
 /// bekommt, und gibt sie unverändert weiter: Senkrechtes Scrollen bleibt also
-/// unberührt. Blätter, Popover und andere Fenster zählen nicht mit.
+/// unberührt. Es zählt nur, was über der Fläche dieses Views (dem Kalender)
+/// geschieht; Blätter, Popover und andere Fenster zählen nicht mit.
 private struct TrackpadPagingMonitor: NSViewRepresentable {
     let onStep: @MainActor (Int) -> Void
 
@@ -388,15 +427,21 @@ private struct TrackpadPagingMonitor: NSViewRepresentable {
 
     func updateNSView(_ view: MonitorView, context: Context) { view.onStep = onStep }
 
+    static func dismantleNSView(_ view: MonitorView, coordinator: ()) { view.stop() }
+
     final class MonitorView: NSView {
         var onStep: @MainActor (Int) -> Void = { _ in }
         private var monitor: Any?
         private var paging = TrackpadPaging()
 
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
+        func stop() {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
             guard window != nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
                 MainActor.assumeIsolated { self?.handle(event) }
@@ -405,8 +450,11 @@ private struct TrackpadPagingMonitor: NSViewRepresentable {
         }
 
         private func handle(_ event: NSEvent) {
-            // Nur Trackpad-Gesten in diesem Fenster; das Mausrad hat keine Phase.
-            guard event.window === window, event.hasPreciseScrollingDeltas else { return }
+            // Nur Trackpad-Gesten über dem Kalender dieses Fensters, ohne offenes
+            // Blatt; das Mausrad hat keine Phase.
+            guard let window, event.window === window, window.attachedSheet == nil, event.hasPreciseScrollingDeltas,
+                  bounds.contains(convert(event.locationInWindow, from: nil))
+            else { return }
             let phase: TrackpadPaging.Phase
             if !event.momentumPhase.isEmpty {
                 phase = .momentum

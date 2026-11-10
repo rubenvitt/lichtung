@@ -19,18 +19,17 @@ struct EventDetailView: View {
                     // Zusammengefasste Vorkommen (Spec §6): Tipp öffnet das andere.
                     let others = model.otherOccurrences(of: occurrence)
                     if !others.isEmpty {
-                        LabeledContent("Steht auch in") {
-                            HStack(spacing: 12) {
-                                ForEach(others) { other in
-                                    Button { model.selectedOccurrence = other } label: {
-                                        HStack(spacing: 5) {
-                                            CalendarDot(color: model.color(for: other.calendarId))
-                                            Text(model.state.calendars[other.calendarId]?.name ?? "Kalender")
-                                        }
+                        HStack(spacing: 12) {
+                            Text("Steht auch in").foregroundStyle(.secondary)
+                            ForEach(others) { other in
+                                Button { model.selectedOccurrence = other } label: {
+                                    HStack(spacing: 5) {
+                                        CalendarDot(color: model.color(for: other.calendarId))
+                                        Text(model.state.calendars[other.calendarId]?.name ?? "Kalender")
                                     }
-                                    .buttonStyle(.borderless)
-                                    .help("Dieses Vorkommen öffnen")
                                 }
+                                .buttonStyle(.borderless)
+                                .help("Dieses Vorkommen öffnen")
                             }
                         }
                     }

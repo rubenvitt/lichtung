@@ -1,6 +1,3 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import LichtungKit
 import SwiftUI
 
@@ -86,6 +83,8 @@ private struct InvitationsToolbarButton: ViewModifier {
             .onChange(of: showsList) { _, shown in
                 if !shown { showPending() }
             }
+            // „Offene Einladungen“ in der rechten Spalte öffnet diese Liste.
+            .onChange(of: model.invitationsListRequests) { showsList = true }
         #else
         content
             .toolbar {
@@ -272,26 +271,32 @@ struct InvitationResponseButtons: View {
     let onRespond: @MainActor (InvitationResponse) -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            ForEach(InvitationResponse.ordered, id: \.self) { response in
-                if response == current {
-                    Button { onRespond(response) } label: {
-                        Label(response.actionTitle, systemImage: response.systemImage)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(response.tint)
-                    .accessibilityAddTraits(.isSelected)
-                } else {
-                    Button { onRespond(response) } label: {
-                        Label(response.actionTitle, systemImage: response.systemImage)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(response.tint)
-                }
-            }
+        // Schmale Spalte (rechte Spalte am Mac): untereinander statt abgeschnitten.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { buttons }
+            VStack(alignment: .leading, spacing: 6) { buttons }
         }
         .controlSize(.small)
         .labelStyle(.titleAndIcon)
+    }
+
+    private var buttons: some View {
+        ForEach(InvitationResponse.ordered, id: \.self) { response in
+            if response == current {
+                Button { onRespond(response) } label: {
+                    Label(response.actionTitle, systemImage: response.systemImage)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(response.tint)
+                .accessibilityAddTraits(.isSelected)
+            } else {
+                Button { onRespond(response) } label: {
+                    Label(response.actionTitle, systemImage: response.systemImage)
+                }
+                .buttonStyle(.bordered)
+                .tint(response.tint)
+            }
+        }
     }
 }
 
@@ -325,7 +330,7 @@ struct InvitationDetailSection: View {
 
 /// Zeile mit den Antworten im Detail, mit der Frage nach dem Geltungsbereich
 /// bei Serien (`InvitationActions.scopes`).
-private struct InvitationDetailButtons: View {
+struct InvitationDetailButtons: View {
     @Environment(AppModel.self) private var model
     let occurrence: Occurrence
     let current: InvitationResponse?

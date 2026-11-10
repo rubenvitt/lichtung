@@ -74,6 +74,20 @@ struct AgendaTests {
         #expect(days.first?.heading == "Di 3. Nov.")
     }
 
+    @Test func sentenceForTheRightColumn() {
+        // Heute ist Fr 23. Okt.; in den nächsten sechs Tagen reicht der Wochentag.
+        #expect(AgendaBuilder.sentence(L.timed("A", 23, 13, to: 15), today: today, calendar: L.cal) == "Freitag, 13:00 bis 15:00")
+        #expect(AgendaBuilder.sentence(L.timed("A", 27, 9, 30, to: 10), today: today, calendar: L.cal) == "Dienstag, 09:30 bis 10:00")
+        // Weiter weg oder vorbei: mit Datum.
+        #expect(AgendaBuilder.sentence(L.timed("A", 22, 8, to: 9), today: today, calendar: L.cal) == "Donnerstag, 22. Okt., 08:00 bis 09:00")
+        #expect(AgendaBuilder.sentence(L.timed("A", 3, 8, to: 9, month: 11), today: today, calendar: L.cal) == "Dienstag, 3. Nov., 08:00 bis 09:00")
+        // Über Mitternacht: das Ende mit seinem Tag.
+        #expect(AgendaBuilder.sentence(L.timed("A", 23, 22, to: 6, endDay: 24), today: today, calendar: L.cal)
+            == "Freitag, 22:00 bis Samstag, 06:00")
+        #expect(AgendaBuilder.sentence(L.allDay("A", 24), today: today, calendar: L.cal) == "Samstag, ganztägig")
+        #expect(AgendaBuilder.sentence(L.allDay("A", 24, through: 26), today: today, calendar: L.cal) == "Samstag bis Montag, ganztägig")
+    }
+
     @Test func headingOtherYearAndYesterday() {
         #expect(AgendaBuilder.heading(LocalDate(year: 2027, month: 1, day: 3), today: today) == "So 3. Jan. 2027")
         #expect(AgendaBuilder.heading(L.day(22), today: today) == "Gestern · Do 22.")

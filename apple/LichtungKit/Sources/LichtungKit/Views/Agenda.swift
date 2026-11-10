@@ -87,6 +87,33 @@ public enum AgendaBuilder {
         return String(format: "%02d:%02d", c.hour!, c.minute!)
     }
 
+    /// Zeit als Satz für die rechte Spalte am Mac: „Dienstag, 13:00 bis 15:00“.
+    /// Tage außerhalb der nächsten sechs bekommen das Datum dazu
+    /// („Dienstag, 3. Nov., 08:00 bis 09:00“), ganztägige „Samstag, ganztägig“.
+    public static func sentence(_ o: Occurrence, today: LocalDate, calendar cal: Calendar) -> String {
+        sentence(from: o.start, to: o.end, allDay: o.isAllDay, today: today, calendar: cal)
+    }
+
+    /// Wie `sentence(_:today:calendar:)` für einen Zeitraum, der noch kein Termin ist
+    /// (Vorschau der Schnelleingabe). Ganztägig ist `end` exklusiv.
+    public static func sentence(from start: Date, to end: Date, allDay: Bool, today: LocalDate, calendar cal: Calendar) -> String {
+        func dayText(_ day: LocalDate) -> String {
+            let name = QuickEntryPreview.weekdayLong[day.weekday.rawValue - 1]
+            guard !(0...6).contains(today.days(until: day)) else { return name }
+            let year = day.year == today.year ? "" : " \(day.year)"
+            return "\(name), \(day.day). \(QuickEntryPreview.monthShort[day.month - 1])\(year)"
+        }
+        let first = LocalDate(start, calendar: cal)
+        if allDay {
+            // Ende ist exklusiv (Mitternacht danach).
+            let last = LocalDate(end.addingTimeInterval(-1), calendar: cal)
+            return last > first ? "\(dayText(first)) bis \(dayText(last)), ganztägig" : "\(dayText(first)), ganztägig"
+        }
+        let endDay = LocalDate(end, calendar: cal)
+        let endText = endDay == first ? clock(end, cal) : "\(dayText(endDay)), \(clock(end, cal))"
+        return "\(dayText(first)), \(clock(start, cal)) bis \(endText)"
+    }
+
     /// „Heute · Fr 23.“, „Morgen · Sa 24.“, „Gestern · Do 22.“, sonst „So 25. Okt.“
     public static func heading(_ day: LocalDate, today: LocalDate) -> String {
         let wd = QuickEntryPreview.weekdayShort[day.weekday.rawValue - 1]

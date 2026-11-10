@@ -1,46 +1,80 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import AppKit
 import LichtungKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Mac-Hauptfenster (C): Seitenleiste mit Mini-Monat und nächsten Terminen,
-/// rechts Tag, Woche, Monat oder Jahr (Spec §5).
+/// Mac-Hauptfenster (Spec §5): links das Raster (Tag, Woche) bzw. Monat oder
+/// Jahr, rechts die Spalte mit dem markierten Termin (`InspectorColumn`).
+/// In der Toolbar Titel mit Mini-Monat, ein Feld für Eintragen und Suchen
+/// (`CommandField`), Ansicht, Blättern, Kalender-Set, Anfragen und die Spalte.
 ///
-/// Tastatur (LIC-24): Das Kalenderfeld rechts nimmt den Fokus, sobald ein
+/// Tastatur (LIC-24): Das Kalenderfeld nimmt den Fokus, sobald ein
 /// Termin markiert oder leere Fläche angeklickt wird. Dann gelten ↑/↓ und
 /// Tab/⇧Tab (Markierung wandern), ←/→ (Tag für Tag, LIC-50), Return/Leertaste
 /// (öffnen), ⌫ (löschen), Esc (Markierung weg), ⌘C/⌘V. In Textfeldern bleiben
 /// die Tasten beim Text. Belegung in `CalendarKeyCommand` (LichtungKit).
+///
+/// Trackpad (Spec §5): Waagerechtes Wischen mit zwei Fingern blättert einen
+/// Schritt der Ansicht (`TrackpadPaging`), Aufziehen ändert im Raster die Höhe
+/// der Stunde (40–120 pt, gemerkt).
 struct MacRootView: View {
     @Environment(AppModel.self) private var model
 
-    // Suche (LIC-42)
-    @State private var searchText = ""
-    @FocusState private var searchFocused: Bool
+    @AppStorage("inspectorVisible") private var inspectorVisible = true
+    @AppStorage("hourHeight") private var hourHeight = Double(DayGridView.minimumHourHeight)
+    /// Stundenhöhe zu Beginn des Aufziehens; die Vergrößerung zählt ab dort.
+    @State private var pinchBase: Double?
+    @State private var commandMode = CommandField.Mode.create
+    @State private var showsMiniMonth = false
     // Tastatur im Kalenderfeld (LIC-24)
     @FocusState private var calendarFocused: Bool
 
+    static let hourHeightRange = 40.0...120.0
+
     var body: some View {
         @Bindable var model = model
-        NavigationSplitView {
-            SidebarView(searchText: searchText)
-                .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
-        } detail: {
-            VStack(spacing: 0) {
-                keyboardDetail
-                Divider()
-                QuickEntryBar()
+        HStack(spacing: 0) {
+            keyboardDetail
+            if inspectorVisible {
+                InspectorColumn()
             }
-            .navigationTitle(title)
-            .navigationSubtitle(subtitle)
-            .toolbar {
-                // ⌘← und ⌘→ liegen im Menü „Darstellung“ (LIC-50): Als Kürzel
-                // der Toolbar fingen sie in Textfeldern den Sprung an
-                // Zeilenanfang und -ende ab.
-                ToolbarItemGroup(placement: .navigation) {
+        }
+        .background(Theme.shade)
+        .background { TrackpadPagingMonitor { model.step($0) } }
+        // Was weiter innen steht, landet in der Toolbar weiter rechts: Anfragen,
+        // Sync-Probleme und ganz rechts der Knopf für die Spalte.
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { inspectorVisible.toggle() } label: {
+                    Label("Rechte Spalte", systemImage: "sidebar.right")
+                }
+                .help(inspectorVisible ? "Rechte Spalte ausblenden (⌃⌘I)" : "Rechte Spalte einblenden (⌃⌘I)")
+            }
+        }
+        .syncProblemsButton() // Konflikte, abgelehnte Änderungen (LIC-70)
+        .invitationsButton() // Terminanfragen (LIC-30)
+        .navigationTitle(windowTitle)
+        // Der Titel steht als Knopf in der Toolbar (Mini-Monat).
+        .toolbar(removing: .title)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                titleButton
+            }
+            ToolbarItem(placement: .principal) {
+                CommandField(mode: $commandMode)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Picker("Ansicht", selection: $model.viewMode) {
+                    ForEach(CalendarViewMode.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .help("Ansicht (⌘1–⌘4)")
+            }
+            // ⌘← und ⌘→ liegen im Menü „Darstellung“ (LIC-50): Als Kürzel
+            // der Toolbar fingen sie in Textfeldern den Sprung an
+            // Zeilenanfang und -ende ab.
+            ToolbarItem(placement: .primaryAction) {
+                ControlGroup {
                     Button { model.step(-1) } label: { Image(systemName: "chevron.left") }
                         .help("\(model.viewMode.stepTitle(forward: false)) (⌘←)")
                     Button("Heute") { model.goToToday() }
@@ -48,39 +82,58 @@ struct MacRootView: View {
                     Button { model.step(1) } label: { Image(systemName: "chevron.right") }
                         .help("\(model.viewMode.stepTitle(forward: true)) (⌘→)")
                 }
-                ToolbarItem(placement: .principal) {
-                    Picker("Ansicht", selection: $model.viewMode) {
-                        ForEach(CalendarViewMode.allCases) { Text($0.label).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .help("Ansicht (⌘1–⌘4)")
-                }
-                // MARK: Editor (LIC-20)
-                ToolbarItem(placement: .primaryAction) {
-                    Button { model.newEvent() } label: { Image(systemName: "plus") }
-                        .help("Neuer Termin (⌘N)")
-                }
             }
-            .invitationsButton() // Terminanfragen (LIC-30)
-            .syncProblemsButton() // Konflikte, abgelehnte Änderungen (LIC-70)
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Picker("Kalender", selection: $model.calendarSelection) {
+                        Text("Alle Kalender").tag(CalendarQuery.Selection.visible)
+                        ForEach(model.state.calendarSets.values.sorted { $0.position < $1.position }) { set in
+                            Text(set.name).tag(CalendarQuery.Selection.set(set.id))
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                } label: {
+                    Label("Kalender-Set", systemImage: "square.stack")
+                }
+                .help("Kalender-Set")
+            }
         }
         .sheet(item: $model.selectedOccurrence, onDismiss: { model.detailDismissed() }) { occ in
             EventDetailView(occurrence: occ).frame(minWidth: 360, minHeight: 420)
         }
-        // Suche in der Toolbar, ⌘F über das Menü (LIC-42)
-        .searchable(text: $searchText, placement: .toolbar, prompt: "Termine suchen")
-        .searchFocused($searchFocused)
-        .onChange(of: model.searchFocusRequests) { searchFocused = true }
     }
 
-    private var title: String {
+    /// „November 2026, KW 46“; Klick zeigt den Mini-Monat.
+    private var titleButton: some View {
         let d = model.selectedDay
-        return model.viewMode == .year ? "\(d.year)" : MonthGrid.title(year: d.year, month: d.month)
+        return Button { showsMiniMonth.toggle() } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                if model.viewMode == .year {
+                    Text(verbatim: "\(d.year)").fontWeight(.semibold)
+                } else {
+                    Text(MonthTitle.monthName(d.month)).fontWeight(.semibold)
+                    Text(verbatim: "\(d.year), KW \(MonthGrid.isoWeek(d))").foregroundStyle(Theme.text2)
+                }
+            }
+            .font(.system(size: 15))
+            .padding(.horizontal, 6)
+        }
+        .buttonStyle(.plain)
+        .help("Monat zeigen")
+        .accessibilityLabel(windowTitle)
+        .popover(isPresented: $showsMiniMonth, arrowEdge: .bottom) {
+            MiniMonthView(year: d.year, month: d.month)
+                .padding(14)
+                .frame(width: 240)
+                .environment(model)
+        }
     }
 
-    /// „KW 45“ unter dem Monat; im Jahr nichts.
-    private var subtitle: String {
-        model.viewMode == .year ? "" : "KW \(MonthGrid.isoWeek(model.selectedDay))"
+    /// Fenstertitel fürs Menü „Fenster“ und VoiceOver.
+    private var windowTitle: String {
+        let d = model.selectedDay
+        return model.viewMode == .year ? "\(d.year)" : "\(MonthGrid.title(year: d.year, month: d.month)), KW \(MonthGrid.isoWeek(d))"
     }
 
     private var weekStart: LocalDate {
@@ -91,11 +144,22 @@ struct MacRootView: View {
     private var detail: some View {
         let d = model.selectedDay
         switch model.viewMode {
-        case .day: DayGridView(start: d, dayCount: 1)
-        case .week: DayGridView(start: weekStart, dayCount: 7)
+        case .day: DayGridView(start: d, dayCount: 1, hourHeight: CGFloat(hourHeight)).simultaneousGesture(pinch)
+        case .week: DayGridView(start: weekStart, dayCount: 7, hourHeight: CGFloat(hourHeight)).simultaneousGesture(pinch)
         case .month: MonthView(year: d.year, month: d.month)
         case .year: YearView(year: d.year)
         }
+    }
+
+    /// Aufziehen mit zwei Fingern: Höhe der Stunde, ab der Höhe zu Beginn der Geste.
+    private var pinch: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let base = pinchBase ?? hourHeight
+                pinchBase = base
+                hourHeight = min(max(base * value.magnification, Self.hourHeightRange.lowerBound), Self.hourHeightRange.upperBound)
+            }
+            .onEnded { _ in pinchBase = nil }
     }
 
     // MARK: Tastatur (LIC-24)
@@ -182,53 +246,6 @@ struct MacRootView: View {
     }
 }
 
-struct SidebarView: View {
-    @Environment(AppModel.self) private var model
-    /// Text im Suchfeld der Toolbar; nicht leer → Treffer statt nächster Termine (LIC-42).
-    var searchText = ""
-
-    var body: some View {
-        @Bindable var model = model
-        VStack(alignment: .leading, spacing: 10) {
-            MiniMonthView(year: model.selectedDay.year, month: model.selectedDay.month)
-                .padding(12)
-                .background {
-                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                        .fill(.background.secondary)
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                        .strokeBorder(Theme.line, lineWidth: 1)
-                }
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-            VStack(alignment: .leading, spacing: 4) {
-                SectionLabel(text: "Kalender")
-                Picker("Kalender", selection: $model.calendarSelection) {
-                    Text("Alle Kalender").tag(CalendarQuery.Selection.visible)
-                    ForEach(model.state.calendarSets.values.sorted { $0.position < $1.position }) { set in
-                        Text(set.name).tag(CalendarQuery.Selection.set(set.id))
-                    }
-                }
-                .labelsHidden()
-            }
-            .padding(.horizontal, 14)
-            if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-                SectionLabel(text: "Als Nächstes")
-                    .padding(.horizontal, 14)
-                    .padding(.top, 4)
-                // Ansicht A in der Seitenleiste: die nächsten Termine.
-                AgendaView(days: 14, showsTicker: false)
-            } else {
-                // Treffer der Suche; rechts springt das Raster zum Tag (LIC-42).
-                SearchResultsView(text: searchText) { occurrence in
-                    model.show(occurrence)
-                }
-            }
-        }
-    }
-}
-
 /// Jahresansicht: zwölf kleine Monate.
 struct YearView: View {
     let year: Int
@@ -274,12 +291,17 @@ struct LichtungCommands: Commands {
     /// Fokus im Kalenderfeld; sonst sind die Menüpunkte aus und die Taste
     /// bleibt beim Text (LIC-50).
     @FocusedValue(\.calendarKeyboardFocus) private var calendarKeyboardFocus: Bool?
+    /// Rechte Spalte im Hauptfenster (`MacRootView`).
+    @AppStorage("inspectorVisible") private var inspectorVisible = true
 
     var body: some Commands {
         // MARK: Editor (LIC-20)
         CommandGroup(replacing: .newItem) {
             Button("Neuer Termin") { Task { @MainActor in model.newEvent() } }
                 .keyboardShortcut("n", modifiers: .command)
+            // Feld in der Toolbar mit „Anlegen“ oben (Spec §5).
+            Button("Termin eintragen …") { model.createFieldRequests += 1 }
+                .keyboardShortcut("k", modifiers: .command)
         }
         CommandGroup(replacing: .undoRedo) {
             Button("Widerrufen") { Task { await model.undo() } }
@@ -287,8 +309,8 @@ struct LichtungCommands: Commands {
             Button("Wiederholen") { Task { await model.redo() } }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
         }
-        // ⌘F: Suchfeld der Toolbar. Ersetzt das Text-Suchen im Menü
-        // „Bearbeiten“, sonst gäbe es ⌘F zweimal (LIC-42).
+        // ⌘F: Feld der Toolbar mit den Treffern oben. Ersetzt das Text-Suchen
+        // im Menü „Bearbeiten“, sonst gäbe es ⌘F zweimal (LIC-42).
         CommandGroup(replacing: .textEditing) {
             Button("Termine suchen …") { model.searchFocusRequests += 1 }
                 .keyboardShortcut("f", modifiers: .command)
@@ -301,6 +323,9 @@ struct LichtungCommands: Commands {
         // Dazu ⌘← und ⌘→ (LIC-50).
         CommandGroup(before: .toolbar) {
             ViewModeMenuItems(model: model, calendarFocused: calendarKeyboardFocus == true)
+            Button(inspectorVisible ? "Rechte Spalte ausblenden" : "Rechte Spalte einblenden") { inspectorVisible.toggle() }
+                .keyboardShortcut("i", modifiers: [.command, .control])
+            Divider()
         }
         // Aktionen am markierten Termin; ohne Markierung ausgegraut.
         CommandMenu("Termin") {
@@ -349,5 +374,56 @@ struct EventMenuBarItems: View {
         Button("Vorheriger Termin") { model.perform(.highlightPrevious) }
         Button("Markierung aufheben") { model.perform(.clearHighlight) }
             .disabled(model.highlightedOccurrence == nil)
+    }
+}
+
+/// Waagerechtes Wischen mit zwei Fingern blättert (Spec §5). Ein lokaler
+/// Monitor sieht die Scroll-Ereignisse dieses Fensters, bevor das Raster sie
+/// bekommt, und gibt sie unverändert weiter: Senkrechtes Scrollen bleibt also
+/// unberührt. Blätter, Popover und andere Fenster zählen nicht mit.
+private struct TrackpadPagingMonitor: NSViewRepresentable {
+    let onStep: @MainActor (Int) -> Void
+
+    func makeNSView(context: Context) -> MonitorView { MonitorView() }
+
+    func updateNSView(_ view: MonitorView, context: Context) { view.onStep = onStep }
+
+    final class MonitorView: NSView {
+        var onStep: @MainActor (Int) -> Void = { _ in }
+        private var monitor: Any?
+        private var paging = TrackpadPaging()
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                MainActor.assumeIsolated { self?.handle(event) }
+                return event
+            }
+        }
+
+        private func handle(_ event: NSEvent) {
+            // Nur Trackpad-Gesten in diesem Fenster; das Mausrad hat keine Phase.
+            guard event.window === window, event.hasPreciseScrollingDeltas else { return }
+            let phase: TrackpadPaging.Phase
+            if !event.momentumPhase.isEmpty {
+                phase = .momentum
+            } else if event.phase.contains(.began) {
+                phase = .began
+            } else if event.phase.contains(.changed) {
+                phase = .changed
+            } else if event.phase.contains(.ended) {
+                phase = .ended
+            } else if event.phase.contains(.cancelled) {
+                phase = .cancelled
+            } else {
+                return
+            }
+            if let step = paging.feed(phase, dx: event.scrollingDeltaX, dy: event.scrollingDeltaY) {
+                onStep(step)
+            }
+        }
     }
 }

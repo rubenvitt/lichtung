@@ -160,18 +160,8 @@ struct DayGridView: View {
                     .onTapGesture { model.focus(day) }
             }
         }
-        .padding(.top, Self.headerTopPadding)
+        .padding(.top, 4)
         .padding(.bottom, 8)
-    }
-
-    /// Mac: Klicks im Band bis etwa 38 pt unter der Toolbar erreichen den Inhalt
-    /// nicht (macOS 26, `NavigationSplitView`); so liegen die schmalen Tage darunter.
-    private static var headerTopPadding: CGFloat {
-        #if os(macOS)
-        26
-        #else
-        4
-        #endif
     }
 
     /// Fokus-Tag im Kopf: am iPhone in der Woche kleiner, sonst 26 pt.

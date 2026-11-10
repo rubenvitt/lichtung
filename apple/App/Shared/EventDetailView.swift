@@ -1,6 +1,3 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import LichtungKit
 import SwiftUI
 
@@ -19,6 +16,24 @@ struct EventDetailView: View {
                 Section {
                     EventDetailHeader(occurrence: occurrence)
                         .listRowBackground(model.color(for: occurrence.calendarId).opacity(0.12))
+                    // Zusammengefasste Vorkommen (Spec §6): Tipp öffnet das andere.
+                    let others = model.otherOccurrences(of: occurrence)
+                    if !others.isEmpty {
+                        LabeledContent("Steht auch in") {
+                            HStack(spacing: 12) {
+                                ForEach(others) { other in
+                                    Button { model.selectedOccurrence = other } label: {
+                                        HStack(spacing: 5) {
+                                            CalendarDot(color: model.color(for: other.calendarId))
+                                            Text(model.state.calendars[other.calendarId]?.name ?? "Kalender")
+                                        }
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help("Dieses Vorkommen öffnen")
+                                }
+                            }
+                        }
+                    }
                     if occurrence.recurrenceId != nil {
                         Label("Teil einer Serie", systemImage: "repeat").foregroundStyle(.secondary)
                     }

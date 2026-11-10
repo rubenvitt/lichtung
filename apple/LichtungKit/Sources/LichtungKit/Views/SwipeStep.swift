@@ -20,3 +20,39 @@ public enum SwipeStep {
         horizontal(dx: dy, dy: dx)
     }
 }
+
+/// Blättern per waagerechtem Zwei-Finger-Wischen am Mac-Trackpad (Spec §5):
+/// Die Bewegung einer Geste wird aufsummiert; sobald sie nach `SwipeStep`
+/// waagerecht genug ist, gibt es genau einen Schritt, danach nichts mehr bis
+/// zur nächsten Geste. Nachlauf (Schwung) und Ereignisse ohne Phase (Mausrad)
+/// blättern nicht. Richtung wie die Scroll-Deltas des Systems: Zug nach links
+/// (dx < 0) blättert vor.
+public struct TrackpadPaging: Sendable {
+    /// Phase eines Scroll-Ereignisses; `momentum` steht für den Nachlauf.
+    public enum Phase: Sendable { case began, changed, ended, cancelled, momentum }
+
+    private var dx = 0.0
+    private var dy = 0.0
+    /// In einer Geste und noch nicht geblättert.
+    private var armed = false
+
+    public init() {}
+
+    /// Ein Ereignis der Geste; liefert einmal je Geste −1 oder +1.
+    public mutating func feed(_ phase: Phase, dx deltaX: Double, dy deltaY: Double) -> Int? {
+        switch phase {
+        case .began:
+            (dx, dy, armed) = (deltaX, deltaY, true)
+        case .changed:
+            guard armed else { return nil }
+            dx += deltaX
+            dy += deltaY
+        case .ended, .cancelled, .momentum:
+            armed = false
+            return nil
+        }
+        guard let step = SwipeStep.horizontal(dx: dx, dy: dy) else { return nil }
+        armed = false
+        return step
+    }
+}

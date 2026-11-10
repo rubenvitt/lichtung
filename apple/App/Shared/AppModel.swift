@@ -1,6 +1,3 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import Foundation
 import LichtungKit
 import Observation
@@ -270,9 +267,13 @@ final class AppModel {
     /// („Rückgängig: Termin löschen“). Folgt `observeUndo()`.
     private(set) var undoHistory = UndoHistory()
 
-    /// Mac: ⌘F setzt den Fokus ins Suchfeld der Toolbar. Die Ansicht
+    /// Mac: ⌘F setzt den Fokus ins Feld der Toolbar, Treffer oben. Die Ansicht
     /// beobachtet den Zähler, weil das Menü nicht an ihren Fokus kommt.
     var searchFocusRequests = 0
+    /// Mac: ⌘K setzt den Fokus ins Feld der Toolbar, „Anlegen“ oben.
+    var createFieldRequests = 0
+    /// Mac: Bitte, die Liste der Terminanfragen in der Toolbar zu öffnen (rechte Spalte).
+    var invitationsListRequests = 0
 
     /// Liest nach jedem neuen Stand den Verlauf nach. Er ändert sich nur
     /// zusammen mit einem Stand (Anlegen, Ändern, Rückgängig), und der Engine

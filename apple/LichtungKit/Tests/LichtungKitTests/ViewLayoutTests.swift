@@ -383,6 +383,57 @@ struct FrameAndOverflowTests {
         #expect(d.blocks.isEmpty && d.frames.isEmpty && d.overflows.isEmpty)
     }
 
+    // MARK: Trefferflächen und Titel der Rahmen
+
+    func frame(_ id: String, _ index: Int, from h: Double, to e: Double) -> TimelineFrame {
+        TimelineFrame(occurrence: L.timed(id, 12, 8, to: 9), top: h / 24, height: (e - h) / 24, index: index)
+    }
+
+    @Test func singleFrameOwnsTheBand() {
+        let areas = TimelineLayout.frameHitAreas([frame("a", 0, from: 8, to: 17)])
+        #expect(areas.count == 1)
+        #expect(areas.first?.frameId == "a" && areas.first?.x == 0 && areas.first?.width == 16)
+        #expect(abs((areas.first?.height ?? 0) - 9.0 / 24) < 1e-12)
+    }
+
+    @Test func overlappingFramesSplitTheBandAtTheMidpoint() {
+        let areas = TimelineLayout.frameHitAreas([frame("a", 0, from: 8, to: 17), frame("b", 1, from: 8, to: 17)])
+        #expect(areas.map(\.frameId) == ["a", "b"])
+        #expect(areas.map(\.x) == [0, 5.5])
+        #expect(areas.map(\.width) == [5.5, 10.5])
+    }
+
+    @Test func frameAloneBeforeAndAfterOverlapGetsTheWholeBand() {
+        let areas = TimelineLayout.frameHitAreas([frame("a", 0, from: 8, to: 17), frame("b", 1, from: 10, to: 12)])
+        let a = areas.filter { $0.frameId == "a" }
+        #expect(a.map(\.width) == [16, 5.5, 16])
+        let tops: [Double] = [8.0 / 24, 10.0 / 24, 12.0 / 24]
+        #expect(a.map(\.top) == tops)
+        #expect(areas.filter { $0.frameId == "b" }.map(\.x) == [5.5])
+    }
+
+    @Test func middleFrameGetsItsOwnSlotAndBandGrows() {
+        let areas = TimelineLayout.frameHitAreas([frame("a", 0, from: 8, to: 17), frame("b", 1, from: 8, to: 17), frame("c", 2, from: 8, to: 17)])
+        #expect(areas.map(\.x) == [0, 5.5, 10.5])
+        #expect(areas.map(\.width) == [5.5, 5, 10.5])
+    }
+
+    @Test func titlesStartingTogetherGoBelowEachOther() {
+        let rows = TimelineLayout.frameTitleRows([frame("a", 0, from: 8, to: 17), frame("b", 1, from: 8, to: 16)], lineHeight: 0.01)
+        #expect(rows == ["a": 0, "b": 1])
+    }
+
+    @Test func titlesFarApartStayOnTheirLine() {
+        let rows = TimelineLayout.frameTitleRows([frame("a", 0, from: 8, to: 17), frame("b", 1, from: 12, to: 16)], lineHeight: 0.01)
+        #expect(rows == ["a": 0, "b": 0])
+    }
+
+    @Test func titleJustBelowAnotherMovesDown() {
+        // b beginnt 5 Minuten nach a; eine Zeile ist 10 Minuten hoch.
+        let rows = TimelineLayout.frameTitleRows([frame("a", 0, from: 8, to: 17), frame("b", 1, from: 8 + 5.0 / 60, to: 16)], lineHeight: 10.0 / 1440)
+        #expect(rows == ["a": 0, "b": 1])
+    }
+
     @Test func dstDayKeepsPositiveHeights() {
         let d = day([L.timed("a", 25, 1, 30, to: 3, 30), L.timed("f", 25, 0, to: 6)], 25)
         #expect(d.frames.count == 1)

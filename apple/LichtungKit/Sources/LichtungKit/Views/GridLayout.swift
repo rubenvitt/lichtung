@@ -201,6 +201,25 @@ public struct TimelineOverflow: Hashable, Sendable, Identifiable {
     public var id: String
 }
 
+/// Trefferfläche eines Rahmens in einem Zeitabschnitt (`TimelineLayout.frameHitAreas`).
+public struct FrameHitArea: Hashable, Sendable {
+    public var frameId: String
+    /// Linker Rand und Breite in Punkten ab dem linken Spaltenrand.
+    public var x: Double
+    public var width: Double
+    /// Oberkante und Höhe als Anteil der Spalte.
+    public var top: Double
+    public var height: Double
+
+    public init(frameId: String, x: Double, width: Double, top: Double, height: Double) {
+        self.frameId = frameId
+        self.x = x
+        self.width = width
+        self.top = top
+        self.height = height
+    }
+}
+
 public struct TimelineDay: Hashable, Sendable {
     public var blocks: [TimelineBlock]
     public var frames: [TimelineFrame]
@@ -245,6 +264,50 @@ public enum TimelineLayout {
             blocks[i].insetByFrames = frameItems.filter { $0.s < b.shownEnd && b.s < $0.shownEnd }.count
         }
         return TimelineDay(blocks: blocks, frames: frames, overflows: overflows)
+    }
+
+    /// Linie von Rahmen `index` in Punkten ab dem linken Spaltenrand (je 5 pt).
+    public static func frameLineX(_ index: Int) -> Double { 3 + 5 * Double(index) }
+
+    /// Trefferflächen der Rahmen: ein gemeinsames Band von mindestens
+    /// `minimumWidth` pt am linken Rand. Wo sich Rahmen zeitlich überdecken,
+    /// teilt es sich auf halbem Weg zwischen ihren Linien; wo einer allein
+    /// ist, gehört ihm das ganze Band. So trifft jeder Klick genau einen Rahmen.
+    public static func frameHitAreas(_ frames: [TimelineFrame], minimumWidth: Double = 16) -> [FrameHitArea] {
+        let edges = Set(frames.flatMap { [$0.top, $0.top + $0.height] }).sorted()
+        var result: [FrameHitArea] = []
+        for (a, b) in zip(edges, edges.dropFirst()) {
+            let active = frames.filter { $0.top <= a && $0.top + $0.height >= b }.sorted { $0.index < $1.index }
+            guard let last = active.last else { continue }
+            let lines = active.map { frameLineX($0.index) }
+            let band = max(minimumWidth, frameLineX(last.index) + minimumWidth / 2)
+            for (i, f) in active.enumerated() {
+                let left = i == 0 ? 0 : (lines[i - 1] + lines[i]) / 2
+                let right = i == active.count - 1 ? band : (lines[i] + lines[i + 1]) / 2
+                // Gleiche Fläche direkt darüber: verlängern statt neu anlegen.
+                if let j = result.lastIndex(where: { $0.frameId == f.id }), result[j].x == left,
+                   result[j].width == right - left, result[j].top + result[j].height == a {
+                    result[j].height = b - result[j].top
+                } else {
+                    result.append(FrameHitArea(frameId: f.id, x: left, width: right - left, top: a, height: b - a))
+                }
+            }
+        }
+        return result.sorted { ($0.top, $0.x) < ($1.top, $1.x) }
+    }
+
+    /// Zeile des Titels je Rahmen: Titel, die näher als `lineHeight` (Anteil
+    /// der Spalte) beieinander begännen, rutschen je eine Zeile nach unten.
+    public static func frameTitleRows(_ frames: [TimelineFrame], lineHeight: Double) -> [String: Int] {
+        var placed: [Double] = []
+        var rows: [String: Int] = [:]
+        for f in frames.sorted(by: { ($0.top, $0.index) < ($1.top, $1.index) }) {
+            var row = 0
+            while placed.contains(where: { abs($0 - (f.top + Double(row) * lineHeight)) < lineHeight }) { row += 1 }
+            placed.append(f.top + Double(row) * lineHeight)
+            rows[f.id] = row
+        }
+        return rows
     }
 
     /// `s`, `e` und `shownEnd` in Minuten der Achse; `e` ohne Mindesthöhe.

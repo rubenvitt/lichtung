@@ -211,12 +211,12 @@ struct InvitationRow: View {
                         Text(occ.title).font(.body.weight(.medium))
                         Text(invitation.dateText(today: model.today, calendar: model.calendar))
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.text2)
                         if let source = invitation.sourceText {
-                            Text(source).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Text(source).font(.caption).foregroundStyle(Theme.text2).lineLimit(1)
                         }
                         if let series = invitation.seriesText {
-                            Label(series, systemImage: "repeat").font(.caption).foregroundStyle(.secondary)
+                            Label(series, systemImage: "repeat").font(.caption).foregroundStyle(Theme.text2)
                         }
                     }
                     Spacer(minLength: 0)
@@ -229,7 +229,7 @@ struct InvitationRow: View {
             } else {
                 Label(Invitation.readOnlyHint, systemImage: "lock")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
             }
         }
         .padding(.vertical, 4)
@@ -286,8 +286,8 @@ struct InvitationResponseButtons: View {
                 Button { onRespond(response) } label: {
                     Label(response.actionTitle, systemImage: response.systemImage)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(response.tint)
+                // Gewählte Antwort als Hauptknopf (Spec §4), keine Statusfarbe als Fläche.
+                .buttonStyle(Theme.PrimaryButtonStyle())
                 .accessibilityAddTraits(.isSelected)
             } else {
                 Button { onRespond(response) } label: {
@@ -317,7 +317,7 @@ struct InvitationDetailSection: View {
             if model.canRespond(occurrence) {
                 InvitationDetailButtons(occurrence: occurrence, current: InvitationResponse(status))
             } else if occurrence.details.status != .cancelled {
-                Text(Invitation.readOnlyHint).font(.caption).foregroundStyle(.secondary)
+                Text(Invitation.readOnlyHint).font(.caption).foregroundStyle(Theme.text2)
             }
         }
     }

@@ -16,7 +16,7 @@ struct CalendarsSettingsView: View {
             SettingsNotices()
             if settings.calendarSections.isEmpty {
                 Text("Noch keine Kalender. Sie erscheinen, sobald ein Konto verbunden ist.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
             }
             ForEach(settings.calendarSections) { section in
                 Section {
@@ -65,20 +65,20 @@ private struct CalendarSettingsRow: View {
             CalendarDot(color: Color(hex: calendar.displayColor), size: 12)
             VStack(alignment: .leading, spacing: 2) {
                 Text(calendar.name)
-                    .foregroundStyle(calendar.hidden ? Color.secondary : Color.primary)
+                    .foregroundStyle(calendar.hidden ? Theme.text2 : Theme.text1)
                 Text(badges)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
             }
             Spacer()
             if MCPWriteGuard.isWorkCalendar(calendar, account: account), !calendar.mcpWrite {
                 Image(systemName: "lock.shield")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
                     .help("Claude darf hier nicht schreiben")
             }
             Image(systemName: "chevron.right")
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.text2)
         }
         .contentShape(Rectangle())
     }
@@ -109,7 +109,7 @@ private struct CalendarSettingsSheet: View {
                     form(calendar, settings: settings)
                 } else {
                     Text("Diesen Kalender gibt es nicht mehr.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                 }
             }
             .navigationTitle(settings.calendar(calendarId)?.name ?? "Kalender")
@@ -132,7 +132,7 @@ private struct CalendarSettingsSheet: View {
                 LabeledContent("Konto", value: account?.name ?? "–")
                 if !calendar.writable {
                     Text("Nur lesbar: Termine lassen sich hier nicht anlegen oder ändern.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                 }
             }
 
@@ -180,7 +180,7 @@ private struct CalendarSettingsSheet: View {
                     if MCPWriteGuard.suggestsMarking(calendar, account: account) {
                         Text(MCPWriteGuard.suggestion)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.text2)
                     }
                 }
                 Toggle("Claude darf hier schreiben", isOn: Binding(

@@ -53,12 +53,12 @@ struct SearchResultRow: View {
                 if let date = hit.dateText(today: model.today, calendar: model.calendar) {
                     Text(date)
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                 }
                 if let location = occurrence.details.location, !location.isEmpty {
                     Text(location)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                         .lineLimit(1)
                 }
             }

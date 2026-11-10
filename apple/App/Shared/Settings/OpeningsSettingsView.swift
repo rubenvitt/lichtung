@@ -48,7 +48,7 @@ struct OpeningsSettingsView: View {
             Section {
                 if list.open.isEmpty {
                     Text("Keine offenen Einmal-Links.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                 }
                 ForEach(list.open) { opening in
                     row(opening, calendars: calendars, editable: false)
@@ -60,7 +60,7 @@ struct OpeningsSettingsView: View {
             Section {
                 if list.templates.isEmpty {
                     Text("Noch keine festen Links, z. B. „30 Minuten Kennenlernen“ mit Zeitfenstern werktags.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                 }
                 ForEach(list.templates) { opening in
                     row(opening, calendars: calendars, editable: true)
@@ -185,21 +185,21 @@ private struct OpeningRow: View {
             Text(opening.title)
             Text(opening.summary(calendars: calendars))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.text2)
             if !opening.isBooked {
                 ForEach(opening.suggestions) { suggestion in
                     Text(OpeningText.slot(start: suggestion.start, end: suggestion.end, today: today, calendar: calendar))
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                 }
                 if opening.kind == .template {
                     Text(opening.rulesText)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                     if !opening.bookings.isEmpty {
                         Text(OpeningText.bookingCount(opening.bookings.count))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.text2)
                     }
                 }
             }
@@ -207,7 +207,7 @@ private struct OpeningRow: View {
             if opening.kind == .once, let booking = opening.bookings.first {
                 Text(booking.guestText)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
                 if let note = booking.noteText {
                     Text(note)
                         .font(.caption)
@@ -217,7 +217,7 @@ private struct OpeningRow: View {
             if let status = opening.statusText(calendars: calendars, today: today, calendar: calendar) {
                 Label(status, systemImage: opening.isBooked ? "checkmark.circle" : "exclamationmark.circle")
                     .font(.caption)
-                    .foregroundStyle(opening.isBooked ? Color.secondary : Color.orange)
+                    .foregroundStyle(opening.isBooked ? Theme.text2 : Color.orange)
             }
         }
         .padding(.vertical, 2)
@@ -237,12 +237,12 @@ struct OpeningBookingRow: View {
             Text(booking.guestName)
             Text(booking.guestEmail)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.text2)
                 .textSelection(.enabled)
             if showsTime {
                 Text(booking.timeText(today: today, calendar: calendar))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
             }
             if let note = booking.noteText {
                 Text(note)
@@ -368,7 +368,7 @@ private struct OneOffLinkSheet: View {
             if let problem = current.problem(now: Date(), calendars: settings.calendarsById) {
                 Text(problem)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
             }
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -566,7 +566,7 @@ private struct OpeningTemplateEditor: View {
                 if let problem {
                     Section {
                         Text(problem)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.text2)
                     }
                 }
                 if let error {

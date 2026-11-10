@@ -20,7 +20,7 @@ struct AccessSettingsView: View {
             Section {
                 if settings.devices.isEmpty {
                     Text(settings.isAvailable ? "Wird geladen …" : "Keine Geräte.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                 }
                 ForEach(settings.devices) { device in
                     HStack {
@@ -28,7 +28,7 @@ struct AccessSettingsView: View {
                             Text(device.current == true ? "\(device.name) (dieses Gerät)" : device.name)
                             Text(Self.activity(created: device.createdAt, used: device.lastUsedAt))
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.text2)
                         }
                         Spacer()
                         Button {
@@ -64,7 +64,7 @@ struct AccessSettingsView: View {
                             Text(token.name)
                             Text(Self.activity(created: token.createdAt, used: token.lastUsedAt))
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.text2)
                         }
                         Spacer()
                         Button(role: .destructive) {

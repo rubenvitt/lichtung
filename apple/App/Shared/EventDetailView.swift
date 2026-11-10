@@ -20,7 +20,7 @@ struct EventDetailView: View {
                     let others = model.otherOccurrences(of: occurrence)
                     if !others.isEmpty {
                         HStack(spacing: 12) {
-                            Text("Steht auch in").foregroundStyle(.secondary)
+                            Text("Steht auch in").foregroundStyle(Theme.text2)
                             ForEach(others) { other in
                                 Button { model.selectedOccurrence = other } label: {
                                     HStack(spacing: 5) {
@@ -34,20 +34,20 @@ struct EventDetailView: View {
                         }
                     }
                     if occurrence.recurrenceId != nil {
-                        Label("Teil einer Serie", systemImage: "repeat").foregroundStyle(.secondary)
+                        Label("Teil einer Serie", systemImage: "repeat").foregroundStyle(Theme.text2)
                     }
                     // Zeitzone und Reisezeit (LIC-42)
                     if let zoneHint = TimeZoneDisplay.originalZoneHint(for: d, home: model.timeZone) {
                         Label(zoneHint, systemImage: "globe")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.text2)
                             .accessibilityLabel("In anderer Zeitzone angelegt: \(zoneHint)")
                     }
                     if let travel = TravelTime.detailText(for: occurrence, calendar: model.calendar) {
-                        Label(travel, systemImage: "car").foregroundStyle(.secondary)
+                        Label(travel, systemImage: "car").foregroundStyle(Theme.text2)
                     }
                     // LIC-69
                     if d.availability == .free {
-                        Label("Als frei angezeigt", systemImage: "circle.dashed").foregroundStyle(.secondary)
+                        Label("Als frei angezeigt", systemImage: "circle.dashed").foregroundStyle(Theme.text2)
                     }
                 }
                 // Terminanfrage: Status und Antworten (LIC-30)
@@ -140,6 +140,8 @@ struct EventDetailView: View {
                     .disabled(!model.canEdit(occurrence))
                 }
             }
+            // Wie Editor und Einstellungen; ohne fehlen am Mac Ränder und Gruppen.
+            .formStyle(.grouped)
             .modifier(SeriesDeleteDialog(
                 model: model,
                 isPresented: $confirmsSeriesDelete,
@@ -198,12 +200,12 @@ private struct EventDetailHeader: View {
                         .font(.subheadline.weight(.semibold))
                     Text(AgendaBuilder.timeText(occurrence, calendar: model.calendar))
                         .font(Theme.digits(.subheadline))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                     // Mehrtägig: auch das Ende nennen, sonst fehlt es im Kopf.
                     if let until = untilText {
                         Text(until)
                             .font(Theme.digits(.subheadline))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.text2)
                     }
                 }
             }
@@ -252,7 +254,7 @@ private struct AttendeeRow: View {
                 if let detail {
                     Text(detail)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }

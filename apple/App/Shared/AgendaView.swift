@@ -25,7 +25,8 @@ struct AgendaView: View {
                         if section.items.isEmpty {
                             Label("Nichts geplant", systemImage: "leaf")
                                 .font(.callout)
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(Theme.text2)
+                                .listRowBackground(Theme.shade)
                                 .listRowSeparator(.hidden)
                         }
                         ForEach(section.items) { item in
@@ -43,6 +44,9 @@ struct AgendaView: View {
                 }
             }
             .listStyle(.plain)
+            // Grund wie Kopf und Leiste (Spec §4), nicht das Weiß bzw. Schwarz des Systems.
+            .scrollContentBackground(.hidden)
+            .background(Theme.shade)
             // Oben steht der ausgewählte Tag, vergangene Tage liegen darüber.
             .onAppear { scrollToSelected(proxy) }
             // Der erste Stand kommt oft erst nach dem Erscheinen; ohne erneuten Sprung
@@ -61,10 +65,9 @@ struct AgendaView: View {
         }
     }
 
-    /// Markierter Termin (Mac, LIC-24) hinterlegt; sonst der Standard der Liste.
-    private func rowBackground(_ occ: Occurrence) -> Color? {
-        guard model.highlightedOccurrence?.id == occ.id else { return nil }
-        return Theme.light.opacity(0.12)
+    /// Markierter Termin (Mac, LIC-24) hinterlegt; sonst der Grund.
+    private func rowBackground(_ occ: Occurrence) -> Color {
+        model.highlightedOccurrence?.id == occ.id ? Theme.light.opacity(0.12) : Theme.shade
     }
 }
 
@@ -105,8 +108,7 @@ struct AgendaRow: View {
     let item: AgendaItem
 
     var body: some View {
-        // Jede Minute neu, damit „Jetzt“ und das Dämpfen vergangener Termine
-        // auch bei offener Liste mitgehen.
+        // Jede Minute neu, damit der Zustand (vorbei, läuft) auch bei offener Liste mitgeht.
         TimelineView(.everyMinute) { context in
             row(now: context.date)
         }
@@ -115,22 +117,32 @@ struct AgendaRow: View {
     private func row(now: Date) -> some View {
         let occ = item.occurrence
         let color = model.color(for: occ.calendarId)
-        let running = occ.isRunning(now: now)
+        // Drei Zustände über die Schrift (Spec §4): vorbei in Text 2, läuft halbfett.
+        let state = Theme.state(of: occ, now: now)
+        let isPast = state == .past
         return HStack(alignment: .center, spacing: 12) {
-            timeColumn
+            timeColumn(isPast: isPast)
                 .frame(width: 52, alignment: .trailing)
-            CalendarBar(color: color)
+            CalendarBar(color: color.opacity(isPast ? 0.4 : 1))
                 .frame(height: 34)
             VStack(alignment: .leading, spacing: 3) {
                 Text(occ.title)
-                    .font(.body.weight(.medium))
+                    .font(.body.weight(state == .running ? .semibold : .medium))
+                    .foregroundStyle(isPast ? Theme.text2 : Theme.text1)
                     .strikethrough(occ.details.status == .cancelled)
                     .lineLimit(2)
+                if state == .running {
+                    // VoiceOver hört „läuft gerade“ schon über den Wert der Zeile.
+                    Text("Läuft gerade")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.text1)
+                        .accessibilityHidden(true)
+                }
                 if let location = occ.details.location, !location.isEmpty {
                     Label(location, systemImage: "mappin")
                         .labelStyle(.titleAndIcon)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                         .lineLimit(1)
                 }
             }
@@ -140,40 +152,33 @@ struct AgendaRow: View {
             if model.state.isPending(occ.eventId) {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
                     .accessibilityLabel("Noch nicht synchronisiert")
             }
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .background {
-            // Laufender Termin: zart in Kalenderfarbe hinterlegt.
-            if running {
-                RoundedRectangle(cornerRadius: 10).fill(color.opacity(0.10))
-            }
-        }
-        // Vergangene Termine treten zurück.
-        .opacity(occ.isPast(now: now) ? 0.5 : 1)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(EventBlockView.accessibilityValue(Theme.state(of: occ, now: now)))
+        .accessibilityValue(EventBlockView.accessibilityValue(state))
     }
 
-    /// Beginn kräftig, Ende gedämpft darunter („09:00“ / „09:30“).
+    /// Beginn kräftig, Ende gedämpft darunter („09:00“ / „09:30“); vorbei ganz in Text 2.
     @ViewBuilder
-    private var timeColumn: some View {
+    private func timeColumn(isPast: Bool) -> some View {
         let parts = item.timeText.components(separatedBy: "–")
         if parts.count == 2 {
             VStack(alignment: .trailing, spacing: 1) {
                 Text(parts[0])
                     .font(Theme.digits(.subheadline, weight: .semibold))
+                    .foregroundStyle(isPast ? Theme.text2 : Theme.text1)
                 Text(parts[1])
                     .font(Theme.digits(.caption))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
             }
         } else {
             Text(item.timeText)
                 .font(Theme.digits(.caption, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.text2)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
@@ -288,7 +293,8 @@ struct TickerCell: View {
 
     var body: some View {
         let isSelected = day.date == model.selectedDay
-        // Heute in Licht, am Wochenende Text 2; der gewählte Tag liegt auf einer stillen Fläche.
+        // Heute in Licht auf der Licht-Fläche, am Wochenende Text 2; ein anderer gewählter
+        // Tag liegt auf einer stillen Fläche. Ist heute gewählt, bleibt es bei der Licht-Fläche.
         let numberColor: Color = day.isToday ? Theme.light : (day.isWeekend ? Theme.text2 : Theme.text1)
         VStack(spacing: 3) {
             Text(day.weekdayShort)
@@ -313,7 +319,7 @@ struct TickerCell: View {
         .frame(width: 44, height: Self.height)
         .background {
             RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous)
-                .fill(isSelected ? Theme.line : Color.clear)
+                .fill(day.isToday ? Theme.lit : (isSelected ? Theme.line : Color.clear))
         }
         .frame(maxWidth: .infinity)
         .animation(.snappy(duration: 0.2), value: isSelected)

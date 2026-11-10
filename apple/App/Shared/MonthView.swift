@@ -1,6 +1,3 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import LichtungKit
 import SwiftUI
 
@@ -31,6 +28,8 @@ struct MonthView: View {
                 Rectangle().fill(Theme.line).frame(height: 0.5)
             }
         }
+        // Auf dem Grund, damit die weiße Licht-Fläche von heute im hellen Modus zu sehen ist.
+        .background(Theme.shade)
     }
 }
 
@@ -87,12 +86,12 @@ struct MonthWeekRow: View {
         return Theme.text1
     }
 
-    /// Tage außerhalb des Monats gedämpft, dazu feine Spaltenlinien.
+    /// Heute auf der Licht-Fläche, Tage außerhalb des Monats gedämpft, dazu feine Spaltenlinien.
     private var dayWash: some View {
         HStack(spacing: 0) {
             ForEach(days, id: \.self) { day in
                 Rectangle()
-                    .fill(day.month != month ? Theme.line : Color.clear)
+                    .fill(day == model.today ? Theme.lit : (day.month != month ? Theme.line : Color.clear))
                     .overlay(alignment: .leading) {
                         Rectangle().fill(Theme.line).frame(width: 0.5)
                     }
@@ -169,7 +168,7 @@ struct MiniDayCell: View {
                 .font(Theme.digits(.caption2, weight: isToday || selected ? .bold : .regular))
                 .foregroundStyle(selected ? Theme.onLight : (inMonth ? (isToday ? Theme.light : Theme.text1) : Theme.text2))
                 .frame(width: 22, height: 20)
-                .background(Circle().fill(selected ? Theme.light : Color.clear))
+                .background(Circle().fill(selected ? Theme.light : (isToday ? Theme.lit : Color.clear)))
             Circle()
                 .fill(selected ? Theme.light : Theme.text2)
                 .frame(width: 3, height: 3)

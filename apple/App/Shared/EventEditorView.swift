@@ -1,6 +1,3 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import LichtungKit
 import SwiftUI
 
@@ -75,7 +72,7 @@ struct EventEditorView: View {
                 #endif
             if draft.isSeriesOccurrence {
                 Label("Teil einer Serie", systemImage: "repeat")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
             }
         }
     }
@@ -120,7 +117,7 @@ struct EventEditorView: View {
             case .custom:
                 Text("Eigene Regel des Anbieters. Sie bleibt, wie sie ist, solange hier nichts anderes gewählt wird.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
             case .daily, .weekly, .monthly, .yearly:
                 ruleRows
             }
@@ -187,7 +184,7 @@ struct EventEditorView: View {
             if !draft.fixedAlarms.isEmpty {
                 Text(fixedAlarmText)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
             }
             if !draft.alarmChoices.isEmpty {
                 Menu("Erinnerung hinzufügen") {

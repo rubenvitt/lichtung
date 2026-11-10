@@ -131,6 +131,7 @@ struct SessionRootView: View {
             SessionBanner(
                 systemImage: "theatermasks",
                 text: "Demo mit erfundenen Terminen.",
+                shortText: "Demo-Termine",
                 action: "Mit Server verbinden"
             ) { session.leaveDemo() }
         }
@@ -141,6 +142,8 @@ struct SessionRootView: View {
 struct SessionBanner: View {
     let systemImage: String
     let text: String
+    /// Ersatz in einer Zeile, wenn `text` nicht passt (iPhone hochkant).
+    var shortText: String? = nil
     let action: String
     let perform: @MainActor () -> Void
 
@@ -149,8 +152,15 @@ struct SessionBanner: View {
             Image(systemName: systemImage)
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(Theme.text2)
-            Text(text)
-                .lineLimit(2)
+            if let shortText {
+                ViewThatFits(in: .horizontal) {
+                    Text(text).lineLimit(1)
+                    Text(shortText).lineLimit(1)
+                }
+            } else {
+                Text(text)
+                    .lineLimit(2)
+            }
             Spacer(minLength: 8)
             Button(action) { perform() }
                 .buttonStyle(Theme.PrimaryButtonStyle())

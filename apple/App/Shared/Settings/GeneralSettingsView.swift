@@ -19,6 +19,9 @@ struct GeneralSettingsView: View {
     @AppStorage(NewEventDuration.storageKey) private var newEventMinutes = 0
     /// Erinnerungen als Mitteilungen (LIC-68), liest `ReminderScheduler`.
     @AppStorage(ReminderScheduler.enabledKey) private var remindersEnabled = true
+    /// Rohtext des Blocker-Felds; erst bei Return oder Fokusverlust wird er zu `blockerTitles`.
+    @State private var blockerTitlesText = ""
+    @FocusState private var blockerTitlesFocused: Bool
     @State private var choosingZone = false
     @State private var confirmsSignOut = false
 
@@ -108,18 +111,24 @@ struct GeneralSettingsView: View {
         .task { await ReminderScheduler.shared.refreshPermission() }
     }
 
+    private func commitBlockerTitles() {
+        session.model.mergeRules.blockerTitles = blockerTitlesText.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
     /// Gleiche Termine und Blocker zusammenfassen (`AppModel.mergeRules`).
     private var mergeSection: some View {
         @Bindable var model = session.model
-        let titles = Binding<String>(
-            get: { model.mergeRules.blockerTitles.joined(separator: ", ") },
-            set: { model.mergeRules.blockerTitles = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
-        )
         return Section {
             Toggle("Gleiche Termine zusammenfassen", isOn: $model.mergeRules.mergeIdentical)
             Toggle("Blocker ausblenden", isOn: $model.mergeRules.hideBlockers)
             if model.mergeRules.hideBlockers {
-                TextField("Titel von Blockern", text: titles)
+                TextField("Titel von Blockern", text: $blockerTitlesText)
+                    .onSubmit(commitBlockerTitles)
+                    .onAppear { blockerTitlesText = model.mergeRules.blockerTitles.joined(separator: ", ") }
+                    .focused($blockerTitlesFocused)
+                    .onChange(of: blockerTitlesFocused) { if !blockerTitlesFocused { commitBlockerTitles() } }
+                    .onDisappear(perform: commitBlockerTitles)
             }
         } header: {
             Text("Zusammenfassen")

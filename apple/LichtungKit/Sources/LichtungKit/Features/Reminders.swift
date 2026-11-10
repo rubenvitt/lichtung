@@ -45,7 +45,8 @@ public enum ReminderPlanner {
         now: Date,
         horizon: TimeInterval = defaultHorizon,
         limit: Int = defaultLimit,
-        calendar: Calendar
+        calendar: Calendar,
+        merge: MergeRules = .off
     ) -> [PlannedReminder] {
         let end = now.addingTimeInterval(horizon)
         // Relative Erinnerungen liegen vor dem Beginn (oder kurz danach, bei
@@ -69,7 +70,8 @@ public enum ReminderPlanner {
             )
         }
 
-        for occ in query.occurrences(in: window) where remindable(occ.details) {
+        let occurrences = query.occurrences(in: window)
+        for occ in occurrences where remindable(occ.details) {
             for alarm in occ.details.alarms {
                 switch alarm {
                 case let .minutesBefore(m):
@@ -88,11 +90,29 @@ public enum ReminderPlanner {
         result += fixed.map { key, value in reminder(key, value.0, value.1) }
         // Mehrere Erinnerungen mit gleichem Schlüssel (doppelte VALARMs) nur einmal.
         var seen = Set<String>()
-        return result
+        let sorted = result
             .sorted { $0.fireDate != $1.fireDate ? $0.fireDate < $1.fireDate : $0.id < $1.id }
             .filter { seen.insert($0.id).inserted }
-            .prefix(max(0, limit))
-            .map { $0 }
+        return Array(collapse(sorted, occurrences: occurrences, query: query, rules: merge).prefix(max(0, limit)))
+    }
+
+    /// Zusammengefasste Termine erinnern einmal pro Zeitpunkt. Die übrig
+    /// bleibende Erinnerung trägt Titel und Vorkommen des sichtbaren Termins.
+    static func collapse(_ reminders: [PlannedReminder], occurrences: [Occurrence], query: CalendarQuery, rules: MergeRules) -> [PlannedReminder] {
+        guard rules != .off else { return reminders }
+        let groups = OccurrenceMerge.merge(occurrences, calendars: query.calendars, rules: rules).filter { !$0.others.isEmpty }
+        var shownOf: [String: Occurrence] = [:]
+        for g in groups { for o in g.others { shownOf[o.id] = g.shown } }
+        // Zeitpunkte, zu denen der sichtbare Termin selbst schon erinnert.
+        var covered = Set(reminders.filter { shownOf[$0.occurrenceId] == nil }.map { "\($0.occurrenceId)|\($0.fireDate.timeIntervalSince1970)" })
+        return reminders.compactMap { r in
+            guard let shown = shownOf[r.occurrenceId] else { return r }
+            guard covered.insert("\(shown.id)|\(r.fireDate.timeIntervalSince1970)").inserted else { return nil }
+            var r = r
+            r.title = shown.title.isEmpty ? "Termin" : shown.title
+            r.occurrenceId = shown.id
+            return r
+        }
     }
 
     /// Für einen festen Zeitpunkt: lieber ein Vorkommen, das dann noch nicht

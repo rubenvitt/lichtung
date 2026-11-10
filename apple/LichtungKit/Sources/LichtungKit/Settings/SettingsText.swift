@@ -43,7 +43,7 @@ public struct AccountStatusSummary: Hashable, Sendable {
         }
         switch status.state {
         case .ok:
-            let when = status.lastSyncAt.map { " · " + Self.relative($0, now: now) } ?? ""
+            let when = status.lastSyncAt.map { ", " + Self.relative($0, now: now) + " abgeglichen" } ?? ""
             self.init(level: .ok, text: "Aktuell" + when, needsCredentials: false)
         case .syncing:
             self.init(level: .busy, text: "Wird abgeglichen …", needsCredentials: false)

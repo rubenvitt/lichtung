@@ -202,7 +202,7 @@ private struct TimeZonePicker: View {
                         selection = choice.id
                         dismiss()
                     } label: {
-                        row(title: choice.city, detail: "\(choice.offset) · \(choice.id)", selected: selection == choice.id)
+                        row(title: choice.city, detail: "\(choice.offset), \(choice.id)", selected: selection == choice.id)
                     }
                     .buttonStyle(.plain)
                 }

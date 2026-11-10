@@ -115,7 +115,7 @@ private struct AccountRow: View {
     }
 
     private var subtitle: String {
-        [account.kind.displayName, account.username].compactMap { $0 }.joined(separator: " · ")
+        [account.kind.displayName, account.username].compactMap { $0 }.joined(separator: ", ")
     }
 }
 

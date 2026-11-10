@@ -44,7 +44,7 @@ struct ReminderTests {
         #expect(plan.count == 1)
         #expect(plan[0].fireDate == berlinDate(2026, 11, 9, 13, 45))
         #expect(plan[0].title == "Zahnarzt")
-        #expect(plan[0].body == "14:00–15:00 · Praxis")
+        #expect(plan[0].body == "14:00–15:00, Praxis")
         #expect(plan[0].id == "e1#15")
     }
 

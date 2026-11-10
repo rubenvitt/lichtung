@@ -59,13 +59,13 @@ public struct Invitation: Hashable, Sendable, Identifiable {
         return "Von \(name.isEmpty ? o.email : name)"
     }
 
-    /// „Von Anna Beispiel · Arbeit“: Organisator und Kalender, was davon bekannt ist.
+    /// „Von Anna Beispiel, Arbeit“: Organisator und Kalender, was davon bekannt ist.
     public var sourceText: String? {
         let parts = [organizerText, calendarName].compactMap { $0 }.filter { !$0.isEmpty }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 
-    /// Hinweis zu Serien: „Serie · Antwort gilt für alle 4 Termine“,
+    /// Hinweis zu Serien: „Die Antwort gilt für alle 4 Termine der Serie.“,
     /// „Einzelner Termin einer Serie“; `nil` bei Einzelterminen.
     public var seriesText: String? {
         switch target {
@@ -73,15 +73,15 @@ public struct Invitation: Hashable, Sendable, Identifiable {
             return "Einzelner Termin einer Serie"
         case .event:
             guard occurrence.recurrenceId != nil else { return nil }
-            return pendingCount > 1 ? "Serie · Antwort gilt für alle \(pendingCount) Termine" : "Serie · Antwort gilt für alle Termine"
+            return pendingCount > 1 ? "Die Antwort gilt für alle \(pendingCount) Termine der Serie." : "Die Antwort gilt für alle Termine der Serie."
         }
     }
 
-    /// Zeile unter dem Titel wie in der Suche: „Heute · Fr 23. · 09:00–09:30“.
+    /// Zeile unter dem Titel wie in der Suche: „Heute, Fr 23., 09:00–09:30“.
     public func dateText(today: LocalDate, calendar cal: Calendar) -> String {
         let day = LocalDate(occurrence.start, calendar: cal)
         let item = AgendaBuilder.item(occurrence, dayStart: day.startDate(in: cal), dayEnd: day.adding(days: 1).startDate(in: cal), cal: cal)
-        return "\(AgendaBuilder.heading(day, today: today)) · \(item.timeText)"
+        return "\(AgendaBuilder.heading(day, today: today)), \(item.timeText)"
     }
 
     /// Hinweis statt der Knöpfe, wenn der Kalender nur lesbar ist.
@@ -92,7 +92,7 @@ public struct Invitation: Hashable, Sendable, Identifiable {
 public struct InvitationList: Hashable, Sendable {
     public struct Day: Hashable, Sendable, Identifiable {
         public var date: LocalDate
-        /// „Heute · Fr 23.“, „Di 3. Nov.“ (wie Ansicht A).
+        /// „Heute, Fr 23.“, „Di 3. Nov.“ (wie Ansicht A).
         public var heading: String
         public var items: [Invitation]
 

@@ -7,7 +7,7 @@ public struct PlannedReminder: Hashable, Sendable, Identifiable {
     public var id: String
     public var fireDate: Date
     public var title: String
-    /// „14:00–15:00 · Raum 2“, „Morgen, 9:00–9:30“, „Ganztägig“.
+    /// „14:00–15:00, Raum 2“, „Morgen, 9:00–9:30“, „Ganztägig“.
     public var body: String
     public var eventId: String
     public var occurrenceId: String
@@ -132,7 +132,7 @@ public enum ReminderPlanner {
     /// Text unter dem Titel. Bezieht sich auf den Tag, an dem die
     /// Benachrichtigung erscheint: „14:00–15:00“, „Morgen, 9:00–9:30“,
     /// „Di 10. Nov., 9:00–9:30“, ganztägig „Ganztägig“ bzw. „Morgen, ganztägig“.
-    /// Mit Ort dahinter: „ · Raum 2“.
+    /// Mit Ort dahinter: „, Raum 2“.
     static func body(for occ: Occurrence, firingOn fireDay: LocalDate, today: LocalDate, calendar cal: Calendar) -> String {
         let startDay = LocalDate(occ.start, calendar: cal)
         let dayPrefix: String?
@@ -153,7 +153,7 @@ public enum ReminderPlanner {
             text = dayPrefix.map { "\($0), \(range)" } ?? range
         }
         if let location = occ.details.location?.trimmingCharacters(in: .whitespacesAndNewlines), !location.isEmpty {
-            text += " · \(location)"
+            text += ", \(location)"
         }
         return text
     }

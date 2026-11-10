@@ -79,7 +79,7 @@ public enum OpeningText {
         return h * 60 + m
     }
 
-    /// Wochenfenster knapp: „Mo–Fr 09:00–17:00“, „Mo, Mi 09:00–12:00 · Di 14:00–16:00“.
+    /// Wochenfenster knapp: „Mo–Fr 09:00–17:00“, „Mo, Mi 09:00–12:00; Di 14:00–16:00“.
     /// Tage mit gleichen Zeiten stehen zusammen, aufeinanderfolgende ab drei
     /// Tagen als Spanne.
     public static func windows(_ windows: [Opening.Window]) -> String {
@@ -99,7 +99,7 @@ public enum OpeningText {
                 groups.append((times, [day]))
             }
         }
-        return groups.map { "\(days($0.days)) \($0.times)" }.joined(separator: " · ")
+        return groups.map { "\(days($0.days)) \($0.times)" }.joined(separator: "; ")
     }
 
     /// „Mo–Fr“, „Mo, Mi“, „Sa, So“.
@@ -143,11 +143,11 @@ public enum OpeningText {
         }
     }
 
-    /// Ein Vorschlag in der Zeitzone des Geräts: „Morgen · Di 3. · 10:00–10:30“.
+    /// Ein Vorschlag in der Zeitzone des Geräts: „Morgen, Di 3., 10:00–10:30“.
     public static func slot(start: Date, end: Date, today: LocalDate, calendar cal: Calendar) -> String {
         let s = LocalDateTime(start, calendar: cal), e = LocalDateTime(end, calendar: cal)
         let heading = AgendaBuilder.heading(s.date, today: today)
-        return "\(heading) · \(clock(s.hour * 60 + s.minute))–\(clock(e.hour * 60 + e.minute))"
+        return "\(heading), \(clock(s.hour * 60 + s.minute))–\(clock(e.hour * 60 + e.minute))"
     }
 
     /// Auswahl für Dauer, Puffer, Vorlauf und Horizont; ein abweichender
@@ -180,8 +180,8 @@ public enum OpeningText {
 }
 
 extension Opening {
-    /// Zeile unter dem Titel: „30 Min. · Privat · 2 Vorschläge“,
-    /// „30 Min. · Privat · freie Zeiten“, bei Vorlagen „… · Mo–Fr 09:00–17:00“.
+    /// Zeile unter dem Titel: „30 Min., Privat, 2 Vorschläge“,
+    /// „30 Min., Privat, freie Zeiten“, bei Vorlagen „…, Mo–Fr 09:00–17:00“.
     public func summary(calendars: [String: CalendarInfo]) -> String {
         var parts = [OpeningText.duration(durationMinutes)]
         parts.append(calendars[calendarId]?.name ?? "Unbekannter Kalender")
@@ -194,23 +194,23 @@ extension Opening {
             parts.append(OpeningText.windows(windows))
             if listed { parts.append("auf der Startseite") }
         }
-        return parts.joined(separator: " · ")
+        return parts.joined(separator: ", ")
     }
 
     /// Regeln für freie Zeiten (Vorlagen und Einmal-Links ohne Vorschläge):
-    /// „4 Std. Vorlauf · 21 Tage voraus · 10 Min. Puffer“.
+    /// „4 Std. Vorlauf, 21 Tage voraus, 10 Min. Puffer“.
     public var rulesText: String {
         [OpeningText.notice(minNoticeMinutes), OpeningText.horizon(horizonDays),
          OpeningText.buffers(before: bufferBeforeMinutes, after: bufferAfterMinutes)]
             .compactMap { $0 }
-            .joined(separator: " · ")
+            .joined(separator: ", ")
     }
 
     /// Hinweis zum Zustand, `nil` wenn alles in Ordnung ist: gebucht, alle
     /// Vorschläge vorbei, Zielkalender taugt nicht mehr, Platzhalter fehlt.
     public func statusText(calendars: [String: CalendarInfo], today: LocalDate, calendar cal: Calendar) -> String? {
         if let bookedAt {
-            return "Gebucht · \(AgendaBuilder.heading(LocalDate(bookedAt, calendar: cal), today: today))"
+            return "Gebucht: \(AgendaBuilder.heading(LocalDate(bookedAt, calendar: cal), today: today))"
         }
         if isExhausted { return "Alle Vorschläge sind vorbei, der Link bietet nichts mehr an." }
         if !OpeningTargets.isAllowed(calendars[calendarId]) {
@@ -239,7 +239,7 @@ extension Opening.Booking {
     /// „Bert Beispiel <bert@example.org>“.
     public var guestText: String { "\(guestName) <\(guestEmail)>" }
 
-    /// Gebuchte Zeit in der Zeitzone des Geräts: „Morgen · Di 3. · 10:00–10:30“.
+    /// Gebuchte Zeit in der Zeitzone des Geräts: „Morgen, Di 3., 10:00–10:30“.
     public func timeText(today: LocalDate, calendar cal: Calendar) -> String {
         OpeningText.slot(start: start, end: end, today: today, calendar: cal)
     }
@@ -368,12 +368,12 @@ public struct OneOffLinkDraft: Hashable, Sendable {
         )
     }
 
-    /// Kurzfassung vor dem Anlegen: „30 Min. · Privat · 2 Vorschläge“.
+    /// Kurzfassung vor dem Anlegen: „30 Min., Privat, 2 Vorschläge“.
     public func summary(calendars: [String: CalendarInfo]) -> String {
         [OpeningText.duration(durationMinutes),
          calendarId.flatMap { calendars[$0]?.name } ?? "kein Kalender",
          suggestions.isEmpty ? "freie Zeiten" : OpeningText.suggestionCount(suggestions.count)]
-            .joined(separator: " · ")
+            .joined(separator: ", ")
     }
 
     /// Erklärung unter den Vorschlägen.

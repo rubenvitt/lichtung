@@ -17,7 +17,7 @@ public struct SyncProblem: Hashable, Sendable, Identifiable {
     /// „Nicht übernommen: Zahnarzt“, „Abgelehnt: Neuer Termin“.
     public var title: String
     public var message: String
-    /// „Geändert auf iPhone · 3.11., 9:01“
+    /// „Geändert auf iPhone, 3.11., 9:01“
     public var detail: String?
     /// Event, das sich öffnen lässt (fehlt, wenn es gelöscht ist).
     public var eventId: String?
@@ -49,7 +49,7 @@ extension SyncState {
                 id: c.id, kind: .conflict,
                 title: name.map { "Nicht übernommen: \($0)" } ?? "Änderung nicht übernommen",
                 message: c.message,
-                detail: parts.isEmpty ? nil : parts.joined(separator: " · "),
+                detail: parts.isEmpty ? nil : parts.joined(separator: ", "),
                 eventId: eventId, date: c.createdAt
             )
         }

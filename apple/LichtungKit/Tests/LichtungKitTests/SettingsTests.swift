@@ -65,7 +65,7 @@ struct SettingsTextTests {
 
     @Test func accountStatus() {
         typealias S = Account.Status
-        #expect(AccountStatusSummary(S(state: .ok, lastSyncAt: now.addingTimeInterval(-300)), now: now).text == "Aktuell · vor 5 Min.")
+        #expect(AccountStatusSummary(S(state: .ok, lastSyncAt: now.addingTimeInterval(-300)), now: now).text == "Aktuell, vor 5 Min. abgeglichen")
         #expect(AccountStatusSummary(S(state: .ok), now: now).text == "Aktuell")
         #expect(AccountStatusSummary(S(state: .syncing), now: now).level == .busy)
         let failed = AccountStatusSummary(S(state: .authFailed), now: now)

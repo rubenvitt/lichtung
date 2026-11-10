@@ -153,7 +153,7 @@ struct AccessSettingsView: View {
         var parts: [String] = []
         if let created { parts.append("angelegt " + AccountStatusSummary.relative(created, now: now)) }
         parts.append(used.map { "zuletzt " + AccountStatusSummary.relative($0, now: now) } ?? "noch nie benutzt")
-        return parts.joined(separator: " · ")
+        return parts.joined(separator: ", ")
     }
 }
 

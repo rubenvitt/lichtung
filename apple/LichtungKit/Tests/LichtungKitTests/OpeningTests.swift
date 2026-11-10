@@ -241,12 +241,12 @@ struct OpeningTests {
 
     @Test func summaries() throws {
         let o = try F.decode(F.onceJSON)
-        #expect(o.summary(calendars: F.calendars) == "30 Min. · Fastmail Privat · 2 Vorschläge")
+        #expect(o.summary(calendars: F.calendars) == "30 Min., Fastmail Privat, 2 Vorschläge")
         let t = try F.decode(F.templateJSON)
-        #expect(t.summary(calendars: F.calendars) == "30 Min. · Fastmail Privat · Mo 09:00–17:00 · Di 09:00–12:00")
-        #expect(t.rulesText == "4 Std. Vorlauf · 21 Tage voraus · 10 Min. Puffer")
+        #expect(t.summary(calendars: F.calendars) == "30 Min., Fastmail Privat, Mo 09:00–17:00; Di 09:00–12:00")
+        #expect(t.rulesText == "4 Std. Vorlauf, 21 Tage voraus, 10 Min. Puffer")
         let free = F.once("opn_3", created: "2026-10-26T07:00:00Z")
-        #expect(free.summary(calendars: [:]) == "30 Min. · Unbekannter Kalender · freie Zeiten")
+        #expect(free.summary(calendars: [:]) == "30 Min., Unbekannter Kalender, freie Zeiten")
     }
 
     @Test func durationsAndRules() {
@@ -271,7 +271,7 @@ struct OpeningTests {
         let w = { (d: String, s: String, e: String) in Opening.Window(weekday: d, start: s, end: e) }
         #expect(OpeningText.windows(Opening.defaultWindows) == "Mo–Fr 09:00–17:00")
         #expect(OpeningText.windows([w("we", "09:00", "12:00"), w("mo", "09:00", "12:00"), w("tu", "14:00", "16:00")])
-            == "Mo, Mi 09:00–12:00 · Di 14:00–16:00")
+            == "Mo, Mi 09:00–12:00; Di 14:00–16:00")
         #expect(OpeningText.windows([w("sa", "10:00", "12:00"), w("su", "10:00", "12:00")]) == "Sa, So 10:00–12:00")
         #expect(OpeningText.windows([w("mo", "08:00", "10:00"), w("mo", "14:00", "16:00")]) == "Mo 08:00–10:00, 14:00–16:00")
         #expect(OpeningText.windows([]) == "keine Zeitfenster")
@@ -281,7 +281,7 @@ struct OpeningTests {
         let o = try F.decode(F.onceJSON)
         let s = o.suggestions[0]
         // 09:00 UTC = 10:00 in Berlin (Winterzeit ab 25. Oktober).
-        #expect(OpeningText.slot(start: s.start, end: s.end, today: F.today, calendar: F.cal) == "Di 3. Nov. · 10:00–10:30")
+        #expect(OpeningText.slot(start: s.start, end: s.end, today: F.today, calendar: F.cal) == "Di 3. Nov., 10:00–10:30")
     }
 
     @Test func statusTexts() throws {
@@ -296,7 +296,7 @@ struct OpeningTests {
         #expect(o.isExhausted)
         #expect(o.statusText(calendars: F.calendars, today: F.today, calendar: cal) == "Alle Vorschläge sind vorbei, der Link bietet nichts mehr an.")
         o.bookedAt = F.now
-        #expect(o.statusText(calendars: F.calendars, today: F.today, calendar: cal) == "Gebucht · Heute · Mo 26.")
+        #expect(o.statusText(calendars: F.calendars, today: F.today, calendar: cal) == "Gebucht: Heute, Mo 26.")
     }
 
     // MARK: Liste
@@ -328,7 +328,7 @@ struct OpeningTests {
         #expect(d.problem(now: F.now, calendars: F.calendars)?.contains("Einladungen") == true)
         d.calendarId = "cal_privat"
         #expect(d.problem(now: F.now, calendars: F.calendars) == nil)
-        #expect(d.summary(calendars: F.calendars) == "30 Min. · Fastmail Privat · freie Zeiten")
+        #expect(d.summary(calendars: F.calendars) == "30 Min., Fastmail Privat, freie Zeiten")
         d.durationMinutes = 4
         #expect(d.problem(now: F.now, calendars: F.calendars) != nil)
         d.durationMinutes = 30
@@ -345,7 +345,7 @@ struct OpeningTests {
         let body = d.newOpening(now: F.now, calendars: F.calendars, timeZone: F.tz)
         #expect(body?.title == "Abstimmung")
         #expect(body?.suggestions?.count == 1)
-        #expect(d.summary(calendars: F.calendars) == "30 Min. · Fastmail Privat · 1 Vorschlag")
+        #expect(d.summary(calendars: F.calendars) == "30 Min., Fastmail Privat, 1 Vorschlag")
     }
 
     @Test func suggestionsAreProposedDayByDay() {

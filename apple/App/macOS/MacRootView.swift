@@ -159,6 +159,8 @@ struct MacRootView: View {
             MiniMonthView(year: d.year, month: d.month)
                 .padding(14)
                 .frame(width: 240)
+                // Auf dem Grund, sonst ist die weiße Licht-Fläche von heute im hellen Modus unsichtbar.
+                .presentationBackground(Theme.shade)
                 .environment(model)
         }
     }

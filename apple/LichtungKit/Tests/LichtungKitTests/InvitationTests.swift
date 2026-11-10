@@ -124,16 +124,16 @@ struct InvitationTests {
         s.events["heute"] = Self.invite("heute", title: "Rückruf", day: 23, hour: 14, month: 10)
         s.events["morgen"] = Self.invite("morgen", title: "Brunch", day: 24, hour: 11, month: 10)
         let days = query(s).invitations(now: F.now).days(today: LocalDate(year: 2026, month: 10, day: 23), calendar: cal)
-        #expect(days.map(\.heading) == ["Heute · Fr 23.", "Morgen · Sa 24.", "Mo 2. Nov.", "Di 3. Nov."])
+        #expect(days.map(\.heading) == ["Heute, Fr 23.", "Morgen, Sa 24.", "Mo 2. Nov.", "Di 3. Nov."])
         #expect(days.map { $0.items.map(\.id) } == [["heute"], ["morgen"], ["serie"], ["einzel"]])
     }
 
     @Test func rowTexts() {
         let list = query(state()).invitations(now: F.now)
         let today = LocalDate(year: 2026, month: 10, day: 23)
-        #expect(list.items[0].dateText(today: today, calendar: cal) == "Mo 2. Nov. · 09:00–10:00")
-        #expect(list.items[0].sourceText == "Von Anna Beispiel · Arbeit")
-        #expect(list.items[0].seriesText == "Serie · Antwort gilt für alle 4 Termine")
+        #expect(list.items[0].dateText(today: today, calendar: cal) == "Mo 2. Nov., 09:00–10:00")
+        #expect(list.items[0].sourceText == "Von Anna Beispiel, Arbeit")
+        #expect(list.items[0].seriesText == "Die Antwort gilt für alle 4 Termine der Serie.")
         #expect(list.items[1].seriesText == nil)
         #expect(InvitationResponse.ordered.map(\.actionTitle) == ["Annehmen", "Vielleicht", "Ablehnen"])
         #expect(ParticipationStatus.needsAction.responseText == "Noch nicht beantwortet")

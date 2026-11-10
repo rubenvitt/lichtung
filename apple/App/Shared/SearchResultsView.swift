@@ -5,8 +5,8 @@ import LichtungKit
 import SwiftUI
 
 /// Trefferliste der Terminsuche (Spec §1 Kriterium 3, LIC-42). iPhone: statt
-/// der Ansicht, solange gesucht wird. Mac: in der Seitenleiste statt der
-/// nächsten Termine.
+/// der Ansicht, solange gesucht wird. Der Mac zeigt Treffer im Feld der
+/// Toolbar (`CommandField`).
 struct SearchResultsView: View {
     @Environment(AppModel.self) private var model
     let text: String

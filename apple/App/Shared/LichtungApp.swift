@@ -1,6 +1,3 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import LichtungKit
 import SwiftUI
 
@@ -106,9 +103,9 @@ struct SessionRootView: View {
         }
     }
 
-    /// Kalender mit Banner darüber. iPhone: im Stapel statt als Einschub,
+    /// Kalender mit Banner. iPhone: darüber im Stapel statt als Einschub,
     /// sonst liegt der Banner über der Navigationsleiste und verdeckt deren
-    /// Knöpfe (LIC-66).
+    /// Knöpfe (LIC-66). Mac: unten, oben verdeckte er den Kopf des Rasters.
     @ViewBuilder
     private var calendarWithBanner: some View {
         #if os(iOS)
@@ -118,7 +115,7 @@ struct SessionRootView: View {
         }
         #else
         RootView()
-            .safeAreaInset(edge: .top, spacing: 0) { banner }
+            .safeAreaInset(edge: .bottom, spacing: 0) { banner }
         #endif
     }
 
@@ -140,7 +137,7 @@ struct SessionRootView: View {
     }
 }
 
-/// Schmale Leiste über dem Kalender.
+/// Schmale Leiste über (iPhone) bzw. unter (Mac) dem Kalender.
 struct SessionBanner: View {
     let systemImage: String
     let text: String
@@ -165,10 +162,19 @@ struct SessionBanner: View {
         .background {
             Rectangle().fill(.bar)
         }
-        .overlay(alignment: .bottom) {
+        .overlay(alignment: Self.lineEdge) {
             Rectangle().fill(Theme.line).frame(height: 0.5)
         }
     }
+}
+
+extension SessionBanner {
+    /// Trennlinie zum Kalender hin.
+    #if os(macOS)
+    static let lineEdge = Alignment.top
+    #else
+    static let lineEdge = Alignment.bottom
+    #endif
 }
 
 struct RootView: View {

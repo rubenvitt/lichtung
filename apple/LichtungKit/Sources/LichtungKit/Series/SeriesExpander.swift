@@ -34,7 +34,7 @@ public struct SeriesExpander: Sendable {
             let start = event.details.start.instant(deviceTimeZone: deviceTimeZone)
             let end = event.details.end.instant(deviceTimeZone: deviceTimeZone)
             guard Self.overlaps(start, end, window) else { return [] }
-            return [Occurrence(eventId: event.id, calendarId: event.calendarId, recurrenceId: nil, details: event.details, start: start, end: end, isModified: false)]
+            return [Occurrence(eventId: event.id, calendarId: event.calendarId, recurrenceId: nil, details: event.details, start: start, end: end, isModified: false, blockerOf: event.blockerOf)]
         }
 
         let series = SeriesFrame(master: event.details, deviceTimeZone: deviceTimeZone)
@@ -74,7 +74,7 @@ public struct SeriesExpander: Sendable {
             guard Self.overlaps(start, end, window) else { continue }
             result.append(Occurrence(
                 eventId: event.id, calendarId: event.calendarId, recurrenceId: series.value(key),
-                details: o.details, start: start, end: end, isModified: true
+                details: o.details, start: start, end: end, isModified: true, blockerOf: event.blockerOf
             ))
         }
         for local in starts where overrides[local] == nil {
@@ -82,7 +82,7 @@ public struct SeriesExpander: Sendable {
             guard Self.overlaps(start, end, window) else { continue }
             result.append(Occurrence(
                 eventId: event.id, calendarId: event.calendarId, recurrenceId: series.value(local),
-                details: details, start: start, end: end, isModified: false
+                details: details, start: start, end: end, isModified: false, blockerOf: event.blockerOf
             ))
         }
         return result.sorted { ($0.start, $0.end, $0.id) < ($1.start, $1.end, $1.id) }

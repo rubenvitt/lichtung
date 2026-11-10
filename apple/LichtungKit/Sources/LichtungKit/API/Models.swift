@@ -276,12 +276,16 @@ public struct Event: Codable, Hashable, Sendable, Identifiable {
     public var details: EventDetails
     public var recurrence: Recurrence?
     public var overrides: [EventOverride]
+    /// Nur an Blockern, die der Server angelegt hat (LIC-75): ID des
+    /// Termins, für den der Blocker blockt (`blocker_of`).
+    public var blockerOf: String?
     public var createdAt: Date?
     public var updatedAt: Date?
 
     public init(
         id: String, calendarId: String, uid: String? = nil, version: Int = 1, details: EventDetails,
-        recurrence: Recurrence? = nil, overrides: [EventOverride] = [], createdAt: Date? = nil, updatedAt: Date? = nil
+        recurrence: Recurrence? = nil, overrides: [EventOverride] = [], blockerOf: String? = nil,
+        createdAt: Date? = nil, updatedAt: Date? = nil
     ) {
         self.id = id
         self.calendarId = calendarId
@@ -290,12 +294,13 @@ public struct Event: Codable, Hashable, Sendable, Identifiable {
         self.details = details
         self.recurrence = recurrence
         self.overrides = overrides
+        self.blockerOf = blockerOf
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, calendarId, uid, version, recurrence, overrides, createdAt, updatedAt
+        case id, calendarId, uid, version, recurrence, overrides, blockerOf, createdAt, updatedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -306,6 +311,7 @@ public struct Event: Codable, Hashable, Sendable, Identifiable {
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 0
         recurrence = try c.decodeIfPresent(Recurrence.self, forKey: .recurrence)
         overrides = try c.decodeIfPresent([EventOverride].self, forKey: .overrides) ?? []
+        blockerOf = try c.decodeIfPresent(String.self, forKey: .blockerOf)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt)
         details = try EventDetails(from: decoder)
@@ -319,6 +325,7 @@ public struct Event: Codable, Hashable, Sendable, Identifiable {
         try c.encode(version, forKey: .version)
         try c.encode(recurrence, forKey: .recurrence)
         try c.encode(overrides, forKey: .overrides)
+        try c.encodeIfPresent(blockerOf, forKey: .blockerOf)
         try c.encodeIfPresent(createdAt, forKey: .createdAt)
         try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
         try details.encode(to: encoder)

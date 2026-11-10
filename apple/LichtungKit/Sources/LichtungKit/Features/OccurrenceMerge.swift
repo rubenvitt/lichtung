@@ -4,7 +4,8 @@ import Foundation
 public struct MergeRules: Hashable, Sendable, Codable {
     /// Gleicher Beginn, gleiches Ende, gleicher Titel in verschiedenen Kalendern.
     public var mergeIdentical = true
-    /// Blocker („Blockiert“) verschwinden hinter einem Termin zur selben Zeit.
+    /// Blocker verschwinden hinter einem Termin zur selben Zeit: vom Server
+    /// angelegte hinter ihrem Termin, andere nach ihrem Titel.
     public var hideBlockers = true
     public var blockerTitles = ["Blockiert"]
 
@@ -71,16 +72,31 @@ public enum OccurrenceMerge {
 
         if rules.hideBlockers {
             let titles = Set(rules.blockerTitles.map(norm).filter { !$0.isEmpty })
-            func isBlocker(_ g: [Occurrence]) -> Bool {
-                titles.contains(norm(g[0].title)) && !g.contains { $0.details.selfStatus == .needsAction }
+            // Vom Server angelegte Blocker (LIC-75) kennen ihren Termin; die
+            // übrigen erkennt die Titelregel.
+            func isCandidate(_ g: [Occurrence]) -> Bool {
+                g[0].blockerOf != nil || titles.contains(norm(g[0].title))
             }
-            let partners = groups.filter { !titles.contains(norm($0[0].title)) }
+            func isBlocker(_ g: [Occurrence]) -> Bool {
+                isCandidate(g) && !g.contains { $0.details.selfStatus == .needsAction }
+            }
+            let partners = groups.filter { !isCandidate($0) }
             var kept = partners
-            for g in groups where titles.contains(norm(g[0].title)) {
+            for g in groups where isCandidate(g) {
                 let calendarIds = Set(g.map(\.calendarId))
-                if isBlocker(g), let p = kept.prefix(partners.count).firstIndex(where: { cand in
-                    cand[0].start == g[0].start && cand[0].end == g[0].end && !cand.contains { calendarIds.contains($0.calendarId) }
-                }) {
+                let partner: Int? = if !isBlocker(g) {
+                    nil
+                } else if let source = g[0].blockerOf {
+                    // Genau sein Termin, zur selben Zeit.
+                    kept.prefix(partners.count).firstIndex { cand in
+                        cand.contains { $0.eventId == source && $0.start == g[0].start && $0.end == g[0].end }
+                    }
+                } else {
+                    kept.prefix(partners.count).firstIndex { cand in
+                        cand[0].start == g[0].start && cand[0].end == g[0].end && !cand.contains { calendarIds.contains($0.calendarId) }
+                    }
+                }
+                if let p = partner {
                     kept[p] += g
                 } else {
                     kept.append(g)

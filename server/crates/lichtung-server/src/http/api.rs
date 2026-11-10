@@ -10,6 +10,7 @@
 //! | `GET /api/occurrences` | see [`super::events`] |
 //! | sync API (pull, push, SSE), conflicts | see [`super::sync`] |
 //! | openings (booking links) | see [`super::openings`] |
+//! | blocker rules (LIC-75) | see [`super::blockers`] |
 //!
 //! Credentials are managed by a browser session or a device of the app
 //! ([`Principal::may_manage_credentials`]); API, bootstrap and OAuth tokens
@@ -50,6 +51,7 @@ pub fn routes() -> Router<App> {
         .merge(super::events::routes())
         .merge(super::sync::routes())
         .merge(super::openings::routes())
+        .merge(super::blockers::routes())
         .layer(DefaultBodyLimit::max(API_BODY_LIMIT))
 }
 

@@ -103,6 +103,25 @@ struct APICodingTests {
         #expect(encoded["rrule"] == nil, "fehlt statt leerem Text")
     }
 
+    @Test func decodesBlockerOfAndHandsItToOccurrences() throws {
+        // LIC-75: Ein Blocker des Servers nennt seinen Termin.
+        let json = """
+        {"id": "ev_9", "calendar_id": "cal_2", "version": 1, "title": "Blockiert",
+         "start": {"date_time": "2026-11-03T18:00:00", "time_zone": "Europe/Berlin"},
+         "end": {"date_time": "2026-11-03T19:00:00", "time_zone": "Europe/Berlin"},
+         "status": "confirmed", "availability": "busy", "recurrence": null,
+         "overrides": [], "blocker_of": "ev_3"}
+        """
+        let e = try APICoding.decoder.decode(Event.self, from: Data(json.utf8))
+        #expect(e.blockerOf == "ev_3")
+        let tz = TimeZone(identifier: "Europe/Berlin")!
+        let window = DateInterval(start: APICoding.parseTimestamp("2026-11-01T00:00:00Z")!, duration: 30 * 86_400)
+        #expect(SeriesExpander(deviceTimeZone: tz).occurrences(of: e, in: window).first?.blockerOf == "ev_3")
+        #expect(jsonObject(try APICoding.encoder.encode(e))["blocker_of"] as? String == "ev_3")
+        let plain = try APICoding.decoder.decode(Event.self, from: Data(json.replacingOccurrences(of: #", "blocker_of": "ev_3""#, with: "").utf8))
+        #expect(plain.blockerOf == nil)
+    }
+
     @Test func decodesAllDayAndFloating() throws {
         let json = """
         {"id": "ev_2", "calendar_id": "cal_1", "version": 1, "title": "Urlaub",

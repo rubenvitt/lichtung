@@ -13,6 +13,7 @@
 //! - [`crypto`]: encryption of provider credentials (AES-256-GCM)
 //! - [`free`]: free time (busy rules, windows), for MCP and openings
 //! - [`openings`]: booking links, their slots and placeholders (LIC-31/32)
+//! - [`blockers`]: busy copies of events in other calendars (LIC-75)
 //! - [`booking`]: the public booking page `/o/<token>` and its protection
 //!   (LIC-33/34)
 //! - [`writes`]: writing events to the provider (create, update, delete,
@@ -30,6 +31,7 @@ pub mod accounts;
 pub mod app;
 pub mod auth;
 pub mod backup;
+pub mod blockers;
 pub mod booking;
 pub mod changes;
 pub mod config;
@@ -138,7 +140,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 pub const DRAIN_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Serves `router` on `listener` with the nightly backup, the sync
-/// scheduler and the openings cleanup until `signal`
+/// scheduler, the openings cleanup and the blocker reconciliation until `signal`
 /// completes, then lets running requests finish for at most
 /// `drain_timeout` and closes the remaining connections.
 pub async fn serve(
@@ -151,6 +153,7 @@ pub async fn serve(
     let backup = tokio::spawn(backup::run_nightly(app.clone()));
     let scheduler = tokio::spawn(sync::run_scheduler(app.clone()));
     let cleanup = tokio::spawn(openings::run_cleanup(app.clone()));
+    let blockers = tokio::spawn(blockers::run_reconciler(app.clone()));
     let shutdown = app.shutdown_token();
     let service = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
     let server = axum::serve(listener, service).with_graceful_shutdown({
@@ -186,6 +189,10 @@ pub async fn serve(
     match tokio::time::timeout(drain_timeout, cleanup).await {
         Ok(joined) => joined?,
         Err(_) => tracing::warn!("openings cleanup still running at shutdown"),
+    }
+    match tokio::time::timeout(drain_timeout, blockers).await {
+        Ok(joined) => joined?,
+        Err(_) => tracing::warn!("blocker reconciliation still running at shutdown"),
     }
     tracing::info!("stopped");
     Ok(())

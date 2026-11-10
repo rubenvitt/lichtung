@@ -74,7 +74,7 @@ impl EventContext {
         }
     }
 
-    fn is_self(&self, address: &str) -> bool {
+    pub(crate) fn is_self(&self, address: &str) -> bool {
         let email = strip_mailto(address).trim().to_lowercase();
         !email.is_empty() && self.self_addresses.contains(&email)
     }
@@ -531,6 +531,10 @@ struct EventJson {
     fields: EventFields,
     recurrence: Option<RecurrenceJson>,
     overrides: Vec<OverrideJson>,
+    /// *(LIC-75)* Only on a blocker the server wrote: the event it blocks
+    /// for (`X-LICHTUNG-BLOCKER-OF`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocker_of: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -630,6 +634,7 @@ fn build(row: &EventRow, ctx: &EventContext) -> Result<Value, String> {
         fields,
         recurrence,
         overrides: override_json,
+        blocker_of: crate::blockers::build::blocker_of(&object),
         created_at: format_ms(row.created_at),
         updated_at: format_ms(row.updated_at),
     };

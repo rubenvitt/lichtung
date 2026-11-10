@@ -39,6 +39,7 @@ final class SettingsModel {
         errorMessage = nil
         calendarOverrides = [:]
         deletedOpeningIds = []
+        blockerRules = []
     }
 
     var isAvailable: Bool { session?.management != nil }
@@ -315,6 +316,51 @@ final class SettingsModel {
             deletedOpeningIds.insert(id)
             await refresh()
         }
+        return ok
+    }
+
+    // MARK: Blocker (LIC-75)
+
+    /// Regeln vom Server; nicht im Pull, darum beim Öffnen geladen.
+    private(set) var blockerRules: [BlockerRule] = []
+
+    var blockerTargets: [CalendarInfo] { BlockerTargets.targets(mergedCalendars) }
+    var blockerSources: [CalendarInfo] { BlockerTargets.sources(mergedCalendars) }
+
+    func canCreateBlockerRule(source: String?, target: String?) -> Bool {
+        BlockerTargets.canCreate(source: source, target: target, calendars: mergedCalendars, existing: blockerRules)
+    }
+
+    func loadBlockerRules() async {
+        guard let api = session?.management else { return }
+        do {
+            blockerRules = try await api.blockerRules()
+        } catch is CancellationError {
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func createBlockerRule(_ body: NewBlockerRule) async -> Bool {
+        await run { api in
+            let rule = try await api.createBlockerRule(body)
+            self.blockerRules.append(rule)
+        }
+    }
+
+    func updateBlockerRule(_ id: String, _ patch: BlockerRulePatch) async -> Bool {
+        guard !patch.isEmpty else { return true }
+        return await run { api in
+            let rule = try await api.updateBlockerRule(id, patch)
+            if let i = self.blockerRules.firstIndex(where: { $0.id == id }) { self.blockerRules[i] = rule }
+        }
+    }
+
+    /// Löscht die Regel; der Server entfernt danach ihre Blocker.
+    @discardableResult
+    func deleteBlockerRule(_ id: String) async -> Bool {
+        let ok = await run { try await $0.deleteBlockerRule(id) }
+        if ok { blockerRules.removeAll { $0.id == id } }
         return ok
     }
 }

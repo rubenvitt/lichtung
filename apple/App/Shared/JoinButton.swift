@@ -55,7 +55,7 @@ struct JoinButton: View {
                         } label: {
                             Label("Beitreten", systemImage: "video.fill")
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(Theme.PrimaryButtonStyle())
                         .controlSize(prominent ? .regular : .small)
                         .help("\(link.provider.displayName) beitreten")
                         .accessibilityLabel("\(link.provider.displayName) beitreten")

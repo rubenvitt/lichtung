@@ -198,7 +198,7 @@ struct SidebarView: View {
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                        .strokeBorder(Theme.hairline, lineWidth: 1)
+                        .strokeBorder(Theme.line, lineWidth: 1)
                 }
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
@@ -245,7 +245,7 @@ struct YearView: View {
                         }
                         .overlay {
                             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                                .strokeBorder(Theme.hairline, lineWidth: 1)
+                                .strokeBorder(Theme.line, lineWidth: 1)
                         }
                 }
             }

@@ -154,9 +154,10 @@ struct EventEditorView: View {
                     draft.toggleWeekday(day)
                 } label: {
                     Text(QuickEntryPreview.weekdayShort[day.rawValue - 1])
+                        .foregroundStyle(selected ? Theme.onLight : Theme.text1)
                         .frame(maxWidth: .infinity, minHeight: 28)
                         .background(
-                            selected ? Theme.accent.opacity(0.25) : Color.secondary.opacity(0.1),
+                            selected ? Theme.light : Theme.line,
                             in: RoundedRectangle(cornerRadius: 6)
                         )
                 }

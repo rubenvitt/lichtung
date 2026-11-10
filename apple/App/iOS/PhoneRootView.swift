@@ -104,8 +104,8 @@ struct PhoneRootView: View {
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Capsule().fill(Theme.accent.opacity(isShowingToday ? 0.08 : 0.16)))
-                    .foregroundStyle(Theme.accent)
+                    .background(Capsule().fill(Theme.line))
+                    .foregroundStyle(isShowingToday ? Theme.text2 : Theme.text1)
             }
             .buttonStyle(.plain)
             .accessibilityHint("Springt zum heutigen Tag")
@@ -114,7 +114,7 @@ struct PhoneRootView: View {
         .padding(.vertical, 8)
         .background(.bar)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.hairline).frame(height: 0.5)
+            Rectangle().fill(Theme.line).frame(height: 0.5)
         }
     }
 

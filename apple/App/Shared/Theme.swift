@@ -11,54 +11,94 @@ import UIKit
 
 /// Gestaltung der Apps an einer Stelle: Farben, Schrift, Maße.
 ///
-/// Bild dahinter ist die Lichtung selbst: Waldgrün als Akzent (Auswahl,
-/// heute, Knöpfe), warmes Licht für „jetzt“ (Jetzt-Linie, laufende Termine).
-/// Alle Farben haben eine helle und eine dunkle Fassung.
+/// Leitidee: Heute ist die Lichtung. Die Oberfläche hat keine eigene
+/// Akzentfarbe; Farbe kommt nur von den Kalendern. Alle Farben haben eine
+/// helle und eine dunkle Fassung (Spec §4).
 enum Theme {
     // MARK: Farben
 
-    /// Waldgrün: Auswahl, heute, Hauptknöpfe.
-    static let accent = Color(light: 0x2E7D5B, dark: 0x5FD39A)
-    /// Schrift und Symbole auf `accent`: hell weiß (5:1), dunkel fast
-    /// schwarz, weil das helle Grün weiße Schrift nicht trägt (8,8:1).
-    static let onAccent = Color(light: 0xFFFFFF, dark: 0x0B2419)
-    /// Dunkleres Grün für Verläufe (Anmeldung, Marke).
-    static let accentDeep = Color(light: 0x1B4D3A, dark: 0x2E7D5B)
-    /// Warmes Licht: Jetzt-Linie, „Jetzt“-Marke.
-    static let now = Color(light: 0xC2410C, dark: 0xFF7A50)
-    /// Schrift auf `now`: hell weiß (5,2:1), dunkel fast schwarz (7:1).
-    static let onNow = Color(light: 0xFFFFFF, dark: 0x2A0E05)
-    /// Sonnengelb für Hinweise (Demo-Modus).
-    static let sun = Color(light: 0xD99A1E, dark: 0xF2B84B)
-    /// Feine Linien im Raster und im Monat.
-    static let hairline = Color.primary.opacity(0.08)
-    /// Noch feinere Linie (halbe Stunden).
-    static let hairlineFaint = Color.primary.opacity(0.04)
-    /// Wochenende und Tage außerhalb des Monats.
-    static let wash = Color.primary.opacity(0.03)
+    /// Grund: Fenster und alle Tage außer heute.
+    static let shade = Color(light: 0xECEEE8, dark: 0x1B1D1B)
+    /// Licht-Fläche: Spalte von heute.
+    static let lit = Color(light: 0xFFFFFF, dark: 0xF4E9C9, darkAlpha: 0.075)
+    /// Licht: Zahl von heute, Hauptknopf, Auswahl.
+    static let light = Color(light: 0x1B1D1A, dark: 0xF4E9C9)
+    /// Schrift auf `light`.
+    static let onLight = Color(light: 0xFFFFFF, dark: 0x1B1D1B)
+    /// Text in drei Rängen. `text3` nur für Stundenzahlen und Linienbeschriftung.
+    static let text1 = Color(light: 0x1B1D1A, dark: 0xECEBE4)
+    static let text2 = Color(light: 0x5F635B, dark: 0x9A9C93)
+    static let text3 = Color(light: 0xA1A49C, dark: 0x63655E)
+    /// Sonne: Jetzt-Linie und ihre Uhrzeit, sonst nichts.
+    static let sun = Color(light: 0xC58500, dark: 0xF0B840)
+    /// Stundenlinien und Trennungen.
+    static let line = Color(light: 0x000000, dark: 0xFFFFFF, lightAlpha: 0.07, darkAlpha: 0.06)
+    /// Schrift auf einem laufenden Termin (volle Kalenderfarbe), in beiden Modi.
+    static let onRunning = Color(light: 0x141513, dark: 0x141513)
 
-    /// Füllung eines Terminblocks in Kalenderfarbe.
-    static func eventFill(_ color: Color, past: Bool = false) -> Color {
-        color.opacity(past ? 0.12 : 0.22)
+    /// Fläche eines kommenden Termins: Kalenderfarbe deckend auf `shade`
+    /// gemischt, dunkel 30 %, hell 20 % (wie `color-mix(in srgb …)` im Entwurf).
+    static func eventFill(_ color: Color) -> Color {
+        // Kalenderfarben sind feste Hex-Werte, also in jedem Modus gleich.
+        let c = color.resolve(in: EnvironmentValues())
+        let calendar = (Double(c.red), Double(c.green), Double(c.blue))
+        return Color(dynamic: { isDark in
+            let base = rgb(isDark ? 0x1B1D1B : 0xECEEE8)
+            let amount = isDark ? 0.3 : 0.2
+            func mix(_ a: Double, _ b: Double) -> Double { amount * a + (1 - amount) * b }
+            return (mix(calendar.0, base.0), mix(calendar.1, base.1), mix(calendar.2, base.2), 1)
+        })
+    }
+
+    /// `0xRRGGBB` als sRGB-Anteile 0…1.
+    fileprivate static func rgb(_ value: UInt32) -> (Double, Double, Double) {
+        (Double((value >> 16) & 0xFF) / 255, Double((value >> 8) & 0xFF) / 255, Double(value & 0xFF) / 255)
+    }
+
+    // MARK: Zustand eines Termins
+
+    enum EventState { case past, upcoming, running }
+
+    /// Ganztägige Termine laufen nie (`isRunning`), sie sind kommend oder vorbei.
+    static func state(of occ: Occurrence, now: Date) -> EventState {
+        if occ.isRunning(now: now) { return .running }
+        if occ.isPast(now: now) { return .past }
+        return .upcoming
     }
 
     // MARK: Schrift
 
-    /// Große Titel (Monat, Anmeldung): Serifenschrift, damit die App ein
-    /// eigenes Gesicht hat.
-    static func display(_ style: Font.TextStyle, weight: Font.Weight = .bold) -> Font {
-        .system(style, design: .serif, weight: weight)
-    }
-
-    /// Zahlen (Tage, Uhrzeiten): gerundet und gleich breit.
-    static func number(_ style: Font.TextStyle, weight: Font.Weight = .regular) -> Font {
-        .system(style, design: .rounded, weight: weight).monospacedDigit()
+    /// Ziffern (Uhrzeiten, Tageszahlen): Systemschrift, gleich breit.
+    static func digits(_ style: Font.TextStyle, weight: Font.Weight = .regular) -> Font {
+        .system(style, weight: weight).monospacedDigit()
     }
 
     // MARK: Maße
 
-    static let blockRadius: CGFloat = 6
+    static let blockRadius: CGFloat = 4
+    static let buttonRadius: CGFloat = 7
     static let cardRadius: CGFloat = 14
+
+    // MARK: Knöpfe
+
+    /// Hauptknopf (Anmelden, Beitreten, +): Fläche `light`, Schrift `onLight`.
+    /// `.controlSize(.small)` gibt die kleine Fassung (Liste, Raster).
+    struct PrimaryButtonStyle: ButtonStyle {
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.controlSize) private var controlSize
+
+        func makeBody(configuration: Configuration) -> some View {
+            let small = controlSize == .small || controlSize == .mini
+            configuration.label
+                .font(small ? .caption.weight(.semibold) : .body.weight(.semibold))
+                .foregroundStyle(Theme.onLight)
+                .padding(.horizontal, small ? 8 : 12)
+                .padding(.vertical, small ? 3 : 6)
+                .background(RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous).fill(Theme.light))
+                .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.4)
+                .contentShape(RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
+        }
+    }
 }
 
 extension Color {
@@ -78,28 +118,25 @@ extension Color {
     }
 
     /// Farbe mit eigener Fassung für den dunklen Modus (`0xRRGGBB`).
-    init(light: UInt32, dark: UInt32) {
+    init(light: UInt32, dark: UInt32, lightAlpha: Double = 1, darkAlpha: Double = 1) {
+        self.init(dynamic: { isDark in
+            let (r, g, b) = Theme.rgb(isDark ? dark : light)
+            return (r, g, b, isDark ? darkAlpha : lightAlpha)
+        })
+    }
+
+    /// Farbe, die je Modus neu berechnet wird (sRGB-Anteile und Deckung, 0…1).
+    init(dynamic rgba: @escaping @Sendable (_ isDark: Bool) -> (Double, Double, Double, Double)) {
         #if os(macOS)
         let color = NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            let rgb = isDark ? dark : light
-            return NSColor(
-                srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255,
-                green: CGFloat((rgb >> 8) & 0xFF) / 255,
-                blue: CGFloat(rgb & 0xFF) / 255,
-                alpha: 1
-            )
+            let (r, g, b, a) = rgba(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
+            return NSColor(srgbRed: r, green: g, blue: b, alpha: a)
         }
         self.init(nsColor: color)
         #else
         let color = UIColor { traits in
-            let rgb = traits.userInterfaceStyle == .dark ? dark : light
-            return UIColor(
-                red: CGFloat((rgb >> 16) & 0xFF) / 255,
-                green: CGFloat((rgb >> 8) & 0xFF) / 255,
-                blue: CGFloat(rgb & 0xFF) / 255,
-                alpha: 1
-            )
+            let (r, g, b, a) = rgba(traits.userInterfaceStyle == .dark)
+            return UIColor(red: r, green: g, blue: b, alpha: a)
         }
         self.init(uiColor: color)
         #endif
@@ -132,21 +169,7 @@ struct CalendarBar: View {
     }
 }
 
-/// Kleine Marke „Jetzt“ für laufende Termine.
-struct NowBadge: View {
-    var body: some View {
-        Text("JETZT")
-            .font(.system(size: 9, weight: .heavy, design: .rounded))
-            .tracking(0.6)
-            .foregroundStyle(Theme.onNow)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(Theme.now))
-            .accessibilityLabel("Läuft gerade")
-    }
-}
-
-/// Monat in Serifen, Jahr gedämpft daneben („November 2026“).
+/// Monat halbfett, Jahr gedämpft daneben („November 2026“).
 struct MonthTitle: View {
     let year: Int
     let month: Int
@@ -155,10 +178,11 @@ struct MonthTitle: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(Self.monthName(month))
-                .font(Theme.display(style))
+                .font(.system(style, weight: .semibold))
+                .foregroundStyle(Theme.text1)
             Text(verbatim: "\(year)")
-                .font(Theme.display(style, weight: .regular))
-                .foregroundStyle(Theme.accent)
+                .font(.system(style))
+                .foregroundStyle(Theme.text2)
         }
         .lineLimit(1)
         .accessibilityElement(children: .combine)
@@ -173,15 +197,14 @@ struct MonthTitle: View {
     }
 }
 
-/// Kopf einer Gruppe in Seitenleisten und Listen („ALS NÄCHSTES“).
+/// Kopf einer Gruppe in Seitenleisten und Listen („Als Nächstes“): eine halbfette Zeile.
 struct SectionLabel: View {
     let text: String
 
     var body: some View {
-        Text(text.uppercased())
-            .font(.caption2.weight(.bold))
-            .tracking(0.8)
-            .foregroundStyle(.secondary)
+        Text(text)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.text1)
     }
 }
 

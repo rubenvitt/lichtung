@@ -158,10 +158,12 @@ struct ReminderTests {
     @Test("Nur der Blocker hat einen Alarm: Erinnerung bleibt, mit Titel des Sichtbaren")
     func blockerAlarmSurvivesWithShownTitle() {
         let sport = R.event("s", title: "Sport", start: R.timed(9, 14), end: R.timed(9, 15), alarms: [], calendar: "cal_1")
-        let blocker = R.event("b", title: "Blockiert", start: R.timed(9, 14), end: R.timed(9, 15), alarms: [.minutesBefore(10)], calendar: "cal_2")
+        let blocker = R.event("b", title: "Blockiert", start: R.timed(9, 14), end: R.timed(9, 15), alarms: [.minutesBefore(10)], location: "Raum 9", calendar: "cal_2")
         let plan = R.plan([sport, blocker], merge: .default)
         #expect(plan.count == 1)
         #expect(plan[0].title == "Sport")
         #expect(plan[0].occurrenceId == "s")
+        #expect(plan[0].eventId == "s")
+        #expect(plan[0].body == "14:00–15:00")
     }
 }

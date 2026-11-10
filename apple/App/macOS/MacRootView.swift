@@ -294,10 +294,7 @@ struct YearView: View {
                 ForEach(1...12, id: \.self) { month in
                     MiniMonthView(year: year, month: month)
                         .padding(12)
-                        .background {
-                            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                                .fill(.background.secondary)
-                        }
+                        // Flach auf dem Grund, nur mit feiner Linie (Spec §2: keine Karten).
                         .overlay {
                             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                                 .strokeBorder(Theme.line, lineWidth: 1)

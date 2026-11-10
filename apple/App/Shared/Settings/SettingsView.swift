@@ -1,6 +1,3 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import LichtungKit
 import SwiftUI
 #if os(macOS)
@@ -96,7 +93,7 @@ struct SettingsNotices: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Ohne Server").font(.headline)
                     Text("Konten, Kalender und Zugänge verwaltet der Lichtung-Server. Im Demo-Modus lässt sich hier nichts ändern.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                     if session.stage == .demo {
                         Button("Mit Server verbinden") { session.leaveDemo() }
                             .padding(.top, 4)

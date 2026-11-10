@@ -1,6 +1,3 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import AuthenticationServices
 import LichtungKit
 import SwiftUI
@@ -38,7 +35,7 @@ struct LoginView: View {
                         ? "Dieses Gerät ist nicht mehr angemeldet. Termine und noch nicht gesendete Änderungen bleiben erhalten."
                         : "Melde dich an deinem eigenen Lichtung-Server an.")
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
@@ -53,14 +50,14 @@ struct LoginView: View {
                     if !session.serverInput.isEmpty, let problem = ServerAddress.problem(with: session.serverInput) {
                         Text(problem.message)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.text2)
                     }
                     SectionLabel(text: "Gerätename").padding(.top, 8)
                     TextField("Gerätename", text: $session.deviceName)
                         .disabled(busy)
                     Text("So erscheint dieses Gerät in der Geräteliste.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                 }
                 .textFieldStyle(.roundedBorder)
                 .padding(20)
@@ -92,7 +89,7 @@ struct LoginView: View {
                         Text(status)
                             .font(.callout)
                             .multilineTextAlignment(.center)
-                            .foregroundStyle(session.loginPhase.failure == nil ? Color.secondary : Color.red)
+                            .foregroundStyle(session.loginPhase.failure == nil ? Theme.text2 : Color.red)
                             .frame(maxWidth: 380)
                     }
 
@@ -106,7 +103,7 @@ struct LoginView: View {
                             .disabled(busy)
                         Text("Mit erfundenen Terminen; nichts verlässt das Gerät.")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.text2)
                     }
                 }
             }

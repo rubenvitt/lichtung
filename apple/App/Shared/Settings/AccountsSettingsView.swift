@@ -1,6 +1,3 @@
-// Ohne Xcode entstanden: Die CI baut diesen Code (Job apps-macos), auf einem
-// Gerät gelaufen ist er noch nicht.
-
 import LichtungKit
 import SwiftUI
 
@@ -19,7 +16,7 @@ struct AccountsSettingsView: View {
             Section {
                 if settings.accounts.isEmpty {
                     Text("Noch kein Konto verbunden.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                 }
                 ForEach(settings.accounts) { account in
                     AccountRow(
@@ -88,12 +85,12 @@ private struct AccountRow: View {
                 Text(account.name).font(.body.weight(.medium))
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.text2)
                 HStack(spacing: 6) {
                     StatusDot(level: summary.level)
                     Text(summary.text)
                         .font(.caption)
-                        .foregroundStyle(summary.level == .error ? Color.red : Color.secondary)
+                        .foregroundStyle(summary.level == .error ? Color.red : Theme.text2)
                 }
                 if summary.needsCredentials {
                     Button("Passwort erneuern") { renew() }

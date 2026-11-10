@@ -18,7 +18,7 @@ struct CalendarSetsSettingsView: View {
             Section {
                 if settings.calendarSets.isEmpty {
                     Text("Noch keine Sets. Ein Set blendet mehrere Kalender gemeinsam ein, z. B. „Arbeit“ oder „Privat“.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.text2)
                 }
                 ForEach(settings.calendarSets) { set in
                     Button {
@@ -29,12 +29,12 @@ struct CalendarSetsSettingsView: View {
                                 Text(set.name)
                                 Text(set.calendarIds.count == 1 ? "1 Kalender" : "\(set.calendarIds.count) Kalender")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(Theme.text2)
                             }
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.caption)
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(Theme.text2)
                         }
                         .contentShape(Rectangle())
                     }

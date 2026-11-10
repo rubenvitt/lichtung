@@ -1009,8 +1009,10 @@ struct EventBlockView: View {
     private func block(state: Theme.EventState, oneLine: Bool) -> some View {
         let color = model.color(for: occurrence.calendarId)
         let isHighlighted: Bool = model.highlightedOccurrence?.id == occurrence.id
-        let titleColor: Color = state == .running ? Theme.onRunning : (state == .past ? Theme.text2 : Theme.text1)
-        let detailColor: Color = state == .running ? Theme.onRunning.opacity(0.7) : Theme.text2
+        // Laufend: Titel und Zeit in derselben deckenden Farbe, Rang nur über Größe und Gewicht.
+        let runningText: Color = Theme.onRunning(for: model.colorHex(for: occurrence.calendarId))
+        let titleColor: Color = state == .running ? runningText : (state == .past ? Theme.text2 : Theme.text1)
+        let detailColor: Color = state == .running ? runningText : Theme.text2
         let fill: Color = state == .running ? color : (state == .past ? Color.clear : Theme.eventFill(color))
         let title = Text(occurrence.title)
             .font(.caption.weight(.medium))

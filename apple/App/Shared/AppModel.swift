@@ -15,7 +15,23 @@ final class AppModel {
     let calendar: Calendar
     private(set) var state = SyncState()
     /// Ausgewählter Tag (Tagesleiste, Mini-Monat, Raster).
-    var selectedDay: LocalDate
+    var selectedDay: LocalDate {
+        // Springt der Tag in eine andere Woche (Raster, Monat, Tagesleiste), zieht der Fokus mit.
+        didSet { if Self.monday(of: selectedDay) != Self.monday(of: focusDay) { focusDay = selectedDay } }
+    }
+    /// Breiter Tag im Raster. Wechselt nur durch `focus(_:)`, ←/→, „Heute“,
+    /// Blättern und Sprünge aus Suche und Mini-Monat; nicht durch einen Klick in
+    /// leere Fläche oder die Markierung, damit nichts unter dem Zeiger wegrutscht.
+    /// Die Woche des Fokus-Tags ist immer die angezeigte Woche.
+    private(set) var focusDay: LocalDate
+    /// Regeln fürs Zusammenfassen gleicher Termine und Blocker.
+    // shortcut: je Gerät in UserDefaults, Abgleich kommt mit LIC-75
+    var mergeRules: MergeRules = AppModel.storedMergeRules() {
+        didSet {
+            UserDefaults.standard.set(try? JSONEncoder().encode(mergeRules), forKey: Self.mergeRulesKey)
+            scheduleReminders()
+        }
+    }
     var selectedOccurrence: Occurrence?
     var calendarSelection: CalendarQuery.Selection = .visible
 
@@ -48,7 +64,24 @@ final class AppModel {
         self.engine = engine
         self.timeZone = timeZone
         self.calendar = .lichtung(timeZone: timeZone)
-        self.selectedDay = LocalDate(Date(), calendar: .lichtung(timeZone: timeZone))
+        let today = LocalDate(Date(), calendar: .lichtung(timeZone: timeZone))
+        self.selectedDay = today
+        self.focusDay = today
+    }
+
+    private static let mergeRulesKey = "mergeRules"
+
+    private static func storedMergeRules() -> MergeRules {
+        UserDefaults.standard.data(forKey: mergeRulesKey)
+            .flatMap { try? JSONDecoder().decode(MergeRules.self, from: $0) } ?? .default
+    }
+
+    private static func monday(of day: LocalDate) -> LocalDate { day.adding(days: -(day.weekday.rawValue - 1)) }
+
+    /// Tipp auf einen Tageskopf, Sprung aus Suche und Mini-Monat: Tag wählen und zum Fokus machen.
+    func focus(_ day: LocalDate) {
+        selectedDay = day
+        focusDay = day
     }
 
     /// Folgt dem Stand des Engines, solange die Ansicht lebt (`.task`).
@@ -73,7 +106,7 @@ final class AppModel {
             return
         }
         guard hasSnapshot else { return }
-        ReminderScheduler.shared.update(query)
+        ReminderScheduler.shared.update(query, merge: mergeRules)
     }
 
     /// Öffnet den Termin einer getippten Erinnerung. Bleibt offen, bis der
@@ -101,9 +134,29 @@ final class AppModel {
 
     var query: CalendarQuery { CalendarQuery(state: state, deviceTimeZone: timeZone) }
 
-    func occurrences(from start: LocalDate, days: Int) -> [Occurrence] {
+    /// Termine im Zeitraum, gleiche und Blocker nach `mergeRules` zusammengefasst.
+    func mergedOccurrences(from start: LocalDate, days: Int) -> [MergedOccurrence] {
         let window = DateInterval(start: start.startDate(in: calendar), end: start.adding(days: days).startDate(in: calendar))
-        return query.occurrences(in: window, selection: calendarSelection)
+        return OccurrenceMerge.merge(query.occurrences(in: window, selection: calendarSelection),
+                                     calendars: state.calendars, rules: mergeRules)
+    }
+
+    /// Nur die angezeigten Termine (`shown`).
+    func occurrences(from start: LocalDate, days: Int) -> [Occurrence] {
+        mergedOccurrences(from: start, days: days).map(\.shown)
+    }
+
+    /// Kalender, in denen der Termin zusammengefasst noch steht.
+    func alsoIn(_ occ: Occurrence) -> [CalendarInfo] {
+        merged(occ)?.alsoInCalendarIds.compactMap { state.calendars[$0] } ?? []
+    }
+
+    /// Die zusammengefassten Vorkommen hinter einem angezeigten Termin.
+    func otherOccurrences(of occ: Occurrence) -> [Occurrence] { merged(occ)?.others ?? [] }
+
+    private func merged(_ occ: Occurrence) -> MergedOccurrence? {
+        let day = LocalDate(occ.start, calendar: calendar)
+        return mergedOccurrences(from: day, days: 1).first { $0.shown.id == occ.id }
     }
 
     func colorHex(for calendarId: String) -> String? {
@@ -237,14 +290,14 @@ final class AppModel {
     /// Springt auf heute; zählt `todayRequests` hoch, damit das Tagesband
     /// auch dann zurückkommt, wenn heute schon gewählt war (LIC-67).
     func goToToday() {
-        selectedDay = today
+        focus(today)
         todayRequests += 1
     }
 
     /// Springt zum Tag eines Vorkommens und öffnet sein Detail.
     /// Am Mac bleibt er danach markiert (LIC-24).
     func show(_ occurrence: Occurrence) {
-        selectedDay = LocalDate(occurrence.start, calendar: calendar)
+        focus(LocalDate(occurrence.start, calendar: calendar))
         open(occurrence)
     }
 
@@ -337,7 +390,11 @@ extension AppModel {
     /// Einen Schritt der Ansicht vor oder zurück (⌘←/⌘→ im Menü „Darstellung“).
     /// Eine Markierung außerhalb des neuen Bereichs fällt weg.
     func step(_ direction: Int) {
-        selectedDay = viewMode.stepped(selectedDay, by: direction)
+        let next = viewMode.stepped(selectedDay, by: direction)
+        // Wochen: gleicher Wochentag des Fokus-Tags in der neuen Woche.
+        let newFocus = viewMode == .week ? Self.monday(of: next).adding(days: focusDay.weekday.rawValue - 1) : next
+        selectedDay = next
+        focusDay = newFocus
         if let h = highlightedOccurrence, OccurrenceNavigation.refreshed(h, in: visibleOccurrences) == nil {
             highlightedOccurrence = nil
         }
@@ -392,7 +449,7 @@ extension AppModel {
     /// wandert seitwärts zum Termin dieses Tags mit der nächsten Uhrzeit.
     func moveSelectedDay(forward: Bool) {
         let day = viewMode.movedSelection(selectedDay, forward: forward)
-        selectedDay = day
+        focus(day)
         if let current = highlightedOccurrence {
             highlightedOccurrence = OccurrenceNavigation.counterpart(of: current, on: day, in: visibleOccurrences, calendar: calendar)
         }

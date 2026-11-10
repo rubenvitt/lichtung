@@ -39,6 +39,7 @@ final class ReminderScheduler {
     @ObservationIgnored private let delegate = ReminderNotificationDelegate()
     @ObservationIgnored private var pending: Task<Void, Never>?
     @ObservationIgnored private var latest: CalendarQuery?
+    @ObservationIgnored private var latestMerge = MergeRules.off
     /// Zählt jede Anforderung mit. Ein älterer Durchlauf, der noch plant oder
     /// auf die Erlaubnis wartet, darf einen neueren nicht überschreiben und
     /// nach `removeAll()` nichts mehr einplanen.
@@ -62,8 +63,9 @@ final class ReminderScheduler {
 
     /// Neu einplanen, kurz verzögert: Bei vielen Änderungen hintereinander
     /// (erster Abgleich, SSE) zählt nur der letzte Stand.
-    func update(_ query: CalendarQuery) {
+    func update(_ query: CalendarQuery, merge: MergeRules) {
         latest = query
+        latestMerge = merge
         generation += 1
         pending?.cancel()
         pending = Task { [weak self] in
@@ -91,9 +93,10 @@ final class ReminderScheduler {
             return
         }
         let now = Date()
+        let merge = latestMerge
         let calendar = Calendar.lichtung(timeZone: query.expander.deviceTimeZone)
         let wanted = await Task.detached(priority: .utility) {
-            ReminderPlanner.plan(query, now: now, calendar: calendar)
+            ReminderPlanner.plan(query, now: now, calendar: calendar, merge: merge)
         }.value
         if !wanted.isEmpty {
             let allowed = await ensurePermission()

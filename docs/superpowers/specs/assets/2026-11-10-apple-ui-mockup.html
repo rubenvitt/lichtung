@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark"><head><meta charset="utf-8"><title>Lichtung – Entwurf 3</title>
+<style>
+:root{--page:#0e0f0e;--bg:#1b1d1b;--lit:rgba(244,233,201,.075);--line:rgba(255,255,255,.06);--t1:#ecebe4;--t2:#9a9c93;--t3:#63655e;--licht:#f4e9c9;--onlicht:#1b1d1b;--sun:#f0b840;--mix:30%;--ctl:rgba(255,255,255,.07)}
+[data-theme=light]{--page:#d9dbd5;--bg:#eceee8;--lit:#fff;--line:rgba(0,0,0,.07);--t1:#1b1d1a;--t2:#5f635b;--t3:#a1a49c;--licht:#1b1d1a;--onlicht:#fff;--sun:#c58500;--mix:20%;--ctl:rgba(0,0,0,.06)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--t1);font:13px/1.3 system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;padding:28px 32px 80px}
+.top{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.top h1{font-size:20px;margin:0;font-weight:600}.top p{margin:2px 0 0;color:var(--t2);max-width:640px}
+.pill{border:0;background:var(--ctl);color:var(--t1);padding:7px 14px;border-radius:7px;font:500 13px system-ui;cursor:pointer;white-space:nowrap}
+.pill.selected{background:var(--licht);color:var(--onlicht)}
+.sp{flex:1}
+.stage{display:flex;gap:36px;align-items:flex-start}
+.win{flex:1;min-width:0;background:var(--bg);border-radius:12px;overflow:hidden;box-shadow:0 0 0 1px var(--line),0 30px 70px rgba(0,0,0,.4)}
+.bar{display:flex;align-items:center;gap:14px;padding:12px 16px}
+.dots{display:flex;gap:8px}.dots i{width:12px;height:12px;border-radius:50%;background:var(--ctl)}
+.g{display:flex;background:var(--ctl);border-radius:7px;padding:2px}
+.g b{font-weight:400;font-size:13px;padding:3px 11px;border-radius:5px;color:var(--t2)}.g b.on{background:var(--bg);color:var(--t1);font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.month{font-size:15px;font-weight:600}.month span{color:var(--t2);font-weight:400}
+.field{flex:1;max-width:380px;margin:0 auto;background:var(--ctl);border-radius:7px;padding:5px 10px;color:var(--t3);display:flex}.field kbd{margin-left:auto;font:inherit}
+.main{display:flex}
+.cal{flex:1;min-width:0;position:relative}
+.days{display:flex;padding-left:44px}
+.dh{flex:1;padding:14px 8px 10px;cursor:pointer;transition:flex .3s;min-width:0;color:var(--t2);font-stretch:88%;white-space:nowrap;overflow:hidden}
+.dh b{font-weight:400;color:var(--t1);margin-left:5px;font-variant-numeric:tabular-nums}
+.dh.we b{color:var(--t2)}
+.dh.focus{font-size:26px;font-weight:300;letter-spacing:-.02em;padding-top:0;color:var(--t1);font-stretch:100%}.dh.focus b{font-weight:600;margin-left:8px}
+.dh.today b{font-weight:700;color:var(--licht)}
+.allday{position:relative;margin-left:44px}
+.ad{position:absolute;height:19px;border-radius:3px;font-size:11px;padding:2px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .3s;font-stretch:88%;background:color-mix(in srgb,var(--c) var(--mix),var(--bg))}
+.grid{display:flex;position:relative;margin-top:6px}
+.hours{width:44px;position:relative;flex:none}
+.hours span{position:absolute;right:9px;font-size:10px;color:var(--t3);transform:translateY(-6px);font-variant-numeric:tabular-nums}
+.col{flex:1;position:relative;transition:flex .3s;min-width:0}
+.col.lit{background:linear-gradient(transparent,var(--lit) 12%,var(--lit) 62%,transparent 80%)}
+[data-theme=light] .col.lit{background:var(--lit)}
+.hl{position:absolute;left:0;right:0;height:1px;background:var(--line)}
+.ev{z-index:1;position:absolute;border-radius:4px;overflow:hidden;padding:2px 6px 2px 9px;font-size:11px;line-height:1.25;background:color-mix(in srgb,var(--c) var(--mix),var(--bg));cursor:pointer;font-stretch:88%}
+.ev::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--c)}
+.ev .t{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev .m{color:var(--t2);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.ev.one{display:flex;gap:6px;align-items:center;padding-top:0;padding-bottom:0}.ev.one .m{flex:none}
+.ev.past{background:none;color:var(--t3)}.ev.past .m{color:var(--t3)}.ev.past::before{opacity:.4}
+.ev.run{background:var(--c);color:#141513}.ev.run .m{color:rgba(20,21,19,.7)}
+.ev.sel{outline:1.5px solid var(--t1);outline-offset:1px}
+.ev.frame{background:none;border-radius:0;padding:2px 6px 0 9px;pointer-events:none;overflow:visible}
+.ev.frame::before{width:1.5px;left:3px}.ev.frame .t{font-size:10px;color:color-mix(in srgb,var(--c) 60%,var(--t1));font-weight:400}
+.big{font-stretch:100%}.big .t{font-size:13px}.big .m{font-size:11px}
+.join{display:inline-block;margin-top:6px;background:var(--licht);color:var(--onlicht);font-weight:500;font-size:11px;border-radius:5px;padding:3px 10px}
+.now{position:absolute;left:0;right:0;height:1.5px;background:var(--sun);z-index:0}
+.now b{position:absolute;right:calc(100% + 9px);top:-7px;background:var(--bg);color:var(--sun);font-size:10px;font-weight:600;font-variant-numeric:tabular-nums}
+.side{width:236px;flex:none;padding:4px 20px 20px 22px}
+.side h3{margin:0 0 4px;font-size:17px;font-weight:600;line-height:1.2}
+.side h4{margin:28px 0 8px;font-size:13px;font-weight:600}
+.when{color:var(--t2)}
+.cta{display:block;text-align:center;margin-top:14px;background:var(--licht);color:var(--onlicht);font-weight:500;border-radius:7px;padding:7px}
+.li{display:flex;gap:10px;padding:4px 0}.li s{text-decoration:none;color:var(--t2);font-variant-numeric:tabular-nums;width:44px;flex:none;white-space:nowrap}
+.li span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid var(--c);padding-left:8px}
+.phone{width:310px;flex:none;height:660px;background:var(--bg);border-radius:46px;border:8px solid #2a2c2a;position:relative;overflow:hidden}
+[data-theme=light] .phone{border-color:#c5c8c1}
+.ph{padding:22px 20px 0}
+.ph .st{display:flex;justify-content:space-between;font-weight:600;margin-bottom:20px}
+.ph h2{margin:0;font-size:32px;font-weight:300;letter-spacing:-.02em}.ph h2 b{font-weight:600}
+.next{color:var(--t2);margin:2px 0 14px}
+.strip{display:flex;justify-content:space-between;margin-bottom:10px;color:var(--t2);text-align:center}
+.strip div{width:36px}.strip b{display:block;font-size:17px;font-weight:400;color:var(--t1)}.strip .on b{font-weight:700;color:var(--licht)}
+.ph .ad{position:static;margin-bottom:8px}
+.pgrid{position:relative}.pgrid .hours{position:absolute;left:0;top:0;bottom:0}.pgrid .col{position:absolute;left:44px;right:0;top:0;bottom:0}
+.tab{position:absolute;left:16px;right:16px;bottom:16px;display:flex;gap:10px;z-index:9;align-items:center}
+.tab .g{flex:1;border-radius:99px;padding:4px;background:color-mix(in srgb,var(--bg) 80%,var(--t1));box-shadow:0 6px 20px rgba(0,0,0,.25)}.tab .g b{padding:9px 0;flex:1;text-align:center;border-radius:99px}
+.plus{width:46px;height:46px;border-radius:50%;background:var(--licht);color:var(--onlicht);font-size:26px;font-weight:300;display:grid;place-items:center;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.notes{margin-top:28px;color:var(--t2);max-width:640px}.notes b{color:var(--t1);font-weight:600}.notes p{margin:0 0 10px}
+</style></head><body>
+<div class="top cards"><div><h1>Entwurf 3</h1><p>Gleicher Aufbau wie Entwurf 2, neu gestaltet. Klick auf einen Tag macht ihn groß, Klick auf einen Termin wählt ihn aus.</p></div><div class="sp"></div>
+<button class="pill" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme=='dark'?'light':'dark'">Hell oder dunkel</button>
+<button class="pill card" data-choice="v3-ja" onclick="toggleSelect(this)">So bauen</button><button class="pill card" data-choice="v3-nein" onclick="toggleSelect(this)">Noch nicht</button></div>
+<div class="stage"><div class="win" id="mac"></div><div class="phone" id="phone"></div></div>
+<div class="notes">
+<p><b>Heute ist die Lichtung.</b> Die Oberfläche hat keine eigene Akzentfarbe mehr. Der heutige Tag ist der einzige, auf den Licht fällt, am hellsten in den Tagesstunden. Farbe kommt nur noch von deinen Kalendern.</p>
+<p><b>Eine Schrift, zwei Breiten.</b> San Francisco durchgehend. Die schmalen Tage setzen sie schmal, damit Titel hineinpassen, der große Tag normal.</p>
+<p><b>Weg ist:</b> Karten, Leuchten, Großbuchstaben-Etiketten, Kapseln, Neongrün. Die Jetzt-Linie ist sonnengelb, lange Termine sind eine Klammer am Rand, Eingabe und Suche teilen sich ein Feld oben.</p>
+</div>
+<script>
+const C={work:'#7c86e0',priv:'#e0685e',drk:'#c76bc9',phx:'#e08a3c',free:'#5fae86'};
+const m=s=>{const[a,b]=s.split(':');return a*60+ +b};
+const raw=[
+[0,'8:45','9:00','Daily Configurillas','work','Teams'],[0,'9:00','9:30','Weekly – Aufgaben','work','Teams'],[0,'9:30','9:45','Daily 2.0','work','Teams'],[0,'9:45','10:15','Feature-Vorstellung','work','Teams'],[0,'10:15','11:00','Fokus','priv'],[0,'11:00','11:30','Weekly Check-in','work'],[0,'11:50','12:20','INNOQ Sync','work','Zoom'],[0,'12:20','13:15','Mittag','priv'],[0,'13:15','13:45','Küche','priv'],[0,'14:00','15:00','Weekly – ASA','work'],[0,'17:00','18:00','Marvin','priv'],
+[1,'8:45','9:00','Daily Configurillas','work','Teams'],[1,'9:00','10:00','Statusrunde DGE-SO','work','Raum 5D-E2.14'],[1,'9:30','9:45','Daily 2.0','work','Teams'],[1,'10:30','11:30','Fotoshooting DRK','drk','Bereitschaftsheim'],[1,'11:00','11:45','Sport','priv'],[1,'13:00','15:00','Vorbereitung KI@Präsenztage','work','Teams'],
+[2,'8:45','9:00','Daily Configurillas','work','Teams'],[2,'9:30','9:45','Daily 2.0','work','Teams'],[2,'10:00','11:30','Retro November','work','Zoom'],[2,'11:45','12:30','Sport','priv'],[2,'14:00','15:00','Architektur-Runde','work','Teams'],
+[3,'8:00','17:00','Technology Day','work','Köln'],[3,'11:00','12:00','Diskussion Plattform','work'],[3,'11:50','12:20','INNOQ Sync','work','Zoom'],[3,'14:00','15:00','Technology-Day-Abschluss','work'],[3,'17:20','21:00','Zug nach Köln','priv'],
+[4,'8:45','9:00','Daily Configurillas','work','Teams'],[4,'9:00','17:00','Teamtag','work','Büro'],[4,'9:30','9:45','Daily 2.0','work','Teams'],[4,'10:00','10:45','O3 mit Lea','work'],[4,'17:45','21:00','Zug nach Hause','priv'],
+[5,'10:00','18:00','Lehrgang DRK','drk','Bereitschaftsheim']
+];
+const EV=raw.map(([d,s,e,t,c,l],i)=>({i,d,s:m(s),e:m(e),t,c,l,time:s}));
+const AD=[[0,7,'Feuersturm 2 · Q4','phx'],[0,7,'Feuer 7 · W7/12','phx'],[4,1,'Ruben weg','free']];
+const DN=['Mo','Di','Mi','Do','Fr','Sa','So'],TODAY=1,NOW=m('10:40'),W=2.1;
+let focus=TODAY,sel=16;
+const past=e=>e.d<TODAY||(e.d==TODAY&&e.e<=NOW),run=e=>e.d==TODAY&&e.s<=NOW&&NOW<e.e;
+const fmt=x=>Math.floor(x/60)+':'+String(x%60).padStart(2,'0');
+function pack(list){list.sort((a,b)=>a.s-b.s||b.e-a.e);let out=[],cl=[],end=-1;
+  const flush=()=>{const n=Math.max(0,...cl.map(x=>x.col))+1;cl.forEach(x=>x.n=n);out.push(...cl);cl=[]};
+  for(const e of list){if(e.s>=end)flush();let col=0;while(cl.some(x=>x.col==col&&x.e>e.s))col++;cl.push({...e,col});end=Math.max(end,e.e)}
+  flush();return out}
+function block(e,rich,H0,H1,PX){
+  const top=(e.s-H0*60)/60*PX+1,h=Math.max(14,(Math.min(e.e,H1*60)-e.s)/60*PX-2);
+  if(e.frame)return `<div class="ev frame" style="--c:${C[e.c]};top:${top}px;height:${h}px;left:2px;right:2px"><div class="t">${e.t}${rich?' · '+e.time+'–'+fmt(e.e):''}</div></div>`;
+  const inset=e.inset?10:2,w=`calc((100% - ${inset+2}px) / ${e.n})`;
+  const cls=`ev ${rich?'big':''} ${past(e)?'past':''} ${run(e)?'run':''} ${sel==e.i?'sel':''}`;
+  const style=`--c:${C[e.c]};top:${top}px;height:${h}px;left:calc(${inset}px + ${w} * ${e.col});width:calc(${w} - 2px)`;
+  if(h<28)return `<div class="${cls} one" data-ev="${e.i}" style="${style}"><div class="t">${e.t}</div>${rich?`<div class="m">${e.time}</div>`:''}</div>`;
+  return `<div class="${cls}" data-ev="${e.i}" style="${style}"><div class="t">${e.t}</div><div class="m">${e.time}–${fmt(e.e)}${rich&&e.l?' · '+e.l:''}</div>${rich&&/Teams|Zoom/.test(e.l||'')&&!past(e)&&h>60?`<span class="join">Beitreten</span>`:''}</div>`}
+function column(d,rich,H0,H1,PX,cls=''){
+  let lines='';for(let h=H0;h<H1;h++)lines+=`<div class="hl" style="top:${(h-H0)*PX}px"></div>`;
+  const all=EV.filter(e=>e.d==d),frames=all.filter(e=>e.e-e.s>=240&&all.some(o=>o!=e&&o.s<e.e&&e.s<o.e));
+  const fg=pack(all.filter(e=>!frames.includes(e))).map(e=>({...e,inset:frames.some(f=>f.s<e.e&&e.s<f.e)}));
+  return `<div class="col ${cls} ${d==TODAY?'lit':''}" style="${cls.includes('flexy')?`flex:${rich?W:1}`:''}">${lines}${frames.map(f=>block({...f,frame:1},rich,H0,H1,PX)).join('')}${fg.map(e=>block(e,rich,H0,H1,PX)).join('')}${d==TODAY?`<div class="now" style="top:${(NOW-H0*60)/60*PX}px"><b>${fmt(NOW)}</b></div>`:''}</div>`}
+function hours(H0,H1,PX){let s='';for(let h=H0+1;h<H1;h++)s+=`<span style="top:${(h-H0)*PX}px">${h}</span>`;return `<div class="hours">${s}</div>`}
+function mac(){const H0=7,H1=21,PX=42,tot=6+W,x=d=>(d<focus?d:d==focus?d:d-1+W)/tot*100+(d>focus?0:0),wd=(d,n)=>{let w=0;for(let i=d;i<d+n;i++)w+=i==focus?W:1;return w/tot*100},lx=d=>{let w=0;for(let i=0;i<d;i++)w+=i==focus?W:1;return w/tot*100};
+  const s=EV.find(e=>e.i==sel),today=EV.filter(e=>e.d==TODAY&&e.e>NOW).sort((a,b)=>a.s-b.s);
+  return `<div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="month">November <span>2026, KW 46</span></div><div class="field">Termin eintragen oder suchen<kbd>⌘K</kbd></div><div class="g"><b>Tag</b><b class="on">Woche</b><b>Monat</b><b>Jahr</b></div><div class="g"><b>‹</b><b>Heute</b><b>›</b></div></div>
+  <div class="main"><div class="cal">
+  <div class="days">${DN.map((n,i)=>`<div class="dh ${i==TODAY?'today':''} ${i>4?'we':''} ${i==focus?'focus':''}" data-day="${i}" style="flex:${i==focus?W:1}">${i==focus?['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'][i]:n}<b>${9+i}</b></div>`).join('')}</div>
+  <div class="allday" style="height:${AD.length*23}px">${AD.map(([d,n,t,c],i)=>`<div class="ad" style="--c:${C[c]};top:${i*22}px;left:calc(${lx(d)}% + 2px);width:calc(${wd(d,n)}% - 4px)">${t}</div>`).join('')}</div>
+  <div class="grid" style="height:${(H1-H0)*PX}px">${hours(H0,H1,PX)}${DN.map((_,d)=>column(d,d==focus,H0,H1,PX,'flexy')).join('')}</div></div>
+  <div class="side" style="--c:${C[s.c]}"><h3>${s.t}</h3><div class="when">${['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'][s.d]}, ${s.time} bis ${fmt(s.e)}${s.l?'<br>'+s.l:''}${run(s)?'<br>läuft gerade':''}</div>${/Teams|Zoom/.test(s.l||'')?`<span class="cta">Beitreten</span>`:''}
+  <h4>Heute noch</h4>${today.map(e=>`<div class="li" style="--c:${C[e.c]}"><s>${e.time}</s><span>${e.t}</span></div>`).join('')}<div class="li" style="color:var(--t3)"><s style="color:inherit">15:00</s><span style="border-color:transparent">danach frei</span></div>
+  <h4>Offene Einladungen</h4><div class="li" style="--c:${C.work}"><s>Mo 16.</s><span>Workshop Plattform</span></div></div></div>`}
+function phone(){const H0=8,H1=17,PX=54;
+  return `<div class="ph"><div class="st"><span>10:40</span><span></span></div><h2>Dienstag <b>10</b></h2><div class="next">Sport beginnt in 20 Minuten</div>
+  <div class="strip">${DN.map((n,i)=>`<div class="${i==TODAY?'on':''}">${n}<b>${9+i}</b></div>`).join('')}</div>
+  <div class="ad" style="--c:${C.phx}">Feuersturm 2 und 1 weiterer</div></div>
+  <div class="pgrid" style="height:${(H1-H0)*PX}px">${hours(H0,H1,PX)}${column(TODAY,true,H0,H1,PX)}</div>
+  <div class="tab"><div class="g"><b class="on">Tag</b><b>Woche</b><b>Monat</b></div><div class="plus">+</div></div>`}
+function render(){document.getElementById('mac').innerHTML=mac();document.getElementById('phone').innerHTML=phone();
+  document.querySelectorAll('#mac .dh').forEach(el=>el.onclick=()=>{focus=+el.dataset.day;render()});
+  document.querySelectorAll('[data-ev]').forEach(el=>el.onclick=()=>{sel=+el.dataset.ev;render()})}
+render();
+</script></body></html>

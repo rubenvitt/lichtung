@@ -30,6 +30,7 @@ final class AppModel {
         didSet {
             UserDefaults.standard.set(try? JSONEncoder().encode(mergeRules), forKey: Self.mergeRulesKey)
             scheduleReminders()
+            refreshHighlight()
         }
     }
     var selectedOccurrence: Occurrence?
@@ -390,14 +391,21 @@ extension AppModel {
     /// Einen Schritt der Ansicht vor oder zurück (⌘←/⌘→ im Menü „Darstellung“).
     /// Eine Markierung außerhalb des neuen Bereichs fällt weg.
     func step(_ direction: Int) {
-        let next = viewMode.stepped(selectedDay, by: direction)
-        // Wochen: gleicher Wochentag des Fokus-Tags in der neuen Woche.
-        let newFocus = viewMode == .week ? Self.monday(of: next).adding(days: focusDay.weekday.rawValue - 1) : next
-        selectedDay = next
-        focusDay = newFocus
+        select(viewMode.stepped(selectedDay, by: direction), keepingFocusWeekday: viewMode == .week)
         if let h = highlightedOccurrence, OccurrenceNavigation.refreshed(h, in: visibleOccurrences) == nil {
             highlightedOccurrence = nil
         }
+    }
+
+    /// Wischen am iPhone: um `days` Tage blättern; ganze Wochen behalten den Wochentag des Fokus-Tags.
+    func page(days: Int) {
+        select(selectedDay.adding(days: days), keepingFocusWeekday: days % 7 == 0)
+    }
+
+    private func select(_ day: LocalDate, keepingFocusWeekday: Bool) {
+        let newFocus = keepingFocusWeekday ? Self.monday(of: day).adding(days: focusDay.weekday.rawValue - 1) : day
+        selectedDay = day
+        focusDay = newFocus
     }
 
     /// Klick auf einen Termin (Mac): markieren, Fokus ins Kalenderfeld.

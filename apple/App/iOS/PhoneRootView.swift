@@ -136,7 +136,7 @@ struct PhoneRootView: View {
                 // Nur ein klar waagerechter Wisch blättert; senkrecht scrollt (LIC-65).
                 .gesture(DragGesture(minimumDistance: 40).onEnded { value in
                     guard let step = SwipeStep.horizontal(dx: value.translation.width, dy: value.translation.height) else { return }
-                    model.selectedDay = model.selectedDay.adding(days: step * days)
+                    model.page(days: step * days)
                 })
         case .month:
             MonthView(year: model.selectedDay.year, month: model.selectedDay.month, visibleLanes: 2)

@@ -179,10 +179,15 @@ private struct InspectorRow: View {
 /// über dem Raster, dessen Kopf nicht scrollt.
 private struct NoTopScrollEdgeEffect: ViewModifier {
     func body(content: Content) -> some View {
+        // Die CI baut mit dem SDK von macOS 15; dort gibt es den Aufruf nicht.
+        #if compiler(>=6.2)
         if #available(macOS 26, *) {
             content.scrollEdgeEffectHidden(true, for: .top)
         } else {
             content
         }
+        #else
+        content
+        #endif
     }
 }

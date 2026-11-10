@@ -37,7 +37,7 @@ struct AgendaTests {
             L.timed("Workshop", 24, 10, to: 11),
         ]
         let days = AgendaBuilder.days(occ, from: today, days: 4, today: today, calendar: L.cal)
-        #expect(days.map(\.heading) == ["Heute · Fr 23.", "Morgen · Sa 24."])
+        #expect(days.map(\.heading) == ["Heute, Fr 23.", "Morgen, Sa 24."])
         #expect(days[0].items.map(\.occurrence.title) == ["Team-Sync", "Sport"])
         #expect(days[0].items.map(\.timeText) == ["09:00–09:30", "11:00–12:00"])
         #expect(days[1].items.map(\.timeText) == ["ganztägig", "10:00–11:00"])
@@ -45,7 +45,7 @@ struct AgendaTests {
 
     @Test func todayStaysWhenEmpty() {
         let days = AgendaBuilder.days([L.timed("Zahnarzt", 27, 14, to: 15)], from: today, days: 7, today: today, calendar: L.cal)
-        #expect(days.map(\.heading) == ["Heute · Fr 23.", "Di 27. Okt."])
+        #expect(days.map(\.heading) == ["Heute, Fr 23.", "Di 27. Okt."])
         #expect(days[0].items.isEmpty)
     }
 
@@ -53,7 +53,7 @@ struct AgendaTests {
         // Liste mit Vorlauf: gestern ist dabei, der leere ausgewählte Tag bleibt als Sprungziel.
         let occ = [L.timed("Kino", 22, 20, to: 22), L.timed("Zahnarzt", 27, 14, to: 15)]
         let days = AgendaBuilder.days(occ, from: L.day(20), days: 10, today: today, calendar: L.cal, anchor: L.day(25))
-        #expect(days.map(\.heading) == ["Gestern · Do 22.", "Heute · Fr 23.", "So 25. Okt.", "Di 27. Okt."])
+        #expect(days.map(\.heading) == ["Gestern, Do 22.", "Heute, Fr 23.", "So 25. Okt.", "Di 27. Okt."])
         #expect(days[2].items.isEmpty)
     }
 
@@ -115,7 +115,7 @@ struct AgendaTests {
 
     @Test func headingOtherYearAndYesterday() {
         #expect(AgendaBuilder.heading(LocalDate(year: 2027, month: 1, day: 3), today: today) == "So 3. Jan. 2027")
-        #expect(AgendaBuilder.heading(L.day(22), today: today) == "Gestern · Do 22.")
+        #expect(AgendaBuilder.heading(L.day(22), today: today) == "Gestern, Do 22.")
     }
 
     @Test func tickerShowsCalendarsAndBusyShare() {

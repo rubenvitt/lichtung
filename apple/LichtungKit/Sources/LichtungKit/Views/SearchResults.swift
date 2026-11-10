@@ -25,12 +25,12 @@ extension EventSearch.Hit {
         occurrence.map { LocalDate($0.start, calendar: cal) }
     }
 
-    /// Zeile unter dem Titel: „Heute · Mo 26. · 09:00–09:30“,
-    /// „Di 3. Nov. · ganztägig“, „Fr 6. Nov. · ab 22:00“ (über Mitternacht).
+    /// Zeile unter dem Titel: „Heute, Mo 26., 09:00–09:30“,
+    /// „Di 3. Nov., ganztägig“, „Fr 6. Nov., ab 22:00“ (über Mitternacht).
     public func dateText(today: LocalDate, calendar cal: Calendar) -> String? {
         guard let o = occurrence else { return nil }
         let day = LocalDate(o.start, calendar: cal)
         let item = AgendaBuilder.item(o, dayStart: day.startDate(in: cal), dayEnd: day.adding(days: 1).startDate(in: cal), cal: cal)
-        return "\(AgendaBuilder.heading(day, today: today)) · \(item.timeText)"
+        return "\(AgendaBuilder.heading(day, today: today)), \(item.timeText)"
     }
 }

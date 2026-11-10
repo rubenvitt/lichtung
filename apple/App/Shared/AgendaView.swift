@@ -71,7 +71,7 @@ struct AgendaView: View {
     }
 }
 
-/// Kopf eines Tages: große Tageszahl, darunter „Heute · Fr 23.“.
+/// Kopf eines Tages: große Tageszahl, daneben „Heute, Fr 23.“.
 struct AgendaSectionHeader: View {
     let section: AgendaDay
 

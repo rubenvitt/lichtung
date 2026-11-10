@@ -219,24 +219,24 @@ struct QuickEntryPreviewTests {
     @Test func timed() {
         let p = preview("Zahnarzt Di 14 Uhr /privat")
         #expect(p.title == "Zahnarzt")
-        #expect(p.when == "Di, 27. Okt. · 14:00–15:00")
+        #expect(p.when == "Di, 27. Okt., 14:00–15:00")
         #expect(p.calendarName == "Privat")
         #expect(p.recurrence == nil)
     }
 
     @Test func todayAndTomorrow() {
-        #expect(preview("Kino heute Abend").when == "Heute, Fr, 23. Okt. · 19:00–20:00")
-        #expect(preview("Team-Sync morgen 9–9:30").when == "Morgen, Sa, 24. Okt. · 09:00–09:30")
+        #expect(preview("Kino heute Abend").when == "Heute, Fr, 23. Okt., 19:00–20:00")
+        #expect(preview("Team-Sync morgen 9–9:30").when == "Morgen, Sa, 24. Okt., 09:00–09:30")
     }
 
     @Test func allDayRange() {
-        #expect(preview("Urlaub 3.–7.11.").when == "Di, 3. Nov. – Sa, 7. Nov. · ganztägig")
-        #expect(preview("Geburtstag Jona 3.1.").when == "So, 3. Jan. 2027 · ganztägig")
+        #expect(preview("Urlaub 3.–7.11.").when == "Di, 3. Nov. – Sa, 7. Nov., ganztägig")
+        #expect(preview("Geburtstag Jona 3.1.").when == "So, 3. Jan. 2027, ganztägig")
     }
 
     @Test func overnight() {
         #expect(preview("Nachtschicht 22-6 Uhr").when == "Heute, Fr, 23. Okt. 22:00 – Morgen, Sa, 24. Okt. 06:00")
-        #expect(preview("Lesen 22-24 Uhr").when == "Heute, Fr, 23. Okt. · 22:00–00:00")
+        #expect(preview("Lesen 22-24 Uhr").when == "Heute, Fr, 23. Okt., 22:00–00:00")
     }
 
     @Test func recurrence() {

@@ -89,7 +89,7 @@ private struct CalendarSettingsRow: View {
         if calendar.isWork == true { parts.append("Arbeitskalender") }
         if !calendar.writable { parts.append("nur lesen") }
         parts.append(calendar.mcpWrite ? "Claude darf schreiben" : "Claude nur lesend")
-        return parts.joined(separator: " · ")
+        return parts.joined(separator: ", ")
     }
 }
 

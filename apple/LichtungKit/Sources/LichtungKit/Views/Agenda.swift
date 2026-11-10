@@ -3,7 +3,7 @@ import Foundation
 /// Ansicht A: Termine als Liste, Tag für Tag (Spec §5, Entwurf „Tagesleiste + Liste“).
 public struct AgendaDay: Hashable, Sendable, Identifiable {
     public var date: LocalDate
-    /// „Heute · Fr 23.“, „Morgen · Sa 24.“, „So 25. Okt.“
+    /// „Heute, Fr 23.“, „Morgen, Sa 24.“, „So 25. Okt.“
     public var heading: String
     public var isToday: Bool
     public var items: [AgendaItem]
@@ -142,14 +142,14 @@ public enum AgendaBuilder {
         return "\(o.title) beginnt in \(minutes) \(minutes == 1 ? "Minute" : "Minuten")"
     }
 
-    /// „Heute · Fr 23.“, „Morgen · Sa 24.“, „Gestern · Do 22.“, sonst „So 25. Okt.“
+    /// „Heute, Fr 23.“, „Morgen, Sa 24.“, „Gestern, Do 22.“, sonst „So 25. Okt.“
     public static func heading(_ day: LocalDate, today: LocalDate) -> String {
         let wd = QuickEntryPreview.weekdayShort[day.weekday.rawValue - 1]
         let short = "\(wd) \(day.day)."
         switch today.days(until: day) {
-        case 0: return "Heute · \(short)"
-        case 1: return "Morgen · \(short)"
-        case -1: return "Gestern · \(short)"
+        case 0: return "Heute, \(short)"
+        case 1: return "Morgen, \(short)"
+        case -1: return "Gestern, \(short)"
         default:
             let month = QuickEntryPreview.monthShort[day.month - 1]
             let year = day.year == today.year ? "" : " \(day.year)"

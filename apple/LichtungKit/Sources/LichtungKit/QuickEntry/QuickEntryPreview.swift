@@ -1,7 +1,7 @@
 import Foundation
 
 /// Text der Vorschau unter dem Eingabefeld, z. B.
-/// „Di, 27. Okt. · 14:00–15:00“ und „jeden Montag“.
+/// „Di, 27. Okt., 14:00–15:00“ und „jeden Montag“.
 ///
 /// Bewusst ohne `DateFormatter`: Die Vorschau ist Teil der Tabellentests und
 /// soll auf jeder Plattform und mit jeder System-Locale gleich aussehen.
@@ -27,7 +27,7 @@ public struct QuickEntryPreview: Equatable, Sendable {
             let span = first == last
                 ? Self.day(first, today: today)
                 : "\(Self.day(first, today: today)) – \(Self.day(last, today: today))"
-            when = "\(span) · ganztägig"
+            when = "\(span), ganztägig"
         case let .timed(start, end):
             let startDay = LocalDate(start, calendar: cal)
             // Endet um Mitternacht: gehört noch zum Vortag.
@@ -35,7 +35,7 @@ public struct QuickEntryPreview: Equatable, Sendable {
             let from = Self.clock(start, cal)
             let to = Self.clock(end, cal)
             if startDay == endDay {
-                when = "\(Self.day(startDay, today: today)) · \(from)–\(to)"
+                when = "\(Self.day(startDay, today: today)), \(from)–\(to)"
             } else {
                 when = "\(Self.day(startDay, today: today)) \(from) – \(Self.day(endDay, today: today)) \(to)"
             }

@@ -61,10 +61,7 @@ struct LoginView: View {
                 }
                 .textFieldStyle(.roundedBorder)
                 .padding(20)
-                .background {
-                    RoundedRectangle(cornerRadius: Theme.cardRadius + 4, style: .continuous)
-                        .fill(.background.secondary)
-                }
+                // Keine Fläche, nur feine Linie auf dem Grund (Spec §2: keine Karten).
                 .overlay {
                     RoundedRectangle(cornerRadius: Theme.cardRadius + 4, style: .continuous)
                         .strokeBorder(Theme.line, lineWidth: 1)

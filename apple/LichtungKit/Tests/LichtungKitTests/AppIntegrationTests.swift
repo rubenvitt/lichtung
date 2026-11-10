@@ -61,13 +61,13 @@ struct AppSearchTests {
 
         let privat = try #require(q.search("privat", now: F.now).first)
         #expect(privat.day(calendar: cal) == LocalDate(year: 2026, month: 11, day: 3))
-        #expect(privat.dateText(today: today, calendar: cal) == "Di 3. Nov. · 09:00–10:00")
+        #expect(privat.dateText(today: today, calendar: cal) == "Di 3. Nov., 09:00–10:00")
 
         let messe = try #require(q.search("messe", now: F.now).first)
-        #expect(messe.dateText(today: today, calendar: cal) == "Heute · Fr 23. · ganztägig")
+        #expect(messe.dateText(today: today, calendar: cal) == "Heute, Fr 23., ganztägig")
 
         let zug = try #require(q.search("nachtzug", now: F.now).first)
-        #expect(zug.dateText(today: today, calendar: cal) == "Fr 6. Nov. · ab 22:00")
+        #expect(zug.dateText(today: today, calendar: cal) == "Fr 6. Nov., ab 22:00")
     }
 }
 
@@ -86,8 +86,8 @@ struct DetailTextTests {
     }
 
     @Test func travelTimeWithDeparture() {
-        #expect(TravelTime.detailText(for: occurrence(travel: 30), calendar: cal) == "30 Min. Reisezeit · Aufbruch 13:30")
-        #expect(TravelTime.detailText(for: occurrence(travel: 90), calendar: cal) == "1,5 Std. Reisezeit · Aufbruch 12:30")
+        #expect(TravelTime.detailText(for: occurrence(travel: 30), calendar: cal) == "30 Min. Reisezeit, Aufbruch 13:30")
+        #expect(TravelTime.detailText(for: occurrence(travel: 90), calendar: cal) == "1,5 Std. Reisezeit, Aufbruch 12:30")
     }
 
     @Test func noTravelTimeText() {

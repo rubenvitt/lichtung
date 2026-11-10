@@ -169,12 +169,42 @@ public struct TimelineBlock: Hashable, Sendable, Identifiable {
     /// Beginnt vor diesem Tag bzw. endet danach (für abgeschnittene Kanten).
     public var continuesBefore: Bool
     public var continuesAfter: Bool
+    /// Zahl der Rahmen, die den Block zeitlich überdecken (`TimelineLayout.day`).
+    public var insetByFrames = 0
 
     public var id: String { occurrence.id }
 
     /// Linke Kante und Breite als Anteil der Tagesspalte.
     public var leading: Double { Double(column) / Double(columns) }
     public var width: Double { Double(span) / Double(columns) }
+}
+
+/// Langer Termin als Randlinie neben der Tagesspalte (`TimelineLayout.day`).
+public struct TimelineFrame: Hashable, Sendable, Identifiable {
+    public var occurrence: Occurrence
+    /// Oberkante und Höhe als Anteil der Spalte, 0…1.
+    public var top: Double
+    public var height: Double
+    /// 0 = ganz links.
+    public var index: Int
+
+    public var id: String { occurrence.id }
+}
+
+/// Feld „+n“ für Blöcke, die über die erlaubten Spalten hinausgehen.
+public struct TimelineOverflow: Hashable, Sendable, Identifiable {
+    public var hidden: [Occurrence]
+    public var top: Double
+    public var height: Double
+    public var column: Int
+    public var columns: Int
+    public var id: String
+}
+
+public struct TimelineDay: Hashable, Sendable {
+    public var blocks: [TimelineBlock]
+    public var frames: [TimelineFrame]
+    public var overflows: [TimelineOverflow]
 }
 
 public enum TimelineLayout {
@@ -184,36 +214,83 @@ public enum TimelineLayout {
     /// Lage und Überschneidung gelten auf der Wanduhr-Achse (`WallClockAxis`).
     public static func blocks(_ occurrences: [Occurrence], day: LocalDate, calendar cal: Calendar, minimumMinutes: Double = 15) -> [TimelineBlock] {
         let axis = WallClockAxis(day: day, calendar: cal)
+        return columnLayout(items(occurrences, axis: axis, minimumMinutes: minimumMinutes), axis: axis, maxColumns: nil).blocks
+    }
+
+    /// Ab dieser Länge (Minuten am Tag) kann ein Termin zum Rahmen werden.
+    public static let frameMinimumMinutes = 240.0
+
+    /// Raster eines Tages: lange Termine, die kürzere überdecken, werden zu
+    /// Rahmen (Randlinie) und fallen aus der Spaltenrechnung. Hat eine Gruppe
+    /// mehr als `maxColumns` Spalten, sammelt ein Feld „+n“ in der letzten
+    /// Spalte die Blöcke ab Spalte `maxColumns - 1`.
+    public static func day(_ occurrences: [Occurrence], day: LocalDate, calendar cal: Calendar,
+                           maxColumns: Int, minimumMinutes: Double = 15) -> TimelineDay {
+        let axis = WallClockAxis(day: day, calendar: cal)
+        let all = items(occurrences, axis: axis, minimumMinutes: minimumMinutes)
+        let long = all.filter { $0.e - $0.s >= frameMinimumMinutes }
+        let short = all.filter { $0.e - $0.s < frameMinimumMinutes }
+        let frameItems = long.filter { f in short.contains { $0.s < f.shownEnd && f.s < $0.shownEnd } }
+        let frameIds = Set(frameItems.map(\.o.id))
+        let rest = all.filter { !frameIds.contains($0.o.id) }
+
+        let frames = frameItems.enumerated().map { index, f in
+            TimelineFrame(occurrence: f.o, top: f.s / WallClockAxis.minutesPerDay,
+                          height: (f.shownEnd - f.s) / WallClockAxis.minutesPerDay, index: index)
+        }
+        let byId = Dictionary(rest.map { ($0.o.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var (blocks, overflows) = columnLayout(rest, axis: axis, maxColumns: maxColumns)
+        for i in blocks.indices {
+            guard let b = byId[blocks[i].id] else { continue }
+            blocks[i].insetByFrames = frameItems.filter { $0.s < b.shownEnd && b.s < $0.shownEnd }.count
+        }
+        return TimelineDay(blocks: blocks, frames: frames, overflows: overflows)
+    }
+
+    /// `s`, `e` und `shownEnd` in Minuten der Achse; `e` ohne Mindesthöhe.
+    fileprivate struct Item { var o: Occurrence; var s: Double; var e: Double; var shownEnd: Double }
+
+    fileprivate static func items(_ occurrences: [Occurrence], axis: WallClockAxis, minimumMinutes: Double) -> [Item] {
         let dayStart = axis.dayStart
         let dayEnd = axis.dayEnd
-        let full = WallClockAxis.minutesPerDay
-
-        // `s` und `shownEnd` in Minuten der Achse.
-        struct Item { var o: Occurrence; var s: Double; var shownEnd: Double }
-        let items = occurrences
+        return occurrences
             .filter { !$0.isAllDay && $0.start < dayEnd && ($0.end > dayStart || ($0.end <= $0.start && $0.start >= dayStart)) }
             .map { o -> Item in
                 let s = axis.minutes(at: max(o.start, dayStart))
                 let e = axis.minutes(at: min(max(o.end, o.start), dayEnd))
-                return Item(o: o, s: s, shownEnd: min(full, max(e, s + minimumMinutes)))
+                return Item(o: o, s: s, e: e, shownEnd: min(WallClockAxis.minutesPerDay, max(e, s + minimumMinutes)))
             }
             .sorted { a, b in
                 if a.s != b.s { return a.s < b.s }
                 if a.shownEnd != b.shownEnd { return a.shownEnd > b.shownEnd }
                 return CalendarQuery.displayOrder(a.o, b.o)
             }
+    }
+
+    /// Spaltenrechnung: Gruppen sich überschneidender Termine, je Gruppe
+    /// Spalten und Ausdehnung. Mit `maxColumns` wandern Blöcke ab der letzten
+    /// erlaubten Spalte in ein Überlauffeld.
+    fileprivate static func columnLayout(_ items: [Item], axis: WallClockAxis, maxColumns: Int?) -> (blocks: [TimelineBlock], overflows: [TimelineOverflow]) {
+        let dayStart = axis.dayStart
+        let dayEnd = axis.dayEnd
+        let full = WallClockAxis.minutesPerDay
 
         var result: [TimelineBlock] = []
+        var overflows: [TimelineOverflow] = []
         var cluster: [(Item, Int)] = []
         var clusterEnd = -Double.infinity
 
         func flush() {
             guard !cluster.isEmpty else { return }
-            let columns = (cluster.map(\.1).max() ?? 0) + 1
-            for (item, col) in cluster {
+            let groupColumns = (cluster.map(\.1).max() ?? 0) + 1
+            let collapses = maxColumns.map { groupColumns > $0 } ?? false
+            // Mit Überlauf bleiben die Spalten davor; das Feld sitzt in der letzten.
+            let visibleColumns = collapses ? maxColumns! - 1 : groupColumns
+            let columns = collapses ? maxColumns! : groupColumns
+            for (item, col) in cluster where col < visibleColumns {
                 // Nach rechts ausdehnen, solange keine Spalte daneben belegt ist.
                 var span = 1
-                while col + span < columns, !cluster.contains(where: { other in
+                while col + span < visibleColumns, !cluster.contains(where: { other in
                     other.1 == col + span && other.0.s < item.shownEnd && item.s < other.0.shownEnd
                 }) { span += 1 }
                 result.append(TimelineBlock(
@@ -222,6 +299,15 @@ public enum TimelineLayout {
                     height: (item.shownEnd - item.s) / full,
                     column: col, columns: columns, span: span,
                     continuesBefore: item.o.start < dayStart, continuesAfter: item.o.end > dayEnd
+                ))
+            }
+            if collapses {
+                let hidden = cluster.filter { $0.1 >= visibleColumns }.map(\.0)
+                let top = hidden.map(\.s).min() ?? 0
+                let bottom = hidden.map(\.shownEnd).max() ?? top
+                overflows.append(TimelineOverflow(
+                    hidden: hidden.map(\.o), top: top / full, height: (bottom - top) / full,
+                    column: visibleColumns, columns: columns, id: "+\(hidden[0].o.id)"
                 ))
             }
             cluster = []
@@ -236,7 +322,7 @@ public enum TimelineLayout {
             clusterEnd = max(clusterEnd, item.shownEnd)
         }
         flush()
-        return result
+        return (result, overflows)
     }
 
     /// Höhe der aktuellen Uhrzeit-Linie als Anteil der Spalte (Wanduhr-Achse),

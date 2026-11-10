@@ -318,3 +318,74 @@ struct LaneAndMonthTests {
         #expect(c[L.day(6, month: 11)] == nil)
     }
 }
+
+@Suite("Raster: Rahmen und Überlauf")
+struct FrameAndOverflowTests {
+    typealias L = LayoutFixtures
+
+    func day(_ occ: [Occurrence], _ d: Int = 12, month: Int = 10, maxColumns: Int = 3) -> TimelineDay {
+        TimelineLayout.day(occ, day: L.day(d, month: month), calendar: L.cal, maxColumns: maxColumns)
+    }
+
+    @Test func longEventBecomesFrame() {
+        let d = TimelineLayout.day([L.timed("tech", 12, 8, to: 17), L.timed("a", 12, 11, to: 12),
+            L.timed("b", 12, 14, to: 15), L.timed("c", 12, 9, 30, to: 9, 45)], day: L.day(12), calendar: L.cal, maxColumns: 3)
+        #expect(d.frames.map(\.occurrence.eventId) == ["tech"])
+        #expect(d.blocks.count == 3)
+        #expect(d.blocks.allSatisfy { $0.columns == 1 && $0.insetByFrames == 1 })
+    }
+
+    @Test func longEventAloneStaysBlock() {
+        let d = day([L.timed("a", 12, 9, to: 17)])
+        #expect(d.frames.isEmpty && d.blocks.count == 1)
+    }
+
+    @Test func twoLongEventsOnlyOverlappingEachOtherStayBlocks() {
+        let d = day([L.timed("a", 12, 8, to: 14), L.timed("b", 12, 10, to: 17)])
+        #expect(d.frames.isEmpty)
+        #expect(d.blocks.map(\.columns) == [2, 2])
+    }
+
+    @Test func overnightEventIsNoFrame() {
+        let occ = [L.timed("night", 12, 22, to: 6, endDay: 13), L.timed("x", 12, 23, to: 23, 30)]
+        #expect(day(occ, 12).frames.isEmpty)
+        #expect(day(occ, 13).frames.isEmpty)
+    }
+
+    @Test func twoFramesGetIndexes() {
+        let d = day([L.timed("a", 12, 8, to: 17), L.timed("b", 12, 9, to: 16), L.timed("c", 12, 12, to: 13)])
+        #expect(d.frames.map(\.index) == [0, 1])
+        #expect(d.blocks.count == 1 && d.blocks[0].insetByFrames == 2)
+    }
+
+    @Test func blockOutsideFrameIsNotInset() {
+        let d = day([L.timed("f", 12, 8, to: 12), L.timed("a", 12, 10, to: 11), L.timed("b", 12, 14, to: 15)])
+        #expect(d.frames.count == 1)
+        #expect(d.blocks.map(\.insetByFrames) == [1, 0])
+    }
+
+    @Test func overflowCollapsesExtraColumns() {
+        let d = day((0..<10).map { L.timed("e\($0)", 12, 10, to: 11) })
+        #expect(d.blocks.count == 2)
+        #expect(d.overflows.count == 1)
+        #expect(d.overflows[0].hidden.count == 8)
+        #expect(d.overflows[0].column == 2 && d.overflows[0].columns == 3)
+        #expect(d.blocks.allSatisfy { $0.columns == 3 && $0.column < 2 && $0.span == 1 })
+    }
+
+    @Test func shortBackToBackGoSideBySide() {
+        let d = day([L.timed("a", 12, 9, to: 9, 5), L.timed("b", 12, 9, 5, to: 9, 30)])
+        #expect(d.blocks.map(\.columns) == [2, 2])
+    }
+
+    @Test func emptyDay() {
+        let d = day([])
+        #expect(d.blocks.isEmpty && d.frames.isEmpty && d.overflows.isEmpty)
+    }
+
+    @Test func dstDayKeepsPositiveHeights() {
+        let d = day([L.timed("a", 25, 1, 30, to: 3, 30), L.timed("f", 25, 0, to: 6)], 25)
+        #expect(d.frames.count == 1)
+        #expect((d.blocks.map(\.height) + d.frames.map(\.height)).allSatisfy { $0 > 0 })
+    }
+}

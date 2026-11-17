@@ -5,6 +5,7 @@
 //! | `GET /api/me` | every principal of `/api` |
 //! | `GET, POST /api/tokens`, `DELETE /api/tokens/{id}` | browser session or device |
 //! | `GET /api/devices`, `PATCH`/`DELETE /api/devices/{id}` | browser session or device |
+//! | `PUT`/`DELETE /api/devices/current/push` (LIC-27) | device |
 //! | `GET /api/oauth/clients`, `DELETE /api/oauth/clients/{id}` | browser session or device |
 //! | accounts, calendars, calendar sets | see [`super::accounts`] |
 //! | `GET /api/occurrences` | see [`super::events`] |
@@ -18,16 +19,17 @@
 
 use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::StatusCode;
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 
 use super::extract::{parse_uuid, ApiJson};
-use crate::app::{App, CreatedToken, TokenInfo};
+use crate::app::{now_ms, App, CreatedToken, TokenInfo};
 use crate::auth::{Principal, PrincipalKind};
 use crate::error::{AppError, AppResult};
-use crate::oauth;
+use crate::{db, oauth};
+use uuid::Uuid;
 
 /// Body limit of `/api` requests.
 pub const API_BODY_LIMIT: usize = 64 * 1024;
@@ -45,6 +47,10 @@ pub fn routes() -> Router<App> {
         .route("/tokens/{id}", delete(revoke_token))
         .route("/devices", get(list_devices))
         .route("/devices/{id}", delete(revoke_device).patch(rename_device))
+        .route(
+            "/devices/current/push",
+            put(register_push).delete(unregister_push),
+        )
         .route("/oauth/clients", get(list_oauth_clients))
         .route("/oauth/clients/{id}", delete(revoke_oauth_client))
         .merge(super::accounts::routes())
@@ -166,6 +172,58 @@ async fn revoke_device(
     require_credential_manager(&principal)?;
     let id = parse_uuid(&id)?;
     oauth::revoke_device(&app, principal.user_id, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PushBody {
+    apns_token: String,
+    environment: String,
+}
+
+/// The device making the request; push registration is only for devices.
+fn current_device(principal: &Principal) -> AppResult<Uuid> {
+    match principal.kind {
+        PrincipalKind::Device { id, .. } => Ok(id),
+        _ => Err(AppError::Forbidden(
+            "Push-Nachrichten meldet nur ein Gerät der Lichtung-App an".into(),
+        )),
+    }
+}
+
+/// Registers the APNs token of this device (LIC-27).
+async fn register_push(
+    State(app): State<App>,
+    principal: Principal,
+    ApiJson(body): ApiJson<PushBody>,
+) -> AppResult<StatusCode> {
+    let device = current_device(&principal)?;
+    let token = crate::apns::validate_registration(&body.apns_token, &body.environment)
+        .map_err(AppError::bad_request)?;
+    let environment = body.environment;
+    let stored = app
+        .with_writer(move |conn| {
+            Ok(db::set_device_push(
+                conn,
+                device,
+                &token,
+                &environment,
+                now_ms(),
+            )?)
+        })
+        .await?;
+    if !stored {
+        return Err(AppError::Unauthorized);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Turns silent pushes off for this device.
+async fn unregister_push(State(app): State<App>, principal: Principal) -> AppResult<StatusCode> {
+    let device = current_device(&principal)?;
+    app.with_writer(move |conn| Ok(db::clear_device_push(conn, device, None, now_ms())?))
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

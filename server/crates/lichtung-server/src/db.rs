@@ -24,6 +24,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0009_placeholder_attempts.sql"),
     include_str!("../migrations/0010_opening_listed.sql"),
     include_str!("../migrations/0011_blockers.sql"),
+    include_str!("../migrations/0012_device_push.sql"),
 ];
 
 /// The schema version this binary expects.
@@ -780,6 +781,103 @@ pub fn touch_device(conn: &Connection, id: Uuid, now: i64) -> anyhow::Result<()>
         params![id.to_string(), now],
     )?;
     Ok(())
+}
+
+// ----- push (APNs, LIC-27) -------------------------------------------------------
+
+/// A device that wants silent push notifications.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushTarget {
+    pub device_id: Uuid,
+    /// APNs device token (lowercase hex).
+    pub token: String,
+    /// `sandbox` or `production`.
+    pub environment: String,
+}
+
+/// Stores the APNs token of an active device. The token is taken away from
+/// any other device first (one phone, several logins). Returns whether the
+/// device exists and is active.
+pub fn set_device_push(
+    conn: &Connection,
+    device_id: Uuid,
+    token: &str,
+    environment: &str,
+    now: i64,
+) -> anyhow::Result<bool> {
+    let id = device_id.to_string();
+    conn.execute(
+        "UPDATE devices SET apns_token = NULL, apns_environment = NULL, apns_updated_at = ?3
+         WHERE apns_token = ?1 AND id <> ?2",
+        params![token, id, now],
+    )?;
+    let n = conn.execute(
+        "UPDATE devices SET apns_token = ?2, apns_environment = ?3, apns_updated_at = ?4
+         WHERE id = ?1 AND revoked_at IS NULL",
+        params![id, token, environment, now],
+    )?;
+    Ok(n > 0)
+}
+
+/// Removes the APNs token of a device (the app turned push off, or APNs
+/// rejected the token). With `only_token`, only if the device still has
+/// that token (a newer registration wins). Returns whether one was removed.
+pub fn clear_device_push(
+    conn: &Connection,
+    device_id: Uuid,
+    only_token: Option<&str>,
+    now: i64,
+) -> anyhow::Result<bool> {
+    let n = conn.execute(
+        "UPDATE devices SET apns_token = NULL, apns_environment = NULL, apns_updated_at = ?3
+         WHERE id = ?1 AND apns_token IS NOT NULL AND (?2 IS NULL OR apns_token = ?2)",
+        params![device_id.to_string(), only_token, now],
+    )?;
+    Ok(n > 0)
+}
+
+/// Corrects the environment of a token (APNs knew it in the other one).
+pub fn set_device_push_environment(
+    conn: &Connection,
+    device_id: Uuid,
+    token: &str,
+    environment: &str,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE devices SET apns_environment = ?3 WHERE id = ?1 AND apns_token = ?2",
+        params![device_id.to_string(), token, environment],
+    )?;
+    Ok(())
+}
+
+/// Active devices with an APNs token, oldest first.
+pub fn push_targets(conn: &Connection) -> anyhow::Result<Vec<PushTarget>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, apns_token, apns_environment FROM devices
+         WHERE revoked_at IS NULL AND apns_token IS NOT NULL AND apns_environment IS NOT NULL
+         ORDER BY created_at, rowid",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(PushTarget {
+            device_id: parse_uuid_col(row, 0)?,
+            token: row.get(1)?,
+            environment: row.get(2)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Highest change value (`seq`) of an event or an event deletion: grows
+/// whenever an event is created, changed or removed, and only then (unlike
+/// the global cursor, which every sync run of an account moves).
+pub fn event_change_seq(conn: &Connection) -> anyhow::Result<i64> {
+    Ok(conn.query_row(
+        "SELECT MAX(
+             (SELECT COALESCE(MAX(seq), 0) FROM events),
+             (SELECT COALESCE(MAX(seq), 0) FROM tombstones WHERE type = 'event'))",
+        [],
+        |r| r.get(0),
+    )?)
 }
 
 // ----- backup ---------------------------------------------------------------------

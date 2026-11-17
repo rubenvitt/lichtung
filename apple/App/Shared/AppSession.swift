@@ -50,6 +50,7 @@ final class AppSession {
     @ObservationIgnored private var meTask: Task<Void, Never>?
     @ObservationIgnored private let meFetch: SharedFetch<ServerInfo>
     @ObservationIgnored private var isActive = false
+    @ObservationIgnored private var pushTask: Task<Void, Never>?
 
     private enum Key {
         static let mode = "session.mode"
@@ -333,11 +334,39 @@ final class AppSession {
     private func startLive() {
         guard stage == .server, !needsSignIn, liveTask == nil, let api = syncAPI else { return }
         refreshMe()
+        requestPushToken()
         let engine = model.engine
         liveTask = Task { [weak self] in
             let stop = await LiveSync.run(engine: engine, connect: { SyncEventStream(api: api).cursors() })
             if stop == .unauthorized { self?.liveSyncLostAuthorization() }
         }
+    }
+
+    // MARK: Stille Push-Nachrichten (LIC-27)
+
+    /// Bittet iOS um den APNs-Token; er kommt über den App-Delegate zurück
+    /// (`pushTokenReceived`). Bei jedem Aktivwerden, wie Apple es empfiehlt:
+    /// Der Token kann sich ändern, und der Server vergisst ihn, wenn APNs ihn
+    /// ablehnt. Der Mac bekommt keine Push-Nachrichten (läuft meist offen mit SSE).
+    private func requestPushToken() {
+        #if os(iOS)
+        PushBridge.shared.requestToken()
+        #endif
+    }
+
+    /// Token von APNs: beim Server anmelden. Scheitert das (alter Server,
+    /// offline), bleibt alles wie ohne Push; beim nächsten Aktivwerden erneut.
+    func pushTokenReceived(_ registration: PushRegistration) {
+        guard stage == .server, !needsSignIn, let management else { return }
+        pushTask?.cancel()
+        pushTask = Task { try? await management.registerPush(registration) }
+    }
+
+    /// Stille Push-Nachricht: nachziehen und Erinnerungen einplanen. `false`,
+    /// wenn nichts abgeglichen werden konnte.
+    func handleSilentPush() async -> Bool {
+        guard stage == .server, !needsSignIn else { return false }
+        return await model.syncForPush()
     }
 
     private func liveSyncLostAuthorization() {

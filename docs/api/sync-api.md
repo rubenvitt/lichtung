@@ -275,7 +275,7 @@ data: 1837
 
 - Sofort nach dem Verbinden kommt der aktuelle Cursor, danach nach jeder Änderung. Ist er größer als der gespeicherte, zieht der Client per Pull nach. Mehrere Benachrichtigungen dürfen zu einer zusammenfallen.
 - Kommentarzeilen (`: …`) halten die Verbindung offen und werden ignoriert.
-- Bei Verbindungsabbruch mit Backoff neu verbinden (z. B. 1 s, 2 s, 4 s … bis 60 s). SSE ist nur für die offene App gedacht; im Hintergrund weckt künftig eine stille Push-Nachricht (APNs) die App für einen Pull (siehe Abschnitt 8).
+- Bei Verbindungsabbruch mit Backoff neu verbinden (z. B. 1 s, 2 s, 4 s … bis 60 s). SSE ist nur für die offene App gedacht; im Hintergrund weckt eine stille Push-Nachricht (APNs) die App für einen Pull (*LIC-27*, Abschnitt 7).
 - Weitere Ereignistypen kann der Server ergänzen; unbekannte `event:`-Namen ignoriert der Client.
 - *Ergänzung (LIC-11):* Keep-alive als Kommentarzeile etwa alle 15 s, Antwort-Header `x-accel-buffering: no`. Beim Herunterfahren beendet der Server den Stream; der Client verbindet sich dann wie bei einem Abbruch neu. Erlaubt für jedes Token für `/api`.
 
@@ -402,6 +402,7 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 | `GET /api/occurrences?from=<datum>&to=<datum>&calendar_ids=cal_01,cal_02` | Komfort: vom Server expandierte Vorkommen im Zeitraum (`from` inklusiv, `to` exklusiv, ISO-Datum oder RFC 3339). Nicht für den Cache gedacht. |
 | `GET /api/devices`, `DELETE /api/devices/{id}` | angemeldete Geräte, einzeln abmelden |
 | *Ergänzung (LIC-46):* `PATCH /api/devices/{id}` | Gerät umbenennen: `{"name": "…"}` |
+| *Ergänzung (LIC-27):* `PUT`/`DELETE /api/devices/current/push` | stille Push-Nachrichten für dieses Gerät an- bzw. abmelden (siehe unten) |
 | *Ergänzung (LIC-7):* `GET /api/calendars`, `GET /api/calendar-sets` | Komfort: alle Kalender bzw. Sets wie im Pull (nach `position` sortiert) |
 | `GET /api/tokens`, `POST /api/tokens`, `DELETE /api/tokens/{id}` | API-Tokens (`lt_…`) für MCP-Clients; das Token steht nur in der Antwort auf `POST` |
 | *Ergänzung (LIC-31):* `GET`/`POST /api/openings`, `GET`/`PATCH`/`DELETE /api/openings/{id}` | Buchungslinks (Einmal-Links und Vorlagen), siehe [`openings.md`](openings.md) |
@@ -423,6 +424,15 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
   `last_used_at` ist die letzte Nutzung des Tokens (auf etwa eine Minute genau, `null` vor der ersten), `current` markiert das Gerät, das fragt. Widerrufene Geräte fehlen.
 - `PATCH /api/devices/{id}` mit `{"name": "…"}` benennt ein aktives Gerät um und antwortet mit dem Gerät wie in der Liste. Der Name wird getrimmt, darf nicht leer sein, höchstens 100 Zeichen haben und keine Steuerzeichen enthalten (sonst `400 invalid_request`, ebenso für andere Felder); ein unbekanntes oder widerrufenes Gerät ergibt `404`. Der Client des Geräts heißt danach genauso (Abschnitt 2). Konflikte zeigen den neuen Namen erst für neue Konflikte (`origin: app:<Gerätename>`).
 - **Wer darf:** Geräte und Tokens verwalten (`/api/devices`, `/api/tokens`) nur Geräte der App und Browser-Sitzungen (`403 forbidden` für API-Tokens).
+
+*Ergänzungen (LIC-27) zu stillen Push-Nachrichten:*
+
+- `PUT /api/devices/current/push` mit `{"apns_token": "…", "environment": "sandbox"|"production"}` meldet das anfragende Gerät für stille Push-Nachrichten an; Antwort `204`. `apns_token` ist der Device-Token von APNs als Hex (64 bis 200 Zeichen, der Server speichert Kleinbuchstaben), `environment` die APNs-Umgebung des Builds (`sandbox` aus Xcode, `production` aus TestFlight). Ein fehlerhaftes oder fehlendes Feld und unbekannte Felder ergeben `400 invalid_request`. Erneutes Anmelden ersetzt Token und Umgebung; hat ein anderes Gerät denselben Token (neue Anmeldung auf demselben iPhone), verliert es ihn.
+- `DELETE /api/devices/current/push` meldet ab; Antwort `204`, auch wenn nichts angemeldet war.
+- **Wer darf:** nur Geräte-Tokens (`ld_…`), sonst `403 forbidden`.
+- **Was kommt an:** Ändern sich Termine (angelegt, geändert, gelöscht, auch über MCP oder beim Anbieter), schickt der Server allen angemeldeten Geräten eine stille Push-Nachricht (auch bei offener App: Ein SSE-Stream kann auf dem Server noch offen aussehen, wenn das Gerät längst kein Netz mehr hat): `{"aps": {"content-available": 1}}`, `apns-push-type: background`, Priorität 5, `apns-collapse-id: lichtung-sync`. Die App zieht daraufhin per Pull nach und plant ihre Erinnerungen neu. Änderungen, die keine Termine betreffen (Status eines Kontos nach jedem Abgleich), lösen nichts aus. Mehrere Änderungen kurz hintereinander ergeben eine Nachricht (etwa 10 s Wartezeit, höchstens eine Runde pro Minute); iOS darf stille Nachrichten zusätzlich drosseln.
+- **Abgelehnte Tokens:** Kennt APNs den Token in der gemeldeten Umgebung nicht (`BadDeviceToken`), versucht der Server die andere und merkt sich die, die funktioniert. Meldet APNs den Token als ungültig (`410`, `BadDeviceToken` in beiden Umgebungen, falsches Topic), vergisst der Server ihn; die App meldet ihn beim nächsten Aktivwerden neu an.
+- Ohne APNs-Schlüssel auf dem Server ([`../betrieb.md`](../betrieb.md)) nimmt der Server Anmeldungen trotzdem an und schickt nichts.
 
 *Ergänzungen (LIC-7) zu den Konten-Aufrufen:*
 
@@ -467,7 +477,7 @@ Diese Aufrufe gehen nicht über die Outbox. Antworten enthalten das geänderte O
 
 ## 8. Geplant (noch nicht verbindlich)
 
-- `PUT /api/devices/current/push` mit `{"apns_token": "…", "environment": "sandbox"|"production"}`: stille Push-Nachrichten, damit Erinnerungen auch für Termine kommen, die die App noch nicht gesehen hat (Spec Abschnitt 5). Kommt mit dem Erinnerungs-Teil von E2.
+- ~~`PUT /api/devices/current/push` mit `{"apns_token": "…", "environment": "sandbox"|"production"}`: stille Push-Nachrichten, damit Erinnerungen auch für Termine kommen, die die App noch nicht gesehen hat (Spec Abschnitt 5).~~ Umgesetzt (LIC-27), siehe Abschnitt 7.
 - ~~Openings (E3) bekommen eigene Objekttypen im Pull.~~ Umgesetzt (LIC-31): Typ `opening` im Pull, Verwaltung über `/api/openings`, siehe [`openings.md`](openings.md).
 
 ## 9. Fehlercodes
@@ -508,3 +518,4 @@ Zusätzliche `code`s in Mutations-Ergebnissen (`rejected`/`retry`): `calendar_re
 | 2026-10-27 | Ergänzung aus LIC-33 und LIC-35 (keine bestehende Form geändert): Feld `bookings` am Objekt `opening` (Buchungen mit Name, E-Mail-Adresse und Notiz des Gastes, neueste 50), ID-Präfix `bkg_`; eine Buchung einer Vorlage und das Löschen alter Buchungen erscheinen als `upsert` des Links im Pull ([`openings.md`](openings.md), Abschnitte 2, 6, 8) |
 | 2026-11-08 | Ergänzung aus LIC-62 (keine bestehende Form geändert, Verhalten seit LIC-57): Deutung von `COUNT` und `UNTIL` in `recurrence.rrule` bei `update_event` mit `scope` `all` oder `this_and_following` (Abschnitt 6) |
 | 2026-11-10 | Ergänzung aus LIC-75 (keine bestehende Form geändert): Blocker-Regeln mit eigenem Vertrag [`blockers.md`](blockers.md); `GET`/`POST /api/blocker-rules`, `GET`/`PATCH`/`DELETE /api/blocker-rules/{id}`, ID-Präfix `blr_`; Feld `blocker_of` am Event (nur an Blockern des Servers) (Abschnitte 3, 7) |
+| 2026-11-17 | Ergänzung aus LIC-27 (keine bestehende Form geändert): `PUT`/`DELETE /api/devices/current/push` mit `apns_token` und `environment`, nur für Geräte-Tokens; stille Push-Nachrichten an angemeldete Geräte nach Änderungen von Terminen (Abschnitte 5, 7, 8) |

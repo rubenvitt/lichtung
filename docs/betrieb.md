@@ -33,6 +33,11 @@ Ohne Anmeldung erreichbar sind nur `/` (die öffentliche Startseite mit den fest
 | `LICHTUNG_BACKUP_HOUR` | Stunde des nächtlichen Backups (0–23, Zeitzone `TZ`) | `3` |
 | `LICHTUNG_DEV_AUTH` | `true` = Anmeldung ohne OIDC, nur über localhost. **Nie in Produktion** | `false` |
 | `LICHTUNG_DEV_AUTH_ALLOW_REMOTE` | `true` = Dev-Auth auch mit nicht lokaler `LICHTUNG_BIND` (nur für einen lokalen Container mit `-p 127.0.0.1:…`) | `false` |
+| `LICHTUNG_APNS_KEY_FILE` | Pfad zum APNs-Schlüssel (`AuthKey_….p8`) für stille Push-Nachrichten an die iOS-App (siehe [Push-Nachrichten](#push-nachrichten-apns)). Ohne: keine Push-Nachrichten | – |
+| `LICHTUNG_APNS_KEY` | Alternative zur Datei: Inhalt des `.p8`-Schlüssels, Zeilenumbrüche als `\n` | – |
+| `LICHTUNG_APNS_KEY_ID` | Key-ID des Schlüssels (10 Zeichen); Pflicht mit Schlüssel | – |
+| `LICHTUNG_APNS_TEAM_ID` | Team-ID des Developer-Accounts (10 Zeichen); Pflicht mit Schlüssel | – |
+| `LICHTUNG_APNS_TOPIC` | Bundle-ID der iOS-App | `dev.rubeen.lichtung` |
 | `TZ` | Zeitzone für die Backup-Stunde und für floating/ganztägige Termine bei Server-Abfragen | Image: `Europe/Berlin` |
 | `RUST_LOG` | Log-Filter (tracing) | `info,tower_http=info` |
 
@@ -153,6 +158,25 @@ Fehler kommen als `{"error":{"code":"…","message":"…"}}` mit deutscher Meldu
 - **Client-Adresse und `X-Forwarded-For`:** Kommt die Verbindung von einer privaten, Link-Local- oder Loopback-Adresse (auch als `::ffff:…` bei einem Listener auf `[::]`), vertraut der Server dem letzten `X-Forwarded-For`-Eintrag ohne weitere Prüfung; sonst zählt die Gegenstelle. Das gilt für die Buchungsseite und die OAuth-Registrierung. Deshalb darf der Server **nur über den Reverse Proxy erreichbar** sein: keinen Port des Containers veröffentlichen, kein anderer Dienst im selben Docker-Netz, der Anfragen ungeprüft weiterreicht. Der Proxy muss `X-Forwarded-For` selbst setzen oder die echte Gegenstelle anhängen (Traefik hängt an, Standard); ein Proxy, der den Header des Clients unverändert durchreicht, ließe jeden Gast seine Adresse frei wählen und damit die Grenzen umgehen.
 - **Abbau der Platzhalter nach einer Buchung:** Der Server markiert den Link unter der Buchungssperre als gebucht und löscht die Platzhalter erst danach beim Anbieter. Scheitert das Markieren auch beim zweiten Versuch, steht `BOOKING WRITTEN, BUT THE LINK WAS NOT MARKED BOOKED` im Log: Der Termin und die Einladung sind dann da, der Einmal-Link aber noch buchbar; in dem Fall den Link in der App löschen.
 - **Platzhalter:** Für Vorschläge eines Einmal-Links legt der Server Termine „Reserviert: …“ im Zielkalender an (`origin: server`). Beim Start und alle 15 Minuten räumt er Platzhalter vergangener Vorschläge weg und wiederholt Löschungen, die der Anbieter vorher nicht angenommen hat (Log: `placeholders left for the next cleanup`). Platzhalter, die der Anbieter geschrieben hat, obwohl das Anlegen scheiterte, findet die Aufräumrunde nach dem nächsten Abgleich über ihre UID und entfernt sie ebenfalls (Log: `placeholders of failed creations found`); dafür hat die Datenbank ab Schema-Version 9 die Tabelle `placeholder_attempts`.
+
+## Push-Nachrichten (APNs)
+
+Erinnerungen stellt die iPhone-App als lokale Mitteilungen aus ihrem Cache ein (LIC-68). Damit auch Termine erinnern, die die App noch nicht gesehen hat (morgens über Claude angelegt, beim Anbieter eingetragen), weckt der Server sie nach jeder Änderung von Terminen mit einer stillen Push-Nachricht; sie zieht nach und plant neu (LIC-27, Vertrag [`api/sync-api.md`](api/sync-api.md), Abschnitt 7). Ohne APNs-Schlüssel läuft alles wie vorher.
+
+Einrichten (einmalig):
+
+1. **Schlüssel anlegen:** [developer.apple.com](https://developer.apple.com/account/resources/authkeys/list) → Certificates, Identifiers & Profiles → Keys → „+“, Name z. B. „Lichtung APNs“, Haken bei **Apple Push Notifications service (APNs)**, Umgebung **Sandbox & Production**. Die `.p8`-Datei lässt sich nur einmal herunterladen: in den Passwortmanager legen. Die **Key-ID** steht beim Schlüssel, die **Team-ID** oben rechts im Account (dieselbe wie `DEVELOPMENT_TEAM` in `apple/project.yml`).
+2. **App-ID:** Unter Identifiers bei `dev.rubeen.lichtung` die Capability **Push Notifications** einschalten (falls die automatische Signierung sie nicht schon gesetzt hat). Danach baut TestFlight die App mit Push.
+3. **Server:** Die Datei neben `compose.yaml` ablegen (`secrets/AuthKey_<KeyID>.p8`, lesbar für uid 10001: `sudo chown 10001:10001 secrets/AuthKey_*.p8 && sudo chmod 400 secrets/AuthKey_*.p8`), in `compose.yaml` das Volume `./secrets:/secrets:ro` eintragen und in `.env` setzen:
+   ```
+   LICHTUNG_APNS_KEY_FILE=/secrets/AuthKey_<KeyID>.p8
+   LICHTUNG_APNS_KEY_ID=<KeyID>
+   LICHTUNG_APNS_TEAM_ID=<TeamID>
+   ```
+   Neu starten. Ein unvollständiger oder kaputter Schlüssel verhindert den Start mit einer Meldung; im Log steht sonst `APNs notifier running`.
+4. **Prüfen:** Die App einmal öffnen (sie meldet ihren Token an), schließen, dann z. B. über Claude einen Termin mit Erinnerung in ein paar Minuten anlegen. Die Erinnerung kommt, ohne dass die App offen war. Log bei Problemen: `APNs rejected the provider token` (Key-ID, Team-ID oder Schlüssel falsch), `APNs rejected the device token` (App neu installiert; meldet sich beim nächsten Öffnen neu an), `silent push failed` (APNs nicht erreichbar oder gedrosselt, nächste Änderung versucht es wieder).
+
+Der Server spricht HTTP/2 mit `api.push.apple.com` (Builds aus TestFlight) bzw. `api.sandbox.push.apple.com` (Builds aus Xcode); ausgehend muss Port 443 dorthin offen sein. Stille Nachrichten drosselt iOS nach eigenem Ermessen (Akku, Stromsparmodus, App vom Nutzer beendet); sie sind eine Verbesserung, keine Garantie. Die Mac-App bekommt keine Push-Nachrichten, sie läuft meist offen mit Live-Abgleich.
 
 ## Aufbewahrung
 

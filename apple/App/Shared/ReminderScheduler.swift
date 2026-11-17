@@ -7,8 +7,8 @@ import UserNotifications
 ///
 /// Welche Erinnerungen fällig sind, rechnet der Kern aus (`ReminderPlanner`);
 /// hier wird nur die Differenz zu den ausstehenden Benachrichtigungen
-/// eingeplant. Ohne APNs: Termine, die die App nie gesehen hat, erinnern erst,
-/// wenn sie einmal geöffnet war (LIC-27).
+/// eingeplant. Termine, die die App nie gesehen hat, kommen über eine stille
+/// Push-Nachricht des Servers in den Stand (LIC-27, `updateNow`).
 @MainActor
 @Observable
 final class ReminderScheduler {
@@ -72,6 +72,18 @@ final class ReminderScheduler {
         }
     }
 
+    /// Sofort neu einplanen und warten, bis es erledigt ist (stille
+    /// Push-Nachricht im Hintergrund, LIC-27). Fragt nicht nach der
+    /// Erlaubnis: Im Hintergrund kann niemand antworten.
+    func updateNow(_ query: CalendarQuery, merge: MergeRules) async {
+        latest = query
+        latestMerge = merge
+        generation += 1
+        pending?.cancel()
+        pending = nil
+        await reschedule(mayAsk: false)
+    }
+
     /// Alles entfernen (Abmelden, Demo, Schalter aus).
     func removeAll() {
         pending?.cancel()
@@ -82,7 +94,7 @@ final class ReminderScheduler {
         Task { await self.apply(wanted: [], ifCurrent: token) }
     }
 
-    private func reschedule() async {
+    private func reschedule(mayAsk: Bool = true) async {
         guard let query = latest else { return }
         let token = generation
         guard Self.isEnabled else {
@@ -96,7 +108,12 @@ final class ReminderScheduler {
             ReminderPlanner.plan(query, now: now, calendar: calendar, merge: merge)
         }.value
         if !wanted.isEmpty {
-            let allowed = await ensurePermission()
+            let allowed: Bool
+            if mayAsk {
+                allowed = await ensurePermission()
+            } else {
+                allowed = await isAllowed()
+            }
             guard allowed else { return }
         }
         await apply(wanted: wanted, ifCurrent: token)
@@ -115,6 +132,14 @@ final class ReminderScheduler {
         default:
             permission = .allowed
             return true
+        }
+    }
+
+    /// Erlaubt, ohne zu fragen?
+    private func isAllowed() async -> Bool {
+        switch await Self.authorizationStatus() {
+        case .notDetermined, .denied: false
+        default: true
         }
     }
 

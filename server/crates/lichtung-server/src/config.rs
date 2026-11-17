@@ -84,6 +84,125 @@ pub struct Config {
     /// Limits of the public booking page (LIC-34). Not configurable
     /// through the environment; tests lower them.
     pub booking_limits: BookingLimits,
+    /// Silent push notifications to the iOS app (LIC-27); `None` = off.
+    pub apns: Option<ApnsConfig>,
+}
+
+/// APNs production endpoint.
+pub const APNS_PRODUCTION_URL: &str = "https://api.push.apple.com";
+/// APNs sandbox endpoint (development builds from Xcode).
+pub const APNS_SANDBOX_URL: &str = "https://api.sandbox.push.apple.com";
+/// Bundle ID of the iOS app, the default APNs topic.
+pub const DEFAULT_APNS_TOPIC: &str = "dev.rubeen.lichtung";
+
+/// Silent push notifications through APNs (LIC-27), token-based
+/// authentication with a `.p8` key from the Apple Developer account.
+#[derive(Clone)]
+pub struct ApnsConfig {
+    /// The `.p8` key (PKCS#8 PEM, P-256).
+    pub key_pem: String,
+    /// Key ID of the `.p8` key (10 characters).
+    pub key_id: String,
+    /// Team ID of the developer account (10 characters).
+    pub team_id: String,
+    /// `apns-topic`: bundle ID of the app.
+    pub topic: String,
+    /// Endpoints; not configurable through the environment, tests point
+    /// them at a mock server.
+    pub production_url: Url,
+    pub sandbox_url: Url,
+    /// Waits this long after an event changed before pushing, so a sync
+    /// round or a burst of writes becomes one push.
+    pub debounce: std::time::Duration,
+    /// At least this long between two push rounds (APNs throttles
+    /// background pushes).
+    pub min_interval: std::time::Duration,
+}
+
+impl ApnsConfig {
+    /// A configuration with the default endpoints and timings.
+    pub fn new(key_pem: String, key_id: String, team_id: String, topic: String) -> Self {
+        Self {
+            key_pem,
+            key_id,
+            team_id,
+            topic,
+            production_url: Url::parse(APNS_PRODUCTION_URL).expect("static URL is valid"),
+            sandbox_url: Url::parse(APNS_SANDBOX_URL).expect("static URL is valid"),
+            debounce: std::time::Duration::from_secs(10),
+            min_interval: std::time::Duration::from_secs(60),
+        }
+    }
+}
+
+impl fmt::Debug for ApnsConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApnsConfig")
+            .field("key_pem", &"***")
+            .field("key_id", &self.key_id)
+            .field("team_id", &self.team_id)
+            .field("topic", &self.topic)
+            .field("production_url", &self.production_url.as_str())
+            .field("sandbox_url", &self.sandbox_url.as_str())
+            .field("debounce", &self.debounce)
+            .field("min_interval", &self.min_interval)
+            .finish()
+    }
+}
+
+/// Reads the APNs settings: `LICHTUNG_APNS_KEY_FILE` (path of the `.p8`
+/// file) or `LICHTUNG_APNS_KEY` (its content, `\n` allowed for line
+/// breaks), `LICHTUNG_APNS_KEY_ID`, `LICHTUNG_APNS_TEAM_ID`, optional
+/// `LICHTUNG_APNS_TOPIC`. All or nothing; nothing set = push off.
+fn parse_apns(get: &impl Fn(&str) -> Option<String>) -> Result<Option<ApnsConfig>, ConfigError> {
+    let file = get("LICHTUNG_APNS_KEY_FILE");
+    let inline = get("LICHTUNG_APNS_KEY");
+    let key_id = get("LICHTUNG_APNS_KEY_ID");
+    let team_id = get("LICHTUNG_APNS_TEAM_ID");
+    let topic = get("LICHTUNG_APNS_TOPIC");
+    if file.is_none() && inline.is_none() && key_id.is_none() && team_id.is_none() {
+        if topic.is_some() {
+            return err("LICHTUNG_APNS_TOPIC braucht LICHTUNG_APNS_KEY_FILE, LICHTUNG_APNS_KEY_ID und LICHTUNG_APNS_TEAM_ID");
+        }
+        return Ok(None);
+    }
+    let key_pem = match (file, inline) {
+        (Some(_), Some(_)) => {
+            return err("LICHTUNG_APNS_KEY_FILE und LICHTUNG_APNS_KEY schließen sich aus");
+        }
+        (Some(path), None) => std::fs::read_to_string(&path).map_err(|e| {
+            ConfigError(format!(
+                "LICHTUNG_APNS_KEY_FILE ({path}) lässt sich nicht lesen: {e}"
+            ))
+        })?,
+        (None, Some(inline)) => inline.replace("\\n", "\n"),
+        (None, None) => {
+            return err(
+                "LICHTUNG_APNS_KEY_FILE (oder LICHTUNG_APNS_KEY) fehlt für die Push-Nachrichten",
+            );
+        }
+    };
+    let id = |name: &str, value: Option<String>| -> Result<String, ConfigError> {
+        match value {
+            Some(v) if v.len() == 10 && v.bytes().all(|b| b.is_ascii_alphanumeric()) => Ok(v),
+            Some(v) => err(format!("{name} muss 10 Buchstaben oder Ziffern haben: {v}")),
+            None => err(format!("{name} fehlt für die Push-Nachrichten")),
+        }
+    };
+    let key_id = id("LICHTUNG_APNS_KEY_ID", key_id)?;
+    let team_id = id("LICHTUNG_APNS_TEAM_ID", team_id)?;
+    let config = ApnsConfig::new(
+        key_pem,
+        key_id,
+        team_id,
+        topic.unwrap_or_else(|| DEFAULT_APNS_TOPIC.to_owned()),
+    );
+    crate::apns::check_key(&config).map_err(|e| {
+        ConfigError(format!(
+            "Der APNs-Schlüssel ist kein .p8-Schlüssel (P-256, PKCS#8): {e}"
+        ))
+    })?;
+    Ok(Some(config))
 }
 
 /// Limits of the public booking page `/o/<token>` (LIC-34), counted in
@@ -152,6 +271,7 @@ impl fmt::Debug for Config {
             .field("fastmail_url", &self.fastmail_url.as_str())
             .field("icloud_url", &self.icloud_url.as_str())
             .field("booking_limits", &self.booking_limits)
+            .field("apns", &self.apns)
             .finish()
     }
 }
@@ -351,6 +471,7 @@ impl Config {
             fastmail_url: default_fastmail_url(),
             icloud_url: default_icloud_url(),
             booking_limits: BookingLimits::default(),
+            apns: parse_apns(&get)?,
         })
     }
 
@@ -370,6 +491,7 @@ impl Config {
             fastmail_url: default_fastmail_url(),
             icloud_url: default_icloud_url(),
             booking_limits: BookingLimits::default(),
+            apns: None,
         }
     }
 
@@ -620,5 +742,93 @@ mod tests {
         let dev: HashMap<&str, &str> = [("LICHTUNG_DEV_AUTH", "true")].into();
         let bind = Config::bind_from_lookup(|k| dev.get(k).map(|v| v.to_string())).unwrap();
         assert_eq!(bind.to_string(), "127.0.0.1:8080");
+    }
+
+    /// An invented `.p8` key (P-256, PKCS#8 PEM).
+    fn p8_key() -> String {
+        let rng = ring::rand::SystemRandom::new();
+        let der = ring::signature::EcdsaKeyPair::generate_pkcs8(
+            &ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+            &rng,
+        )
+        .unwrap();
+        let b64 = base64::engine::general_purpose::STANDARD.encode(der.as_ref());
+        format!("-----BEGIN PRIVATE KEY-----\n{b64}\n-----END PRIVATE KEY-----\n")
+    }
+
+    #[test]
+    fn apns_is_off_without_settings_and_complete_with_them() {
+        assert!(cfg_key(&[]).unwrap().apns.is_none());
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("AuthKey_ABC123DEFG.p8");
+        std::fs::write(&file, p8_key()).unwrap();
+        let file = file.to_str().unwrap();
+        let apns = cfg_key(&[
+            ("LICHTUNG_APNS_KEY_FILE", file),
+            ("LICHTUNG_APNS_KEY_ID", "ABC123DEFG"),
+            ("LICHTUNG_APNS_TEAM_ID", "TEAM456XYZ"),
+        ])
+        .unwrap()
+        .apns
+        .unwrap();
+        assert_eq!(apns.key_id, "ABC123DEFG");
+        assert_eq!(apns.team_id, "TEAM456XYZ");
+        assert_eq!(apns.topic, DEFAULT_APNS_TOPIC);
+        assert_eq!(apns.production_url.as_str(), "https://api.push.apple.com/");
+        assert!(!format!("{apns:?}").contains("PRIVATE"), "key not in Debug");
+
+        // The key inline, line breaks as \n (one line in an env file).
+        let inline = p8_key().replace('\n', "\\n");
+        let apns = cfg_key(&[
+            ("LICHTUNG_APNS_KEY", &inline),
+            ("LICHTUNG_APNS_KEY_ID", "ABC123DEFG"),
+            ("LICHTUNG_APNS_TEAM_ID", "TEAM456XYZ"),
+            ("LICHTUNG_APNS_TOPIC", "dev.rubeen.lichtung.beta"),
+        ])
+        .unwrap()
+        .apns
+        .unwrap();
+        assert_eq!(apns.topic, "dev.rubeen.lichtung.beta");
+    }
+
+    #[test]
+    fn apns_settings_are_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("AuthKey.p8");
+        std::fs::write(&file, p8_key()).unwrap();
+        let file = file.to_str().unwrap();
+        let broken = dir.path().join("kaputt.p8");
+        std::fs::write(
+            &broken,
+            "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
+        )
+        .unwrap();
+        let broken = broken.to_str().unwrap();
+        let ids = [
+            ("LICHTUNG_APNS_KEY_ID", "ABC123DEFG"),
+            ("LICHTUNG_APNS_TEAM_ID", "TEAM456XYZ"),
+        ];
+        let with = |extra: &[(&str, &str)]| {
+            let mut vars = ids.to_vec();
+            vars.extend_from_slice(extra);
+            cfg_key(&vars)
+        };
+        // Only part of it.
+        assert!(cfg_key(&[("LICHTUNG_APNS_KEY_ID", "ABC123DEFG")]).is_err());
+        assert!(cfg_key(&[("LICHTUNG_APNS_TOPIC", "dev.rubeen.lichtung")]).is_err());
+        assert!(with(&[]).is_err());
+        assert!(cfg_key(&[("LICHTUNG_APNS_KEY_FILE", file)]).is_err());
+        // Wrong values.
+        assert!(with(&[("LICHTUNG_APNS_KEY_FILE", "/gibt/es/nicht.p8")]).is_err());
+        let e = with(&[("LICHTUNG_APNS_KEY_FILE", broken)]).unwrap_err();
+        assert!(e.0.contains(".p8"), "{e}");
+        assert!(with(&[("LICHTUNG_APNS_KEY_FILE", file), ("LICHTUNG_APNS_KEY", "x")]).is_err());
+        assert!(cfg_key(&[
+            ("LICHTUNG_APNS_KEY_FILE", file),
+            ("LICHTUNG_APNS_KEY_ID", "zu-kurz"),
+            ("LICHTUNG_APNS_TEAM_ID", "TEAM456XYZ"),
+        ])
+        .is_err());
     }
 }

@@ -112,6 +112,25 @@ final class AppModel {
         ReminderScheduler.shared.update(query, merge: mergeRules)
     }
 
+    /// Stille Push-Nachricht (LIC-27): abgleichen und die Erinnerungen
+    /// einplanen, bevor iOS die App wieder anhält. Unabhängig von `observe()`,
+    /// das nach einem Start im Hintergrund nicht laufen muss. `false`, wenn
+    /// der Abgleich nicht durchging.
+    func syncForPush() async -> Bool {
+        let synced: Bool
+        do {
+            synced = try await engine.sync() == .synced
+        } catch {
+            synced = false
+        }
+        state = await engine.state
+        hasSnapshot = true
+        if schedulesReminders, ReminderScheduler.isEnabled {
+            await ReminderScheduler.shared.updateNow(query, merge: mergeRules)
+        }
+        return synced
+    }
+
     /// Öffnet den Termin einer getippten Erinnerung. Bleibt offen, bis der
     /// Stand den Termin kennt (Kaltstart über die Benachrichtigung).
     func openRequestedReminder() {

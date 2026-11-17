@@ -4,7 +4,11 @@ import SwiftUI
 @main
 struct LichtungApp: App {
     /// Anmeldung, Demo oder Server (LIC-43). Hält das aktuelle `AppModel`.
-    @State private var session = AppSession()
+    @State private var session: AppSession
+    #if os(iOS)
+    /// APNs-Token und stille Push-Nachrichten (LIC-27).
+    @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var pushDelegate
+    #endif
 
     init() {
         #if os(macOS)
@@ -13,6 +17,13 @@ struct LichtungApp: App {
         #endif
         // Vor dem ersten Tipp auf eine Erinnerung (LIC-68).
         ReminderScheduler.shared.install()
+        let session = AppSession()
+        _session = State(initialValue: session)
+        #if os(iOS)
+        // Auch bei einem Start im Hintergrund durch eine Push-Nachricht, wenn
+        // noch keine Ansicht steht.
+        PushBridge.shared.session = session
+        #endif
     }
 
     var body: some Scene {

@@ -24,10 +24,12 @@
 //! - [`oauth`]: built-in OAuth 2.1 authorization server (`/mcp`, devices)
 //! - [`http`]: router and handlers
 //! - [`mcp`]: MCP endpoint `/mcp` with the calendar tools (LIC-12)
+//! - [`apns`]: silent push notifications to the iOS app (LIC-27)
 //! - [`backup`]: nightly `VACUUM INTO` backups
 //! - [`healthcheck`]: client for the `healthcheck` subcommand
 
 pub mod accounts;
+pub mod apns;
 pub mod app;
 pub mod auth;
 pub mod backup;
@@ -140,7 +142,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 pub const DRAIN_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Serves `router` on `listener` with the nightly backup, the sync
-/// scheduler, the openings cleanup and the blocker reconciliation until `signal`
+/// scheduler, the openings cleanup, the blocker reconciliation and the
+/// APNs notifier until `signal`
 /// completes, then lets running requests finish for at most
 /// `drain_timeout` and closes the remaining connections.
 pub async fn serve(
@@ -154,6 +157,7 @@ pub async fn serve(
     let scheduler = tokio::spawn(sync::run_scheduler(app.clone()));
     let cleanup = tokio::spawn(openings::run_cleanup(app.clone()));
     let blockers = tokio::spawn(blockers::run_reconciler(app.clone()));
+    let notifier = tokio::spawn(apns::run_notifier(app.clone()));
     let shutdown = app.shutdown_token();
     let service = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
     let server = axum::serve(listener, service).with_graceful_shutdown({
@@ -193,6 +197,10 @@ pub async fn serve(
     match tokio::time::timeout(drain_timeout, blockers).await {
         Ok(joined) => joined?,
         Err(_) => tracing::warn!("blocker reconciliation still running at shutdown"),
+    }
+    match tokio::time::timeout(drain_timeout, notifier).await {
+        Ok(joined) => joined?,
+        Err(_) => tracing::warn!("APNs notifier still running at shutdown"),
     }
     tracing::info!("stopped");
     Ok(())

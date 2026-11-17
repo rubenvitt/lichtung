@@ -55,6 +55,13 @@ targets:
         # Theme.light (hell #1B1D1A, dunkel #F4E9C9), damit Systemregler und -dialoge nicht grün sind
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
+    entitlements:
+      path: DerivedInfo/Lichtung-iOS.entitlements
+      properties:
+        # Stille Push-Nachrichten vom Server (LIC-27). Beim Export für
+        # TestFlight setzt Xcode „production“ ein. Die App-ID braucht die
+        # Capability „Push Notifications“ im Developer-Account.
+        aps-environment: development
     info:
       path: DerivedInfo/Lichtung-iOS-Info.plist
       properties:

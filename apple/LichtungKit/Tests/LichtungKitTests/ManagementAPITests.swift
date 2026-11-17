@@ -63,6 +63,37 @@ struct ManagementAPITests {
         #expect(jsonObject(t.recorded[0].body ?? Data())["name"] as? String == "Rubens iPhone")
     }
 
+    @Test func pushTokenIsHex() {
+        let r = PushRegistration(deviceToken: Data([0x00, 0x0F, 0xA0, 0xFF]), environment: .sandbox)
+        #expect(r.apnsToken == "000fa0ff")
+    }
+
+    @Test func registersAndRemovesPush() async throws {
+        let t = ScriptedTransport([
+            ScriptedTransport.json("", status: 204),
+            ScriptedTransport.json("", status: 204),
+        ])
+        let m = api(t)
+        let token = Data((0..<32).map { UInt8($0) })
+        try await m.registerPush(PushRegistration(deviceToken: token, environment: .production))
+        #expect(t.recorded[0].method == "PUT")
+        #expect(t.recorded[0].url.path == "/api/devices/current/push")
+        let body = jsonObject(t.recorded[0].body ?? Data())
+        #expect(body["apns_token"] as? String == "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+        #expect(body["environment"] as? String == "production")
+        #expect(body.count == 2)
+        try await m.unregisterPush()
+        #expect(t.recorded[1].method == "DELETE")
+        #expect(t.recorded[1].url.path == "/api/devices/current/push")
+    }
+
+    @Test func pushRegistrationReportsErrors() async throws {
+        let t = ScriptedTransport([ScriptedTransport.error(403, code: "forbidden")])
+        await #expect(throws: APIError.self) {
+            try await api(t).registerPush(PushRegistration(apnsToken: "ab", environment: .sandbox))
+        }
+    }
+
     @Test func listsBareOrWrapped() async throws {
         let t = ScriptedTransport([
             ScriptedTransport.json(#"[{"id": "tok_1", "name": "Claude.ai", "created_at": "2026-10-20T07:00:00Z"}]"#),

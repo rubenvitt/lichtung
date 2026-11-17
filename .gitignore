@@ -17,6 +17,9 @@ xcuserdata/
 !.env.example
 /data/
 /server/data/
+# APNs-Schlüssel (LIC-27)
+/server/deploy/secrets/
+*.p8
 
 # Brainstorming-Entwürfe
 .superpowers/

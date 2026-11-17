@@ -29,6 +29,10 @@ services:
     volumes:
       # Der Container läuft als uid/gid 10001: vorher `sudo chown 10001:10001 data`.
       - ./data:/data
+      # Stille Push-Nachrichten an die iPhone-App (LIC-27): APNs-Schlüssel in
+      # ./secrets/ ablegen, diese Zeile einkommentieren und LICHTUNG_APNS_* in
+      # .env setzen (docs/betrieb.md, Abschnitt „Push-Nachrichten“).
+      # - ./secrets:/secrets:ro
     networks:
       - proxy
     labels:
